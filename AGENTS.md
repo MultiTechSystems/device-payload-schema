@@ -3038,6 +3038,100 @@ improved. The Go, Java and C# corpus runners write per-vector reports only when
     No corpus vector encodes a nibble decimal or a fractional written discriminator, so no
     floor moves.
 
+- **CR-2026-159 (la-payload-schema `cr/0.5.6-apply-158-162`, for 0.5.6): four constructs and a
+  misuse of `min`/`max` are withdrawn and rejected at load.** Each message is the spec
+  prototype's (`key_vocabulary.WITHDRAWN`, `check_field`), word for word, with no prefix, so
+  Python, Go, Java and C# give one string:
+  - **`formula`** -> "`formula` is withdrawn; use `compute`, `polynomial`, `transform` or
+    `guard` (CR-2026-159, PS-448)"; **`encode_formula`** -> "`encode_formula` is withdrawn with
+    `formula` (CR-2026-159, PS-448)"; a **transform `clamp`** stage -> "`clamp` is withdrawn;
+    use a `floor` stage and a `ceiling` stage (CR-2026-159, PS-115)"; a port's **`confirmed`**
+    -> "`confirmed` is withdrawn: confirmed or unconfirmed is chosen per transmission, not by
+    the schema (CR-2026-159, PS-448)".
+  - **`min`/`max` on a field that is no repeat** -> "`min` on field 'v' is withdrawn: it bounds
+    a repeat's element count only; declare a value range with `valid_range` (CR-2026-159,
+    PS-395)" (`max` likewise; `<unnamed>` where the field has no name). On a `type: repeat`
+    they stay valid, and `ties: even` stays valid.
+  - **Where:** Python `withdrawn_errors` (from `schema_iterator_errors`, so the interpreter,
+    the validator and the TS013 generator refuse it) and `transform_stage_errors` for
+    `clamp`, with `WITHDRAWN_KEYS`; Go `go/schema/cr159.go` from `checkFieldRules`,
+    `checkTransformStages` and `checkTypeVocabulary`; Java `Cr159`, from `parseFields`,
+    `checkStage` and `parseRaw`; C# `Cr159.cs`, from `ParseFields`, `CheckStage` and `Parse`.
+    C has none of the keys: `tools/schema_binary.py` (`schema_errors`) refuses them with the
+    same text before a blob exists. A definition no `$ref` reaches is not walked by Python
+    (every other walk skips it too); Go, Java and C# check one where they parse it.
+  - **The encoder's min/max value check was already gone in this repository.** The prototype
+    dropped the `min`/`max` range check from `encode_field`; none of the Python reference, the
+    TS013 runtime, Go, Java, C# or C ever had one (measured: `u8` with `min: 10` encodes 5 and
+    `max: 100` encodes 150). Nothing to remove; `valid_range` does not reject on encode, and a
+    case pins it in all four.
+  - **Dead code removed:** the formula evaluators (Python `_evaluate_formula` and
+    `_evaluate_encode_formula`, Go `evaluateFormula` and its expression parser, Java
+    `FormulaEvaluator`, the generator's `formula_to_js`), every `clamp` stage reader, the
+    `Formula`/`Clamp` model fields, the validator's formula and clamp checks, and the
+    vocabulary and `payload-schema.json` entries (the hint table names the replacements).
+    `tools/generate_firmware_codec.py`, `generate_js_decoder.py` and `convert_decentlab.py`
+    are not conformance paths and keep their old spellings.
+  - **Measured before changing anything:** 0 `formula`, `encode_formula`, `confirmed` or non-repeat
+    `min`/`max` in `schemas/devices`, `schemas/library` and `examples`, and none in the
+    4065 files of the private registry; two `clamp` stages, both in the generated-and-orphaned
+    `examples/env_sensor_resolved.yaml` and `multi_sensor_resolved.yaml`, now `floor: 0` and
+    `ceiling: 100` (the same meaning). No device vector, so **no floor moves**.
+  - **Tests:** the Python, Go, Java and C# formula and `clamp` tests are deleted with the
+    construct (the prototype did the same); a few that used `formula` incidentally now use
+    `div`/`add` or `ref` + `mult`. `tests/cr-2026-159-cases.yaml` is one case list read by
+    `test_cr_2026_159_withdrawals.py` (interpreter, validator, generator, binary converter),
+    Go `cr159_test.go`, Java `CR2026159Test`, C# `CR2026_159Tests`.
+
+- **CR-2026-160 (PS-059; la-payload-schema branch `cr/0.5.6-apply-158-162`, for 0.5.6): a bit
+  range's base is any multiple of 8 from 8 to 64, and the wide widths are bases only.** `u40`,
+  `u48`, `u56` and `s40`, `s48`, `s56` are valid as `uN[a:b]`/`sN[a:b]`, a non-consuming one
+  included (Dragino lse01-121 reads bit 7 of its seventh byte with `u56[7:7]`, `consume: 0`),
+  and are not field types of PS-052: a standalone `type: u56` is an unknown type.
+  - **Measured before any change: every path already behaved so.** Python, Go (whose bit-range
+    pattern gained 40/48/56 in #142 without its type table following), Java, C#, the TS013
+    generator, the validator and C's `schema_binary.py` all rejected a standalone wide type and
+    all read a wide range; this change is the cases and this entry. The error text is each
+    implementation's existing unknown-type message, not one string: the shared cases match on
+    the type's name, as the prototype's test does.
+  - **Cases:** `tests/cr-2026-160-cases.yaml` (the prototype's `TestCR2026160WideBitRangeBases`
+    case for case, plus a u40 and a signed s48 range), read by `test_cr_2026_160_cases.py`
+    (reference, validator, generator and `encode_schema`), Go `cr160_test.go`, Java
+    `CR2026160Test`, C# `CR2026_160Tests`. They are not corpus vectors, so no floor moves.
+
+- **CR-2026-161 (PS-570, PS-571; la-payload-schema branch `cr/0.5.6-apply-158-162`, for 0.5.6):
+  `_meta` carries `reports`, and a lookup's labels are of one type.**
+  - **PS-570:** every `_meta` entry derived from a declaration, at any depth, carries `reports`,
+    the JSON type PS-279 selects, right after `type` (key order is compared exactly): `integer`,
+    `number`, `string`, `boolean`, `object` or `array`. A match discriminator is `integer`, a
+    `merge: false` tlv's `channels` is `array`, `bytes` with `format: array` is `array`, a field
+    with a lookup reports its labels' type whatever arithmetic precedes it (the lookup is the
+    last step, PS-443; integer-only numeric labels `integer`, other numeric `number`, a
+    `${value}` default `string`), and an undeclared PS-499 entry `{}` has none. One function per
+    language, mirroring the prototype's `reports_of`: Python `reports_of`
+    (`tools/schema_interpreter.py`), Go `reportsOf` (`go/schema/cr161.go`), Java `Reports.of`,
+    C# `Meta.ReportsOf`. The discriminator and `channels` have no declaration of their own, so
+    the first is given an internal `_reports` key beside its pseudo-declaration and the second
+    is recognised by its `tlv`. C has no `_meta`.
+  - **PS-571:** a lookup whose labels (a non-`${value}` `default` counts as one) mix JSON types
+    is rejected at load, `Field 'f': its lookup mixes boolean, string labels; a lookup's labels
+    are of one type (PS-571)`, the types sorted, integer and other numbers both `number`.
+    Python `lookup_type_errors` from `schema_iterator_errors` (so the interpreter, the
+    validator and the TS013 generator), Go `checkLookupTypes`, Java `Reports.check`, C#
+    `Meta.CheckLookupTypes`. Measured before enforcing: no schema in the corpus, library or
+    examples is rejected. Only one existing test tripped it, and it was a bug in the test:
+    `lookup: {1: on, default: unknown}` is `true` under YAML 1.1, so the labels were a boolean
+    and a string. **Quote `"on"`/`"off"`/`"yes"`/`"no"` as lookup labels**: PyYAML and SnakeYAML
+    read them as booleans and C# (YAML 1.2) as strings, which is also why the shared cases
+    quote them.
+  - **`expected_meta` fixtures:** 12 `_language-conformance` fixtures changed, each entry
+    gaining `reports` from the spec rule (they are compared exactly), and four Python tests that
+    spell a `_meta` entry out. `make gate-verdicts` rule 3 (`_meta` identical to Python's in Go,
+    Java and C#) is the check that the four producers agree.
+  - **Cases:** `tests/cr-2026-161-cases.yaml` (the prototype's `TestCR2026161MetaReports`, 16),
+    read by `test_cr_2026_161_cases.py`, Go `cr161_test.go`, Java `CR2026161Test`, C#
+    `CR2026_161Tests`. No corpus vector changes, so no floor moves.
+
 ## Converting a vendor codec
 
 The converters in `tools/` (`convert_decentlab.py`, `convert_milesight.py`) do the

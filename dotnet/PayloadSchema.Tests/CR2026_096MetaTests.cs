@@ -41,8 +41,8 @@ public class CR2026_096MetaTests
             ["schema"] = "flat",
             ["fields"] = new Dictionary<string, object?>
             {
-                ["a"] = new Dictionary<string, object?> { ["type"] = "u8", ["unit"] = "V" },
-                ["b"] = new Dictionary<string, object?> { ["type"] = "u8" },
+                ["a"] = new Dictionary<string, object?> { ["type"] = "u8", ["reports"] = "integer", ["unit"] = "V" },
+                ["b"] = new Dictionary<string, object?> { ["type"] = "u8", ["reports"] = "integer" },
             },
         };
         Assert.Null(CorpusConformanceTests.MetaMismatch(want, output["_meta"], "_meta"));

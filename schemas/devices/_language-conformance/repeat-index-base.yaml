@@ -43,7 +43,8 @@ test_vectors:
     fields:
       devices:
         type: repeat
+        reports: array
         elements:
-          slot: {type: number}
+          slot: {type: number, reports: number}
         identity: {index: i, count: 2, index_base: 1}
-      devices_reported: {type: number}
+      devices_reported: {type: number, reports: number}

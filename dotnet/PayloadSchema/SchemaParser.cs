@@ -118,6 +118,7 @@ public static partial class SchemaParser
         if (root.TryGetValue("direction", out var direction))
             schema.Direction = Scalar(direction);
         CheckPortDeclarations(root);
+        Cr159.CheckPorts(root);            // CR-2026-159
 
         // No `header:` block. It was never in the specification, and honouring it
         // here while Python and Go ignored it meant the same schema decoded
@@ -138,6 +139,7 @@ public static partial class SchemaParser
         // above, as the spec prototype does, so a construct's own error keeps its text.
         CheckFieldNames(root);
         CheckSampled(root);    // PS-569 (CR-2026-156)
+        Meta.CheckLookupTypes(root);    // PS-571 (CR-2026-161)
         schema.RepeatOnlyNames = RepeatOnlyNames(root);
         // PS-491 (CR-2026-096): one reported name's declarations in one field list agree
         // on unit, senml and ipso, or `_meta` could not describe the name.
@@ -412,7 +414,7 @@ public static partial class SchemaParser
     /// operation rather than operations of their own (PS-452).
     /// </summary>
     static readonly string[] TransformOperations =
-        { "add", "mult", "div", "sqrt", "abs", "pow", "floor", "ceiling", "clamp", "log10", "log", "op" };
+        { "add", "mult", "div", "sqrt", "abs", "pow", "floor", "ceiling", "log10", "log", "op" };
     static readonly string[] TransformOpParameters = { "decimals", "ties" };
 
     /// <summary>
@@ -428,6 +430,8 @@ public static partial class SchemaParser
         if (node is not YamlMappingNode stage)
             throw new InvalidOperationException($"{at} is {Scalar(node)}, not a mapping holding one operation (PS-452)");
         var keys = stage.Children.Keys.Select(Scalar).ToList();
+        if (keys.Contains("clamp"))
+            throw new InvalidOperationException(Cr159.Clamp);          // CR-2026-159
         if (keys.Contains("round"))
             throw new InvalidOperationException(at + ": `{round: n}` is not a transform stage; "
                 + "write {op: round, decimals: n} (PS-390)");
@@ -533,6 +537,7 @@ public static partial class SchemaParser
                     throw new InvalidOperationException($"Field '{name}': unknown type: {spelling}");
                 }
             }
+            Cr159.CheckField(fieldMap);       // CR-2026-159
             CheckBytesFormat(fieldMap);
             CheckCaseBodies(fieldMap);        // PS-441
             CheckLiteral(fieldMap);
@@ -700,9 +705,6 @@ public static partial class SchemaParser
                     if (tMap.TryGetValue("pow", out var tpow)) stage.Pow = Double(tpow);
                     if (tMap.TryGetValue("floor", out var tfl)) stage.Floor = Double(tfl);
                     if (tMap.TryGetValue("ceiling", out var tce)) stage.Ceiling = Double(tce);
-                    if (tMap.TryGetValue("clamp", out var tcl) && tcl is YamlSequenceNode clampSeq
-                        && clampSeq.Children.Count == 2)
-                        stage.Clamp = new[] { Double(clampSeq.Children[0]), Double(clampSeq.Children[1]) };
                     if (tMap.TryGetValue("ties", out var tties)) stage.Ties = Scalar(tties);
                     f.Transform.Add(stage);
                 }
@@ -944,9 +946,6 @@ public static partial class SchemaParser
                 }
             }
         }
-
-        // Formula (deprecated)
-        if (fm.TryGetValue("formula", out var formula)) f.Formula = Scalar(formula);
 
         // Semantic
         if (fm.TryGetValue("valid_range", out var vrNode) && vrNode is YamlSequenceNode vrSeq)

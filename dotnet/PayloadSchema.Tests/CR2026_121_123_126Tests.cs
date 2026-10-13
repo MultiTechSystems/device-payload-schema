@@ -130,7 +130,7 @@ public class CR2026_121_123_126Tests
         Assert.Equal(new object?[] { "1.8.1", "2.8.1" }, Values(output, "codes"));
         Assert.Equal(new double[] { 123, 456 }, Values(output, "values").Select(Convert.ToDouble));
         var entry = Assert.IsType<Dictionary<string, object?>>(FieldsMeta(Codes + ValuesField(), payload)["values"]);
-        Assert.Equal(new[] { "type", "element", "identity" }, entry.Keys);
+        Assert.Equal(new[] { "type", "reports", "element", "identity" }, entry.Keys);
         var identity = Assert.IsType<Dictionary<string, object?>>(entry["identity"]);
         Assert.Equal(new[] { "repeat", "values", "open" }, identity.Keys);
         Assert.Equal("codes", identity["repeat"]);

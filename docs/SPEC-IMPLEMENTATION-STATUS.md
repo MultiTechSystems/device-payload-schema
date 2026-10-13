@@ -103,7 +103,7 @@ build (`make test-c` prints why). Go, Java and C# decode floors are the full cor
 | `transform:` arithmetic stages | ✓ | ✓ | ✓ | ✓ | ✗ | ✓ |
 | `sqrt` `abs` `pow` `log` `log10` | ✓ | ✓ | ✓ | ✓ | ✗ | ✓ |
 | `{op: round, decimals: N}` half-to-even | ✓ | ✓ | ✓ | ✓ | ✗ | ✓ |
-| `floor:` `ceiling:` `clamp:` bounds | ✓ | ∅ | ∅ | ∅ | ✗ | ✓ |
+| `floor:` `ceiling:` bounds (`clamp:` is withdrawn, CR-2026-159) | ✓ | ∅ | ∅ | ∅ | ✗ | ✓ |
 | `{op: floor}` / `{op: ceiling}` | ✓ | ∅ | ∅ | ∅ | ✗ | ✓ |
 | `polynomial` | ✓ | ✓ | ✓ | ✓ | ✗ | ✓ |
 | `type: number` + `ref:` | ✓ | ✓ | ✓ | ✓ | ✗ | ✓ |
@@ -339,7 +339,7 @@ DL-5TM schema (8 fields, `flagged`, `polynomial`).
 
 The cells above marked ∅ or ⚠ are the work list; the ones that matter most:
 
-- `floor`/`ceiling`/`clamp` stages are silently ignored by Go, Java and C#.
+- `floor`/`ceiling` stages are silently ignored by Go, Java and C# (`clamp` is withdrawn, CR-2026-159).
 - Bit-range base byte order: Go and the generator disagree with PS-059.
 - `$ref` inside a nested construct works only in C#, and only inside an `object`.
 - The generator's silent omissions (`f16`, `hex:upper`, `base64`, `udec`,
@@ -348,6 +348,6 @@ The cells above marked ∅ or ⚠ are the work list; the ones that matter most:
 
 ### Not Planned
 
-- Formula expressions (security concern)
+- Formula expressions: withdrawn (CR-2026-159)
 - Dynamic schema modification
 - Encryption/compression (out of scope)

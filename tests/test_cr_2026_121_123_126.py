@@ -205,7 +205,8 @@ class TestIdentityFromASibling:
         entry = out["_meta"]["fields"]["values"]
         assert entry == {
             "type": "repeat",
-            "element": {"type": "u32"},
+            "reports": "array",
+            "element": {"type": "u32", "reports": "integer"},
             "identity": {
                 "repeat": "codes",
                 "values": ["1.8.1", "2.8.1", "${value}"],

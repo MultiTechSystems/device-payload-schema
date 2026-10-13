@@ -1,0 +1,52 @@
+# CR-2026-160 (0.5.6, PS-059): a bit range's base is any multiple of 8 from 8 to 64. u40, u48
+# and u56 (and s40, s48, s56) are bases only: a standalone `type: u56` is an unknown type.
+#
+# One case list, read by the reference, the validator and the TS013 generator
+# (tests/test_cr_2026_160_cases.py), Go (go/schema/cr160_test.go), Java (CR2026160Test.java)
+# and C# (CR2026_160Tests.cs). C's binary form (tools/schema_binary.py) is held to the same
+# rejection by the Python test.
+#
+# `schema` is YAML text. A case is either `error` (text the load error contains: the unknown
+# type's name, the spec prototype's test matches the same) or `payload` (hex) with `decoded`
+# (JSON text: the decoded values; TestCR2026160WideBitRangeBases supplies the first).
+
+cases:
+
+- name: u40_is_not_a_field_type
+  schema: "name: t\nversion: 1\nfields:\n  - {name: x, type: u40}\n"
+  error: "u40"
+
+- name: u48_is_not_a_field_type
+  schema: "name: t\nversion: 1\nfields:\n  - {name: x, type: u48}\n"
+  error: "u48"
+
+- name: u56_is_not_a_field_type
+  schema: "name: t\nversion: 1\nfields:\n  - {name: x, type: u56}\n"
+  error: "u56"
+
+- name: s40_is_not_a_field_type
+  schema: "name: t\nversion: 1\nfields:\n  - {name: x, type: s40}\n"
+  error: "s40"
+
+- name: s48_is_not_a_field_type
+  schema: "name: t\nversion: 1\nfields:\n  - {name: x, type: s48}\n"
+  error: "s48"
+
+- name: s56_is_not_a_field_type
+  schema: "name: t\nversion: 1\nfields:\n  - {name: x, type: s56}\n"
+  error: "s56"
+
+- name: a_u56_peek_reads_seven_bytes_ahead
+  schema: "name: t\nversion: 1\nfields:\n  - {name: _mode, type: 'u56[7:7]', consume: 0}\n  - {name: mode_seen, type: number, ref: $_mode}\n  - {name: first, type: u8}\n  - {type: skip, length: 6}\n"
+  payload: "11000000000080"
+  decoded: "{\"mode_seen\": 1, \"first\": 17}"
+
+- name: a_u40_range_consumes_five_bytes
+  schema: "name: t\nversion: 1\nfields:\n  - {name: v, type: 'u40[0:3]', consume: 5}\n  - {name: after, type: u8}\n"
+  payload: "f10000000a07"
+  decoded: "{\"v\": 10, \"after\": 7}"
+
+- name: an_s48_range_sign_extends_from_its_width
+  schema: "name: t\nversion: 1\nfields:\n  - {name: v, type: 's48[44:47]', consume: 6}\n"
+  payload: "f00000000000"
+  decoded: "{\"v\": -1}"

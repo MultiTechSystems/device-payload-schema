@@ -20,7 +20,7 @@ test_vectors:
       schema: meta_port_default
       fPort: 1
       fields:
-        battery: {type: u16, unit: mV}
+        battery: {type: u16, reports: integer, unit: mV}
   - name: unlisted_port_reports_what_was_received
     source: spec-example
     payload: "5A"
@@ -30,4 +30,4 @@ test_vectors:
       schema: meta_port_default
       fPort: 9
       fields:
-        level: {type: u8, unit: "/100"}
+        level: {type: u8, reports: integer, unit: "/100"}

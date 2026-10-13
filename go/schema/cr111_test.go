@@ -151,7 +151,8 @@ fields:
 	got := out["_meta"].(map[string]any)["fields"].(map[string]any)["temperatures"]
 	want := map[string]any{
 		"type":     "repeat",
-		"element":  map[string]any{"type": "u16", "unit": "Cel"},
+		"reports":  "array",
+		"element":  map[string]any{"type": "u16", "reports": "integer", "unit": "Cel"},
 		"identity": map[string]any{"index": "i", "count": 8, "index_base": 1},
 	}
 	if asJSON(t, got) != asJSON(t, want) {

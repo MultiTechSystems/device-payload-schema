@@ -8,7 +8,7 @@ Status of semantic enhancements for the Payload Schema language.
 
 ### `valid_range` ✓
 
-Declarative bounds for expected output values. Unlike `clamp` (which modifies values), this validates and flags out-of-range readings.
+Declarative bounds for expected output values. Unlike a `floor` or `ceiling` stage (which modify values), this validates and flags out-of-range readings.
 
 **Schema Syntax:**
 ```yaml

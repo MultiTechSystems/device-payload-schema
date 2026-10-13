@@ -1,0 +1,92 @@
+# CR-2026-161 (0.5.6, PS-570, PS-571): `_meta` entries carry `reports`, the JSON type PS-279
+# selects for the field's reported value, and a lookup's labels are of one type.
+#
+# One case list, read by the reference, the validator and the TS013 generator
+# (tests/test_cr_2026_161_cases.py), Go (go/schema/cr161_test.go), Java (CR2026161Test.java)
+# and C# (CR2026_161Tests.cs). It mirrors the spec prototype's TestCR2026161MetaReports. C has
+# no `_meta`; tools/schema_binary.py is not held to PS-571 here (see AGENTS.md).
+#
+# `schema` is YAML text; every field is named f. A case is either
+#   - `payload` (hex), `reports` (what `_meta.fields.f.reports` is), and for a repeat
+#     `element_reports` (what its `element` entry reports), or
+#   - `error`: the text the schema's load error contains (the prototype's check_lookup_types).
+
+cases:
+
+- name: u8
+  schema: "name: t\nversion: 1\nfields:\n  - {name: f, type: u8}\n"
+  payload: "0000000000000000"
+  reports: integer
+
+- name: u16_div
+  schema: "name: t\nversion: 1\nfields:\n  - {name: f, type: u16, div: 10}\n"
+  payload: "0000000000000000"
+  reports: number
+
+- name: f32
+  schema: "name: t\nversion: 1\nfields:\n  - {name: f, type: f32}\n"
+  payload: "0000000000000000"
+  reports: number
+
+- name: string_labels
+  schema: "name: t\nversion: 1\nfields:\n  - {name: f, type: u8, lookup: [\"off\", \"on\"]}\n"
+  payload: "0000000000000000"
+  reports: string
+
+- name: boolean_labels
+  schema: "name: t\nversion: 1\nfields:\n  - {name: f, type: u8, lookup: {0: false, 1: true}}\n"
+  payload: "0000000000000000"
+  reports: boolean
+
+- name: integer_labels
+  schema: "name: t\nversion: 1\nfields:\n  - {name: f, type: u8, lookup: {0: 1, 1: 10}}\n"
+  payload: "0000000000000000"
+  reports: integer
+
+- name: number_labels_after_arithmetic
+  schema: "name: t\nversion: 1\nfields:\n  - {name: f, type: u8, mult: 2, lookup: {0: 0.001, 1: 0.01}}\n"
+  payload: "0000000000000000"
+  reports: number
+
+- name: value_default_is_a_string
+  schema: "name: t\nversion: 1\nfields:\n  - {name: f, type: u8, lookup: {1: a, default: \"code ${value}\"}}\n"
+  payload: "0000000000000000"
+  reports: string
+
+- name: ascii_numeral
+  schema: "name: t\nversion: 1\nfields:\n  - {name: f, type: ascii, length: 2, numeral: hex}\n"
+  payload: "3041"
+  reports: integer
+
+- name: hex_is_a_string
+  schema: "name: t\nversion: 1\nfields:\n  - {name: f, type: hex, length: 2}\n"
+  payload: "0000000000000000"
+  reports: string
+
+- name: bool
+  schema: "name: t\nversion: 1\nfields:\n  - {name: f, type: bool}\n"
+  payload: "0000000000000000"
+  reports: boolean
+
+- name: string_literal
+  schema: "name: t\nversion: 1\nfields:\n  - {name: f, type: string, value: meter}\n"
+  payload: "0000000000000000"
+  reports: string
+
+- name: a_repeat_and_its_element
+  schema: "name: t\nversion: 1\nfields:\n  - {name: f, type: repeat, count: 2, element: {type: u8, div: 2}}\n"
+  payload: "0204"
+  reports: array
+  element_reports: number
+
+- name: mixed_labels_a_number_and_a_string
+  schema: "name: t\nversion: 1\nfields:\n  - {name: f, type: u8, lookup: {0: 0, 1: 1, default: error}}\n"
+  error: "Field 'f': its lookup mixes number, string labels; a lookup's labels are of one type (PS-571)"
+
+- name: mixed_labels_a_boolean_and_a_string
+  schema: "name: t\nversion: 1\nfields:\n  - {name: f, type: u8, lookup: {0: false, 1: true, default: unknown}}\n"
+  error: "Field 'f': its lookup mixes boolean, string labels; a lookup's labels are of one type (PS-571)"
+
+- name: mixed_labels_a_fraction_and_a_string
+  schema: "name: t\nversion: 1\nfields:\n  - {name: f, type: u8, lookup: {0: 0.5, 1: 1, default: unknown}}\n"
+  error: "Field 'f': its lookup mixes number, string labels; a lookup's labels are of one type (PS-571)"

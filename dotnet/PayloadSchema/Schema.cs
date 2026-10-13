@@ -66,7 +66,6 @@ public class TransformStage
     /// <summary>Bound stages (PS-115). C# had none and passed the value through.</summary>
     public double? Floor { get; set; }
     public double? Ceiling { get; set; }
-    public double[]? Clamp { get; set; }
 }
 
 public class MatchCase
@@ -291,8 +290,6 @@ public class SchemaField
     public string? Delimiter { get; set; }
     public string? Prefix { get; set; }
 
-    // Formula (deprecated)
-    public string? Formula { get; set; }
 
     // Semantic
     public double[]? ValidRange { get; set; }

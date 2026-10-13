@@ -183,10 +183,11 @@ class TestMeta:
              "element": {"name": "t", "type": "u16", "unit": "Cel"}}]}
         meta = SchemaInterpreter(schema).interpret(bytes(16)).data["_meta"]
         entry = meta["fields"]["temperatures"]
-        assert entry == {"type": "repeat", "element": {"type": "u16", "unit": "Cel"},
+        assert entry == {"type": "repeat", "reports": "array",
+                         "element": {"type": "u16", "reports": "integer", "unit": "Cel"},
                          "identity": {"index": "i", "count": 8, "index_base": 1}}
         # Key order is compared exactly across the four (gate-verdicts rule 3).
-        assert list(entry) == ["type", "element", "identity"]
+        assert list(entry) == ["type", "reports", "element", "identity"]
         assert list(entry["identity"]) == ["index", "count", "index_base"]
 
     def test_a_base_of_0_adds_nothing_to_the_listing(self):

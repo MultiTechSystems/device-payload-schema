@@ -156,10 +156,10 @@ public class CR2026_111Tests
         var fields = FieldsMeta("  - name: temperatures\n    type: repeat\n    count: 8\n    index: i\n"
             + "    index_base: 1\n    identity: i\n    element: {name: t, type: u16, unit: Cel}\n", new byte[16]);
         var entry = Assert.IsType<Dictionary<string, object?>>(fields["temperatures"]);
-        Assert.Equal(new[] { "type", "element", "identity" }, entry.Keys);
+        Assert.Equal(new[] { "type", "reports", "element", "identity" }, entry.Keys);
         Assert.Equal("repeat", entry["type"]);
         var element = Assert.IsType<Dictionary<string, object?>>(entry["element"]);
-        Assert.Equal(new[] { "type", "unit" }, element.Keys);
+        Assert.Equal(new[] { "type", "reports", "unit" }, element.Keys);
         Assert.Equal("u16", element["type"]);
         Assert.Equal("Cel", element["unit"]);
         var identity = Assert.IsType<Dictionary<string, object?>>(entry["identity"]);

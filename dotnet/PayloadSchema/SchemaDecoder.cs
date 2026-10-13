@@ -1136,11 +1136,6 @@ public static class SchemaDecoder
             }
             if (stage.Floor.HasValue) { numVal = Math.Max(numVal, stage.Floor.Value); continue; }
             if (stage.Ceiling.HasValue) { numVal = Math.Min(numVal, stage.Ceiling.Value); continue; }
-            if (stage.Clamp is { Length: 2 } bounds)
-            {
-                numVal = Math.Max(bounds[0], Math.Min(bounds[1], numVal));
-                continue;
-            }
             // Unary maths stages, each exclusive of the others and of the arithmetic
             // ops, in the order the Python interpreter checks them. sqrt clamps a
             // negative input at 0 (PS-116). The log of a non-positive number has no
@@ -1182,8 +1177,7 @@ public static class SchemaDecoder
         if (!integerType) return false;
 
         return field.Mult == null && field.Div == null && field.Add == null
-            && (field.Transform == null || field.Transform.Count == 0)
-            && string.IsNullOrEmpty(field.Formula);
+            && (field.Transform == null || field.Transform.Count == 0);
     }
 
     internal static double ApplyModifiers(double numVal, SchemaField field)

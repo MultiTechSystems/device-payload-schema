@@ -40,14 +40,16 @@ test_vectors:
       fields:
         probe:
           type: object
+          reports: object
           fields:
-            depth: {type: u8, unit: cm}
-            moisture: {type: u8, unit: "/100", senml: {name: vwc}}
+            depth: {type: u8, reports: integer, unit: cm}
+            moisture: {type: u8, reports: integer, unit: "/100", senml: {name: vwc}}
         channels:
           type: repeat
+          reports: array
           elements:
-            sensor: {type: u8}
-            value: {type: s16, unit: Cel, senml: {name: "t_${sensor}"}}
+            sensor: {type: u8, reports: string}
+            value: {type: s16, reports: number, unit: Cel, senml: {name: "t_${sensor}"}}
           identity: {field: sensor, values: [soil, air, "s${value}"], open: true}
   - name: a_listed_label
     source: spec-example

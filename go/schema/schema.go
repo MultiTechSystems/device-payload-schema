@@ -188,8 +188,6 @@ type Field struct {
 	Parts     [][]any `json:"parts,omitempty" yaml:"parts,omitempty"`
 	Delimiter string  `json:"delimiter,omitempty" yaml:"delimiter,omitempty"`
 	Prefix    string  `json:"prefix,omitempty" yaml:"prefix,omitempty"`
-	// Formula (can reference $field_name for computed values) - DEPRECATED
-	Formula string `json:"formula,omitempty" yaml:"formula,omitempty"`
 	// Semantic fields
 	ValidRange []float64 `json:"valid_range,omitempty" yaml:"valid_range,omitempty"` // [min, max] bounds for quality checks
 	Resolution *float64  `json:"resolution,omitempty" yaml:"resolution,omitempty"`   // Minimum detectable change
@@ -267,11 +265,9 @@ type Transform struct {
 	Decimals int    `json:"decimals,omitempty" yaml:"decimals,omitempty"`
 	// Ties is "even" (the default) or "away" from zero (PS-390).
 	Ties string `json:"ties,omitempty" yaml:"ties,omitempty"`
-	// Bound stages (PS-115): floor is a lower clamp, ceiling an upper one, clamp both.
-	// Go had none of the three and passed the value through unclamped.
+	// Bound stages (PS-115): floor is a lower clamp, ceiling an upper one.
 	Floor   *float64   `json:"floor,omitempty" yaml:"floor,omitempty"`
 	Ceiling *float64   `json:"ceiling,omitempty" yaml:"ceiling,omitempty"`
-	Clamp   []float64  `json:"clamp,omitempty" yaml:"clamp,omitempty"`
 	// Unary maths stages. Sqrt, Abs, Log10 and Log are flags; Pow carries the
 	// exponent. Pointers so an absent key is distinguishable from `pow: 0`.
 	Sqrt  bool     `json:"sqrt,omitempty" yaml:"sqrt,omitempty"`
@@ -642,12 +638,12 @@ func isIntegerTyped(field Field) bool {
 }
 
 // carriesModifier reports whether anything in the field turns its value into a `number`
-// rather than an integer (PS-279): the bare modifiers, a transform, a formula, or the
+// rather than an integer (PS-279): the bare modifiers, a transform, or the
 // legacy modifiers array.
 func carriesModifier(field Field) bool {
 	return field.Mult != nil || field.Div != nil || field.Add != nil ||
 		len(field.Transform) > 0 || len(field.Modifiers) > 0 ||
-		field.Formula != "" || field.Ref != "" || field.Compute != nil
+		field.Ref != "" || field.Compute != nil
 }
 
 // reportsAsInteger reports whether this field must be reported through an integer
@@ -770,10 +766,6 @@ func applyTransformStages(value float64, stages []Transform) float64 {
 		}
 		if stage.Ceiling != nil {
 			value = math.Min(value, *stage.Ceiling)
-			continue
-		}
-		if len(stage.Clamp) == 2 {
-			value = math.Max(stage.Clamp[0], math.Min(stage.Clamp[1], value))
 			continue
 		}
 		// Unary maths stages, each exclusive of the others and of the arithmetic
@@ -1019,6 +1011,10 @@ func ParseSchema(data string) (*Schema, error) {
 	// CR-2026-156: `sampled` only on a repeat, with an interval, an order and an anchor
 	// that mean something (PS-569).
 	if err := checkSampled(raw, order); err != nil {
+		return nil, err
+	}
+	// CR-2026-161: a lookup's labels are of one type (PS-571).
+	if err := checkLookupTypes(raw, order); err != nil {
 		return nil, err
 	}
 
@@ -1299,13 +1295,6 @@ func parseFieldMap(fm map[string]any, node *yaml.Node) Field {
 				}
 				if bound, ok := toFloat64(tm["ceiling"]); ok && tm["ceiling"] != nil {
 					t.Ceiling = &bound
-				}
-				if bounds, ok := tm["clamp"].([]any); ok && len(bounds) == 2 {
-					lo, okLo := toFloat64(bounds[0])
-					hi, okHi := toFloat64(bounds[1])
-					if okLo && okHi {
-						t.Clamp = []float64{lo, hi}
-					}
 				}
 				// Unary maths stages. Struct tags are not enough here: transform
 				// stages are built by hand from this map, so a field added to
@@ -1642,11 +1631,6 @@ func parseFieldMap(fm map[string]any, node *yaml.Node) Field {
 				f.Parts = append(f.Parts, pArr)
 			}
 		}
-	}
-
-	// Formula (deprecated)
-	if formula, ok := fm["formula"].(string); ok {
-		f.Formula = formula
 	}
 
 	// Semantic fields
@@ -2828,13 +2812,6 @@ func decodeField(field Field, ctx *DecodeContext) (any, error) {
 				return nil, err
 			}
 			value = source
-		} else if field.Formula != "" {
-			// Legacy formula support
-			val, err := evaluateFormula(field.Formula, 0, ctx)
-			if err != nil {
-				return nil, err
-			}
-			value = val
 		} else {
 			value = field.Value
 		}
@@ -2894,17 +2871,7 @@ func applyLookupAndModifiers(value any, field Field, ctx *DecodeContext) (any, e
 		}
 		return omitted, nil
 	}
-	// Formula takes precedence over top-level modifiers (per spec section 03)
-	// For TypeNumber with ref, transform is already applied in the ref block
-	if field.Formula != "" && field.Type != TypeNumber {
-		if numVal, ok := toFloat64(value); ok {
-			result, err := evaluateFormula(field.Formula, numVal, ctx)
-			if err != nil {
-				return nil, err
-			}
-			value = result
-		}
-	} else if reportsAsInteger(field) {
+	if reportsAsInteger(field) {
 		// PS-293, PS-294: an integer-typed field with no modifier keeps the exact
 		// uint64 or int64 decodeUint/decodeSint produced. Falling through to the
 		// float64 branch below would round it, which is how a u64 of 2^64-1 came back
@@ -3063,8 +3030,7 @@ func bindTagComponent(tf Field, val int64, ctx *DecodeContext) error {
 
 // hasComponentModifiers reports whether a tag component declares arithmetic to apply.
 func hasComponentModifiers(tf Field) bool {
-	return tf.Mult != nil || tf.Div != nil || tf.Add != nil || len(tf.Transform) > 0 ||
-		tf.Formula != ""
+	return tf.Mult != nil || tf.Div != nil || tf.Add != nil || len(tf.Transform) > 0
 }
 
 // computedSource is a computed field's source (PS-443): the referenced value with its
@@ -6641,10 +6607,9 @@ func DecodeCompact(format string, data []byte) (map[string]any, error) {
 }
 
 // =============================================================================
-// Formula evaluator
+// Polynomial evaluator
 // =============================================================================
 
-// evaluateFormula evaluates a formula expression with variable substitution.
 // evaluatePolynomial evaluates a polynomial using Horner's method.
 // coefficients are in order [a_n, a_{n-1}, ..., a_1, a_0].
 func evaluatePolynomial(coeffs []float64, x float64) float64 {
@@ -6782,364 +6747,4 @@ func guardConditionsHold(gd *GuardDef, ctx *DecodeContext) bool {
 		}
 	}
 	return true
-}
-
-// evaluateFormula (DEPRECATED - use polynomial/compute/guard instead)
-// Supports: $field_name references, x (raw value), pow/abs/sqrt/min/max,
-// arithmetic operators, ternary (cond ? a : b), and/or.
-func evaluateFormula(formula string, x float64, ctx *DecodeContext) (float64, error) {
-	expr := formula
-
-	// Substitute $field_name references
-	varPattern := regexp.MustCompile(`\$([a-zA-Z_][a-zA-Z0-9_]*)`)
-	var scopeErr error
-	expr = varPattern.ReplaceAllStringFunc(expr, func(match string) string {
-		name := match[1:]
-		if val, ok := ctx.Variables[name]; ok {
-			if f, ok := toFloat64(val); ok {
-				return strconv.FormatFloat(f, 'f', -1, 64)
-			}
-		} else if err := ctx.scopeError(name); err != nil && scopeErr == nil {
-			scopeErr = err
-		}
-		return "0"
-	})
-	// PS-368: an element name out of scope is an error, not the 0 an unbound name reads as.
-	if scopeErr != nil {
-		return 0, scopeErr
-	}
-
-	// Replace standalone 'x' with raw value
-	xPattern := regexp.MustCompile(`\bx\b`)
-	expr = xPattern.ReplaceAllString(expr, strconv.FormatFloat(x, 'f', -1, 64))
-
-	// Replace 'and'/'or' with Go-compatible tokens for our evaluator
-	expr = regexp.MustCompile(`\band\b`).ReplaceAllString(expr, "&&")
-	expr = regexp.MustCompile(`\bor\b`).ReplaceAllString(expr, "||")
-
-	return evalExpr(expr)
-}
-
-// evalExpr is a simple recursive descent expression parser.
-// Supports: +, -, *, /, >, <, >=, <=, ==, !=, &&, ||, ternary (? :),
-// pow(), abs(), sqrt(), min(), max(), parentheses, and numeric literals.
-func evalExpr(expr string) (float64, error) {
-	p := &exprParser{input: strings.TrimSpace(expr), pos: 0}
-	val, err := p.parseTernary()
-	if err != nil {
-		return 0, fmt.Errorf("formula eval failed for %q: %w", expr, err)
-	}
-	return val, nil
-}
-
-type exprParser struct {
-	input string
-	pos   int
-}
-
-func (p *exprParser) skipSpaces() {
-	for p.pos < len(p.input) && p.input[p.pos] == ' ' {
-		p.pos++
-	}
-}
-
-func (p *exprParser) peek() byte {
-	p.skipSpaces()
-	if p.pos >= len(p.input) {
-		return 0
-	}
-	return p.input[p.pos]
-}
-
-func (p *exprParser) peekStr(n int) string {
-	p.skipSpaces()
-	end := p.pos + n
-	if end > len(p.input) {
-		end = len(p.input)
-	}
-	return p.input[p.pos:end]
-}
-
-func (p *exprParser) parseTernary() (float64, error) {
-	val, err := p.parseOr()
-	if err != nil {
-		return 0, err
-	}
-	p.skipSpaces()
-	if p.pos < len(p.input) && p.input[p.pos] == '?' {
-		p.pos++
-		trueVal, err := p.parseTernary()
-		if err != nil {
-			return 0, err
-		}
-		p.skipSpaces()
-		if p.pos < len(p.input) && p.input[p.pos] == ':' {
-			p.pos++
-			falseVal, err := p.parseTernary()
-			if err != nil {
-				return 0, err
-			}
-			if val != 0 {
-				return trueVal, nil
-			}
-			return falseVal, nil
-		}
-		return 0, fmt.Errorf("expected ':' in ternary")
-	}
-	return val, nil
-}
-
-func (p *exprParser) parseOr() (float64, error) {
-	val, err := p.parseAnd()
-	if err != nil {
-		return 0, err
-	}
-	for {
-		if p.peekStr(2) == "||" {
-			p.pos += 2
-			right, err := p.parseAnd()
-			if err != nil {
-				return 0, err
-			}
-			if val != 0 || right != 0 {
-				val = 1
-			} else {
-				val = 0
-			}
-		} else {
-			break
-		}
-	}
-	return val, nil
-}
-
-func (p *exprParser) parseAnd() (float64, error) {
-	val, err := p.parseComparison()
-	if err != nil {
-		return 0, err
-	}
-	for {
-		if p.peekStr(2) == "&&" {
-			p.pos += 2
-			right, err := p.parseComparison()
-			if err != nil {
-				return 0, err
-			}
-			if val != 0 && right != 0 {
-				val = 1
-			} else {
-				val = 0
-			}
-		} else {
-			break
-		}
-	}
-	return val, nil
-}
-
-func (p *exprParser) parseComparison() (float64, error) {
-	val, err := p.parseAddSub()
-	if err != nil {
-		return 0, err
-	}
-	for {
-		p.skipSpaces()
-		if p.peekStr(2) == ">=" {
-			p.pos += 2
-			right, err := p.parseAddSub()
-			if err != nil {
-				return 0, err
-			}
-			if val >= right { val = 1 } else { val = 0 }
-		} else if p.peekStr(2) == "<=" {
-			p.pos += 2
-			right, err := p.parseAddSub()
-			if err != nil {
-				return 0, err
-			}
-			if val <= right { val = 1 } else { val = 0 }
-		} else if p.peekStr(2) == "==" {
-			p.pos += 2
-			right, err := p.parseAddSub()
-			if err != nil {
-				return 0, err
-			}
-			if val == right { val = 1 } else { val = 0 }
-		} else if p.peekStr(2) == "!=" {
-			p.pos += 2
-			right, err := p.parseAddSub()
-			if err != nil {
-				return 0, err
-			}
-			if val != right { val = 1 } else { val = 0 }
-		} else if p.peek() == '>' {
-			p.pos++
-			right, err := p.parseAddSub()
-			if err != nil {
-				return 0, err
-			}
-			if val > right { val = 1 } else { val = 0 }
-		} else if p.peek() == '<' {
-			p.pos++
-			right, err := p.parseAddSub()
-			if err != nil {
-				return 0, err
-			}
-			if val < right { val = 1 } else { val = 0 }
-		} else {
-			break
-		}
-	}
-	return val, nil
-}
-
-func (p *exprParser) parseAddSub() (float64, error) {
-	val, err := p.parseMulDiv()
-	if err != nil {
-		return 0, err
-	}
-	for {
-		p.skipSpaces()
-		if p.peek() == '+' {
-			p.pos++
-			right, err := p.parseMulDiv()
-			if err != nil {
-				return 0, err
-			}
-			val += right
-		} else if p.peek() == '-' {
-			p.pos++
-			right, err := p.parseMulDiv()
-			if err != nil {
-				return 0, err
-			}
-			val -= right
-		} else {
-			break
-		}
-	}
-	return val, nil
-}
-
-func (p *exprParser) parseMulDiv() (float64, error) {
-	val, err := p.parseUnary()
-	if err != nil {
-		return 0, err
-	}
-	for {
-		p.skipSpaces()
-		if p.peek() == '*' {
-			p.pos++
-			right, err := p.parseUnary()
-			if err != nil {
-				return 0, err
-			}
-			val *= right
-		} else if p.peek() == '/' {
-			p.pos++
-			right, err := p.parseUnary()
-			if err != nil {
-				return 0, err
-			}
-			if right == 0 {
-				val = 0
-			} else {
-				val /= right
-			}
-		} else {
-			break
-		}
-	}
-	return val, nil
-}
-
-func (p *exprParser) parseUnary() (float64, error) {
-	p.skipSpaces()
-	if p.peek() == '-' {
-		p.pos++
-		val, err := p.parsePrimary()
-		if err != nil {
-			return 0, err
-		}
-		return -val, nil
-	}
-	return p.parsePrimary()
-}
-
-func (p *exprParser) parsePrimary() (float64, error) {
-	p.skipSpaces()
-
-	// Parenthesized expression
-	if p.peek() == '(' {
-		p.pos++
-		val, err := p.parseTernary()
-		if err != nil {
-			return 0, err
-		}
-		p.skipSpaces()
-		if p.peek() == ')' {
-			p.pos++
-		}
-		return val, nil
-	}
-
-	// Function calls: pow, abs, sqrt, min, max
-	for _, fname := range []string{"pow", "abs", "sqrt", "min", "max"} {
-		if strings.HasPrefix(p.input[p.pos:], fname+"(") {
-			p.pos += len(fname) + 1
-			arg1, err := p.parseTernary()
-			if err != nil {
-				return 0, err
-			}
-			p.skipSpaces()
-
-			switch fname {
-			case "abs":
-				if p.peek() == ')' { p.pos++ }
-				return math.Abs(arg1), nil
-			case "sqrt":
-				if p.peek() == ')' { p.pos++ }
-				return math.Sqrt(arg1), nil
-			}
-
-			// Two-argument functions
-			if p.peek() == ',' {
-				p.pos++
-			}
-			arg2, err := p.parseTernary()
-			if err != nil {
-				return 0, err
-			}
-			p.skipSpaces()
-			if p.peek() == ')' { p.pos++ }
-
-			switch fname {
-			case "pow":
-				return math.Pow(arg1, arg2), nil
-			case "min":
-				return math.Min(arg1, arg2), nil
-			case "max":
-				return math.Max(arg1, arg2), nil
-			}
-		}
-	}
-
-	// Number literal
-	start := p.pos
-	if p.pos < len(p.input) && (p.input[p.pos] == '-' || p.input[p.pos] == '+') {
-		p.pos++
-	}
-	for p.pos < len(p.input) && (p.input[p.pos] >= '0' && p.input[p.pos] <= '9' || p.input[p.pos] == '.' || p.input[p.pos] == 'e' || p.input[p.pos] == 'E') {
-		p.pos++
-	}
-	if p.pos > start {
-		numStr := p.input[start:p.pos]
-		val, err := strconv.ParseFloat(numStr, 64)
-		if err != nil {
-			return 0, fmt.Errorf("invalid number: %s", numStr)
-		}
-		return val, nil
-	}
-
-	return 0, fmt.Errorf("unexpected token at position %d: %q", p.pos, p.input[p.pos:])
 }

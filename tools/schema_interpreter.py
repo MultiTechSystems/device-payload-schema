@@ -1453,8 +1453,63 @@ def typed_field_dicts(node, _top=True):
 #: an `op:` stage (PS-390). `decimals` and `ties` are parameters of an `op:` stage and are
 #: part of that one operation, not operations of their own (PS-452).
 TRANSFORM_OPERATIONS = ('add', 'mult', 'div', 'sqrt', 'abs', 'pow', 'floor', 'ceiling',
-                        'clamp', 'log10', 'log', 'op')
+                        'log10', 'log', 'op')
 TRANSFORM_OP_PARAMETERS = ('decimals', 'ties')
+
+
+#: CR-2026-159: keys withdrawn from the language, with what replaces them - the spec
+#: prototype's key_vocabulary.WITHDRAWN, word for word. Used by no registry, device or
+#: example schema when it was withdrawn.
+WITHDRAWN_KEYS = {
+    'formula': "`formula` is withdrawn; use `compute`, `polynomial`, `transform` or `guard` "
+               "(CR-2026-159, PS-448)",
+    'encode_formula': "`encode_formula` is withdrawn with `formula` (CR-2026-159, PS-448)",
+    'clamp': "`clamp` is withdrawn; use a `floor` stage and a `ceiling` stage "
+             "(CR-2026-159, PS-115)",
+    'confirmed': "`confirmed` is withdrawn: confirmed or unconfirmed is chosen per "
+                 "transmission, not by the schema (CR-2026-159, PS-448)",
+}
+
+
+def withdrawn_errors(schema):
+    """CR-2026-159: `formula`, `encode_formula` and a port's `confirmed` are rejected at
+    load, and so are `min` and `max` on any field that is not a repeat (they bound a
+    repeat's element count; a value range is `valid_range`, PS-395). A transform's `clamp`
+    stage is transform_stage_errors'. Every message is the prototype's.
+    """
+    errors = []
+
+    def check_field(node):
+        name = node.get('name', '<unnamed>')
+        for key in ('formula', 'encode_formula'):
+            if key in node:
+                errors.append(WITHDRAWN_KEYS[key])
+        if node.get('type') != 'repeat':
+            for bound in ('min', 'max'):
+                if bound in node:
+                    errors.append(
+                        f"`{bound}` on field '{name}' is withdrawn: it bounds a repeat's "
+                        f"element count only; declare a value range with `valid_range` "
+                        f"(CR-2026-159, PS-395)")
+
+    def walk(node, top):
+        if isinstance(node, dict):
+            if not top and ('type' in node or 'name' in node):
+                check_field(node)
+            for key, value in node.items():
+                if top and key in ('test_vectors', 'definitions'):
+                    continue
+                walk(value, False)
+        elif isinstance(node, list):
+            for item in node:
+                walk(item, False)
+
+    if isinstance(schema, dict):
+        for port, entry in (schema.get('ports') or {}).items():
+            if isinstance(entry, dict) and 'confirmed' in entry:
+                errors.append(WITHDRAWN_KEYS['confirmed'])
+        walk(schema, True)
+    return errors
 
 
 def transform_stage_errors(stages, where):
@@ -1475,6 +1530,9 @@ def transform_stage_errors(stages, where):
         if 'round' in stage:
             errors.append(f"{at}: `{{round: n}}` is not a transform stage; write "
                           f"{{op: round, decimals: n}} (PS-390)")
+            continue
+        if 'clamp' in stage:
+            errors.append(WITHDRAWN_KEYS['clamp'])
             continue
         unknown = [k for k in stage
                    if k not in TRANSFORM_OPERATIONS and k not in TRANSFORM_OP_PARAMETERS]
@@ -3016,7 +3074,9 @@ def schema_iterator_errors(schema):
     the validator and the TS013 generator - already calls this one.
     """
     errors = field_name_errors(schema)
+    errors.extend(withdrawn_errors(schema))                          # CR-2026-159
     errors.extend(numeral_errors(schema))                            # PS-560
+    errors.extend(lookup_type_errors(schema))                        # PS-571
     errors.extend(iterator_errors(schema.get('fields')))
     errors.extend(ipso_instance_errors(schema))                      # PS-548
     for port, entry in (schema.get('ports') or {}).items():
@@ -3374,7 +3434,7 @@ def reverse_transform_stages(value, stages):
         elif 'round' in stage or 'op' in stage:
             # The discarded precision is gone; the value itself is unchanged.
             continue
-        elif 'floor' in stage or 'ceiling' in stage or 'clamp' in stage:
+        elif 'floor' in stage or 'ceiling' in stage:
             # Bound stages: identity for anything that was inside the bound.
             continue
         else:
@@ -3561,7 +3621,8 @@ def meta_declarations(fields):
                 label = match.get('name')
                 if isinstance(label, str) and not label.startswith('_'):
                     found.setdefault(label, {'name': label,
-                                             'type': 'u%d' % (8 * int(match.get('length', 1)))})
+                                             'type': 'u%d' % (8 * int(match.get('length', 1))),
+                                             '_reports': 'integer'})         # PS-570
             if f.get('type') == 'match' and isinstance(f.get('cases'), dict):
                 for body in f['cases'].values():
                     if isinstance(body, list):
@@ -3665,6 +3726,97 @@ def meta_reference(value, repeat=None, bare=False, siblings=None):
     return listing
 
 
+def lookup_labels(lookup):
+    """A lookup's labels, and its `default` where that is not a `${value}` template."""
+    if isinstance(lookup, (list, tuple)):
+        return list(lookup)
+    if isinstance(lookup, dict):
+        return [v for k, v in lookup.items()
+                if not (k == 'default' and isinstance(v, str) and LOOKUP_VALUE_TOKEN in v)]
+    return []
+
+
+def json_kind(value):
+    """The JSON type of a lookup label: boolean, integer, number or string."""
+    if isinstance(value, bool):
+        return 'boolean'
+    if isinstance(value, int):
+        return 'integer'
+    if isinstance(value, float):
+        return 'integer' if value.is_integer() else 'number'
+    return 'string'
+
+
+_REPORTS_FLOATS = ('number', 'f16', 'bf16', 'f32', 'f64', 'f32le16', 'f32be16le', 'uflt16',
+                   'sflt16', 'sflt24', 'udec', 'sdec')
+
+
+def reports_of(field_def):
+    """PS-570: the JSON type PS-279 selects for a field's reported value, from the schema
+    alone (the spec prototype's reports_of). A lookup is the last step (PS-443), so a field
+    with one reports its labels' type whatever precedes it; a `${value}` default reports a
+    string. None where nothing declares one."""
+    if '_reports' in field_def:                       # a match discriminator or `channels`
+        return field_def['_reports']
+    lookup = field_def.get('lookup')
+    if lookup is not None:
+        if lookup_template(lookup) is not None:
+            return 'string'
+        kinds = {json_kind(v) for v in lookup_labels(lookup)}
+        if kinds == {'integer', 'number'}:
+            return 'number'
+        return next(iter(kinds)) if len(kinds) == 1 else None
+    if isinstance(field_def.get('tlv'), dict) and not field_def.get('type'):
+        return 'array'                                # `channels` of a merge: false tlv
+    t = str(field_def.get('type', '')).lower()
+    if t == 'repeat':
+        return 'array'
+    if t == 'object':
+        return 'object'
+    if t in ('string', 'number', 'boolean') and 'value' in field_def:          # a literal
+        return t
+    if t == 'bytes' and field_def.get('format') == 'array':
+        return 'array'
+    if t in ('bool', 'boolean'):
+        return 'boolean'
+    if t == 'ascii':
+        return 'integer' if field_def.get('numeral') else 'string'
+    if t in ('string', 'bitfield_string', 'enum', 'bytes', 'hex', 'base64'):
+        return 'string'
+    if any(k in field_def for k in ('mult', 'div', 'add', 'polynomial', 'transform')):
+        return 'number'
+    if t == 'integer':
+        return 'integer'
+    if t in _REPORTS_FLOATS:
+        return 'number'
+    if _BIT_RANGE.match(t) or t in INTEGER_TYPE_INFO:
+        return 'integer'
+    return None
+
+
+def lookup_type_errors(node, _top=True):
+    """PS-571: every label of one lookup, and a `default` that is not a `${value}` template,
+    is of one JSON type (integers and other numbers are one type, number)."""
+    errors = []
+    if isinstance(node, list):
+        for item in node:
+            errors.extend(lookup_type_errors(item, False))
+    elif isinstance(node, dict):
+        if 'lookup' in node and 'type' in node:
+            kinds = {('number' if k == 'integer' else k)
+                     for k in map(json_kind, lookup_labels(node['lookup']))}
+            if len(kinds) > 1:
+                errors.append(f"Field '{node.get('name')}': its lookup mixes "
+                              f"{', '.join(sorted(kinds))} labels; a lookup's labels are of "
+                              f"one type (PS-571)")
+        for key, value in node.items():
+            if _top and key == 'test_vectors':
+                continue
+            if isinstance(value, (list, dict)):
+                errors.extend(lookup_type_errors(value, False))
+    return errors
+
+
 def field_meta(field_def, repeat=None, siblings=None):
     """One `_meta.fields` entry, derived from one declaration (PS-178, PS-493, PS-480,
     PS-371, PS-481). `repeat` is the repeat whose elements the field belongs to, for the
@@ -3674,6 +3826,9 @@ def field_meta(field_def, repeat=None, siblings=None):
     declared_type = meta_type(field_def)
     if declared_type is not None:
         entry['type'] = declared_type
+    reports = reports_of(field_def)
+    if reports is not None:
+        entry['reports'] = reports                                       # PS-570
     senml = field_def.get('senml') if isinstance(field_def.get('senml'), dict) else {}
     unit = senml.get('unit') or field_def.get('unit')          # PS-178, no conversion
     if unit is not None:
@@ -5103,10 +5258,7 @@ class SchemaInterpreter:
         """
         if value is None:
             return
-        if field_def.get('formula'):
-            value = self._evaluate_formula(field_def['formula'], value)
-        else:
-            value = self._apply_modifiers(value, field_def)
+        value = self._apply_modifiers(value, field_def)
         self._bind(field_def, [name, field_def.get('var')], value)
         self._record_internal(field_def, value)                             # PS-572
 
@@ -5375,12 +5527,6 @@ class SchemaInterpreter:
         `transform: [{mult: 10}]` turned `else: 5` into 50.
         """
         self._produced(field_def)
-        # Deprecated: formula field
-        if field_def.get('formula'):
-            import warnings
-            warnings.warn(f"Field '{field_def.get('name', 'unknown')}': 'formula' is deprecated.", DeprecationWarning)
-            return self._evaluate_formula(field_def['formula'], None)
-
         if not (field_def.get('ref') or field_def.get('compute')):
             # Literal value
             return field_def.get('value')
@@ -5439,66 +5585,6 @@ class SchemaInterpreter:
                                  f"decimal, hex, hex:upper (PS-430)")
         
         return prefix + delimiter.join(part_strs), pos
-    
-    def _evaluate_encode_formula(self, formula: str, value: float) -> float:
-        """
-        Phase 3: Evaluate an encode_formula for custom encoding.
-        
-        encode_formula is the inverse of formula, used during encoding.
-        Variable 'x' or 'value' refers to the application-level value.
-        """
-        import math as _math
-        
-        expr = formula
-        # Replace x/value with actual value
-        expr = re.sub(r'\bx\b', str(value), expr)
-        expr = re.sub(r'\bvalue\b', str(value), expr)
-        
-        try:
-            result = eval(expr, {"__builtins__": {}, "_math": _math,
-                                 "abs": abs, "min": min, "max": max, "int": int, "round": round})
-            return float(result)
-        except Exception as e:
-            raise ValueError(f"encode_formula evaluation failed: '{formula}' -> '{expr}': {e}")
-    
-    def _evaluate_formula(self, formula: str, x=None) -> float:
-        """Evaluate a formula with variable substitution and math functions."""
-        import math as _math
-        
-        expr = formula
-        
-        # Substitute $field_name references
-        expr = re.sub(r'\$([a-zA-Z_][a-zA-Z0-9_]*)', 
-                      lambda m: str(self._ref(m.group(1))), expr)
-        
-        # Replace standalone 'x' with raw value
-        if x is not None:
-            expr = re.sub(r'\bx\b', str(x), expr)
-        
-        # Replace function names
-        expr = re.sub(r'\bpow\s*\(', '_math.pow(', expr)
-        expr = re.sub(r'\babs\s*\(', 'abs(', expr)
-        expr = re.sub(r'\bsqrt\s*\(', '_math.sqrt(', expr)
-        expr = re.sub(r'\bmin\s*\(', 'min(', expr)
-        expr = re.sub(r'\bmax\s*\(', 'max(', expr)
-        
-        # Replace 'and'/'or'
-        expr = re.sub(r'\band\b', 'and', expr)
-        expr = re.sub(r'\bor\b', 'or', expr)
-        
-        # Convert C-style ternary (cond ? true_val : false_val) to Python (true_val if cond else false_val)
-        ternary_match = re.match(r'^(.+?)\s*\?\s*(.+?)\s*:\s*(.+)$', expr)
-        if ternary_match:
-            cond, true_val, false_val = ternary_match.groups()
-            expr = f"({true_val}) if ({cond}) else ({false_val})"
-        
-        try:
-            result = eval(expr, {"__builtins__": {}, "_math": _math, 
-                                 "abs": abs, "min": min, "max": max,
-                                 "True": True, "False": False})
-            return float(result) if isinstance(result, (int, float)) else 0.0
-        except Exception as e:
-            raise ValueError(f"Formula evaluation failed: '{formula}' -> '{expr}': {e}")
     
     def _evaluate_polynomial(self, coefficients: List[float], x: float) -> float:
         """
@@ -5744,10 +5830,6 @@ class SchemaInterpreter:
                 value = max(value, float(op['floor']))
             elif 'ceiling' in op:  # Clamp upper bound (renamed from min)
                 value = min(value, float(op['ceiling']))
-            elif 'clamp' in op:
-                bounds = op['clamp']
-                if isinstance(bounds, list) and len(bounds) >= 2:
-                    value = max(float(bounds[0]), min(float(bounds[1]), value))
             elif 'log10' in op and op['log10']:
                 value = math.log10(value) if value > 0 else OMITTED
             elif 'log' in op and op['log']:
@@ -6155,21 +6237,6 @@ class SchemaInterpreter:
         if not isinstance(value, (int, float)):
             return value
         
-        # Formula takes precedence - use sandboxed evaluator (DEPRECATED)
-        formula = field_def.get('formula')
-        if formula:
-            import warnings
-            warnings.warn(
-                f"Field '{field_def.get('name', 'unknown')}': 'formula' is deprecated. "
-                "Use 'polynomial', 'compute', or 'transform' instead.",
-                DeprecationWarning
-            )
-            try:
-                value = self._evaluate_formula(formula, x=value)
-            except ValueError:
-                pass  # Keep original value on formula error
-            return value
-        
         value = apply_canonical_modifiers(value, field_def)
 
         # Apply transform array (new declarative constructs)
@@ -6549,7 +6616,7 @@ class SchemaInterpreter:
                     break
                 continue
             
-            # Computed field - supports formula, ref, polynomial, compute, guard.
+            # Computed field - supports ref, polynomial, compute, guard.
             # `integer` (PS-283) has identical semantics to `number` and declares that
             # the result is an integer, so it reports as one. It performs no rounding
             # of its own: `idiv` truncates and {op: round} rounds, both already
@@ -6639,11 +6706,7 @@ class SchemaInterpreter:
                     continue
                 # Skip type returns None - don't add to output
                 if value is not None:
-                    # Formula takes precedence over mult/add/div modifiers
-                    if field_def.get('formula'):
-                        value = self._evaluate_formula(field_def['formula'], value)
-                    else:
-                        value = self._apply_modifiers(value, field_def)
+                    value = self._apply_modifiers(value, field_def)
                     if value is not OMITTED and self._range_omits(field_def, value):
                         # PS-428: outside the range is no reading, not a flagged one.
                         self._mark_absent(field_def, name, result, 'out_of_range')
@@ -8816,11 +8879,6 @@ class SchemaInterpreter:
         if not isinstance(value, (int, float)) or isinstance(value, bool):
             return value
         
-        # Phase 3: encode_formula takes precedence
-        encode_formula = field_def.get('encode_formula')
-        if encode_formula:
-            return int(round(self._evaluate_encode_formula(encode_formula, value)))
-
         # Decoding applies the canonical modifiers, then the transform chain, then the
         # lookup, so encoding undoes them in the opposite order.
         value = reverse_transform_stages(value, field_def.get('transform'))
