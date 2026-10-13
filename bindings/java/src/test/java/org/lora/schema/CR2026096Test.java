@@ -48,8 +48,8 @@ public class CR2026096Test {
         List<String> keys = new ArrayList<>(out.keySet());
         assertEquals("_meta", keys.get(keys.size() - 1));
         assertEquals(Map.of("schema", "flat",
-                        "fields", Map.of("a", Map.of("type", "u8", "unit", "V"),
-                                "b", Map.of("type", "u8"))),
+                        "fields", Map.of("a", Map.of("type", "u8", "reports", "integer", "unit", "V"),
+                                "b", Map.of("type", "u8", "reports", "integer"))),
                 out.get("_meta"));
     }
 
@@ -92,7 +92,7 @@ public class CR2026096Test {
         Map<String, Object> meta = (Map<String, Object>) schema.interpret(new byte[] {90},
                 new InputContext(9, null, null)).get("_meta");
         assertEquals(9, meta.get("fPort"));
-        assertEquals(Map.of("level", Map.of("type", "u8")), meta.get("fields"));
+        assertEquals(Map.of("level", Map.of("type", "u8", "reports", "integer")), meta.get("fields"));
         // No FPort on a ports schema fails as decode() does (PS-459).
         assertThrows(SchemaException.class, () -> schema.interpret(new byte[] {90}, none()));
     }
@@ -214,10 +214,10 @@ public class CR2026096Test {
         Schema schema = Schema.fromYaml(agreement("type: s16, unit: Cel, description: two"));
         Map<String, Object> meta = (Map<String, Object>) schema.interpret(new byte[] {2, (byte) 0xFF, (byte) 0x9C},
                 none()).get("_meta");
-        assertEquals(Map.of("r", Map.of("type", "s16", "unit", "Cel", "description", "two")),
+        assertEquals(Map.of("r", Map.of("type", "s16", "reports", "integer", "unit", "Cel", "description", "two")),
                 meta.get("fields"));
         meta = (Map<String, Object>) schema.interpret(new byte[] {1, 5}, none()).get("_meta");
-        assertEquals(Map.of("r", Map.of("type", "u8", "unit", "Cel")), meta.get("fields"));
+        assertEquals(Map.of("r", Map.of("type", "u8", "reports", "integer", "unit", "Cel")), meta.get("fields"));
     }
 
     @Test

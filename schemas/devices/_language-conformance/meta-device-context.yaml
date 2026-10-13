@@ -48,13 +48,14 @@ test_vectors:
       fields:
         temperature:
           type: s16
+          reports: number
           unit: Cel
           ipso: {object: 3303, instance: 0, resource: 5700}
           senml: {name: temp}
           description: Air temperature
-        humidity: {type: u8, unit: "%RH"}
-        state: {type: "u8[0:3]"}
-        echo: {type: number, unit: Cel}
+        humidity: {type: u8, reports: integer, unit: "%RH"}
+        state: {type: "u8[0:3]", reports: string}
+        echo: {type: number, reports: number, unit: Cel}
   - name: no_context
     description: "No fPort, recvTime or devEUI: those keys are omitted, never invented"
     source: spec-example
@@ -67,13 +68,14 @@ test_vectors:
       fields:
         temperature:
           type: s16
+          reports: number
           unit: Cel
           ipso: {object: 3303, instance: 0, resource: 5700}
           senml: {name: temp}
           description: Air temperature
-        humidity: {type: u8, unit: "%RH"}
-        state: {type: "u8[0:3]"}
-        echo: {type: number, unit: Cel}
+        humidity: {type: u8, reports: integer, unit: "%RH"}
+        state: {type: "u8[0:3]", reports: string}
+        echo: {type: number, reports: number, unit: Cel}
   - name: offset_time_whole_seconds
     description: "A UTC offset is applied, and a time with no fraction is a whole number"
     source: spec-example
@@ -89,10 +91,11 @@ test_vectors:
       fields:
         temperature:
           type: s16
+          reports: number
           unit: Cel
           ipso: {object: 3303, instance: 0, resource: 5700}
           senml: {name: temp}
           description: Air temperature
-        humidity: {type: u8, unit: "%RH"}
-        state: {type: "u8[0:3]"}
-        echo: {type: number, unit: Cel}
+        humidity: {type: u8, reports: integer, unit: "%RH"}
+        state: {type: "u8[0:3]", reports: string}
+        echo: {type: number, reports: number, unit: Cel}

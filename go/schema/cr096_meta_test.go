@@ -55,8 +55,8 @@ func TestMetaPresentWithoutAnnotations(t *testing.T) {
 	want := map[string]any{
 		"schema": "flat",
 		"fields": map[string]any{
-			"a": map[string]any{"type": "u8", "unit": "V"},
-			"b": map[string]any{"type": "u8"},
+			"a": map[string]any{"type": "u8", "reports": "integer", "unit": "V"},
+			"b": map[string]any{"type": "u8", "reports": "integer"},
 		},
 	}
 	if ok, detail := corpusMetaMatches(want, out["_meta"], "_meta"); !ok {
@@ -275,10 +275,10 @@ fields:
 	want := map[string]any{
 		"schema": "x",
 		"fields": map[string]any{
-			"kind": map[string]any{"type": "u8"},
-			"r":    map[string]any{"type": "s16", "unit": "Cel", "description": "two"},
-			"idx":  map[string]any{"type": "u8"},
-			"ch_3": map[string]any{"type": "u8"},
+			"kind": map[string]any{"type": "u8", "reports": "integer"},
+			"r":    map[string]any{"type": "s16", "reports": "integer", "unit": "Cel", "description": "two"},
+			"idx":  map[string]any{"type": "u8", "reports": "integer"},
+			"ch_3": map[string]any{"type": "u8", "reports": "integer"},
 		},
 	}
 	if ok, detail := corpusMetaMatches(want, out["_meta"], "_meta"); !ok {

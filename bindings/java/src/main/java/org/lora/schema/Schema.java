@@ -41,6 +41,8 @@ public class Schema {
     private Object metaName;
     /** Whether the document declares {@code version}, and the value it declares. */
     private boolean declaresVersion;
+    /** PS-572: each mapping and list of the expanded document, by identity, to its pointer. */
+    private Map<Object, String> pointers = new java.util.IdentityHashMap<>();
     private Object declaredVersion;
 
     public Schema() {
@@ -145,7 +147,10 @@ public class Schema {
         FieldNames.check(raw);
         // CR-2026-156: `sampled` only on a repeat, with a usable interval, order and anchor (PS-569).
         Sampled.check(raw);
+        // CR-2026-161: a lookup's labels are of one type (PS-571).
+        Reports.check(raw);
         Schema schema = new Schema();
+        schema.pointers = DecodeRecord.pointerMap(raw);                // PS-572
         schema.repeatOnlyNames = Wave6a.repeatOnlyNames(raw);
         schema.metaName = raw.get("name");
         schema.declaresVersion = declaresVersion;
@@ -1164,6 +1169,7 @@ public class Schema {
             Map<String, Object> flaggedMap = (Map<String, Object>) flaggedRaw;
             Field.FlaggedDef fd = new Field.FlaggedDef();
             fd.setField((String) flaggedMap.get("field"));
+            fd.setRaw(flaggedMap);
             
             Object groupsRaw = flaggedMap.get("groups");
             if (groupsRaw instanceof List) {
@@ -1193,6 +1199,7 @@ public class Schema {
         if (matchRaw instanceof Map<?, ?> matchMap) {
             Field matchField = new Field();
             matchField.setType(FieldType.MATCH);
+            matchField.setRaw((Map<String, Object>) matchMap);       // located by _decode (PS-572)
             Object on = matchMap.get("field");
             if (on instanceof String) {
                 matchField.setOn((String) on);
@@ -1272,10 +1279,22 @@ public class Schema {
      * (PS-497); a malformed devEUI or recvTime throws too.
      */
     public Map<String, Object> interpret(byte[] data, InputContext in) {
+        return interpret(data, in, false);
+    }
+
+    /**
+     * {@link #interpret(byte[], InputContext)}, and with {@code decodeRecord} the output
+     * also carries {@code _decode} after {@code _meta} (PS-572, CR-2026-162): the location
+     * of every match evaluated with the case it took and the discriminator it read, every
+     * internal field decoded with its value, and every flagged construct with its flags.
+     * {@link Encoder} follows it where the input is given back with it (PS-573).
+     */
+    public Map<String, Object> interpret(byte[] data, InputContext in, boolean decodeRecord) {
         InputContext context = in != null ? in : new InputContext(null, null, null);
         Integer fPort = context.fPort();
         DecodeContext ctx = new DecodeContext(data, endian);
         ctx.setRepeatOnlyNames(repeatOnlyNames);
+        if (decodeRecord) ctx.setRecord(new DecodeRecord(pointers, null));
         List<Field> selected;
         if (fPort == null) {
             if (ports != null && !ports.isEmpty()) {
@@ -1325,6 +1344,7 @@ public class Schema {
         }
         meta.put("fields", entries);
         result.put("_meta", meta);
+        if (ctx.getRecord() != null) result.put("_decode", ctx.getRecord().asMap());   // PS-572
         return result;
     }
 
@@ -1417,6 +1437,25 @@ public class Schema {
     public EncodeResult encode(Map<String, Object> data) {
         return new Encoder(this, fields).run(data);
     }
+
+    /**
+     * {@link #encode(Map)} following a decode record (PS-573): {@code decodeRecord} is the
+     * {@code _decode} that {@link #interpret(byte[], InputContext, boolean)} produced. It
+     * may instead arrive in {@code data} as {@code _decode}; this argument wins.
+     */
+    public EncodeResult encode(Map<String, Object> data, Map<String, Object> decodeRecord) {
+        return new Encoder(this, fields).run(data, decodeRecord);
+    }
+
+    /** {@link #encodeWithPort(Map, int, String)} following a decode record (PS-573). */
+    public EncodeResult encodeWithPort(Map<String, Object> data, int fPort, String direction,
+                                       Map<String, Object> decodeRecord) {
+        checkDirection(fPort, direction);
+        return new Encoder(this, resolveFields(fPort)).run(data, decodeRecord);
+    }
+
+    /** PS-572: the JSON Pointer of each node of the expanded document, by identity. */
+    Map<Object, String> pointers() { return pointers; }
 
     /** {@link #encode} with port-based schema selection. */
     public EncodeResult encodeWithPort(Map<String, Object> data, int fPort) {
@@ -1565,7 +1604,7 @@ public class Schema {
             // Handle an inline match block. Its selected case contributes its fields
             // flat alongside the block's siblings, as the interpreter does.
             if (field.getMatchInline() != null) {
-                Object matchResult = decodeMatch(field.getMatchInline(), ctx);
+                Object matchResult = decodeMatch(field.getMatchInline(), ctx, true);
                 if (matchResult instanceof Map<?, ?> matchMap) {
                     for (Map.Entry<?, ?> entry : matchMap.entrySet()) {
                         String key = String.valueOf(entry.getKey());
@@ -1585,8 +1624,16 @@ public class Schema {
                     throw new SchemaException.DecodeException("`records` belongs in a repeat's element, "
                             + "or a match case within it (PS-541)");
                 }
-                for (List<Field> body : field.getRecords()) {
-                    ctx.getPendingRecords().add(decodeFields(body, ctx));
+                Object bodies = field.getRaw() == null ? null : field.getRaw().get("records");
+                for (int n = 0; n < field.getRecords().size(); n++) {
+                    DecodeRecord rec = ctx.getRecord();
+                    // PS-572: a record's location is `records/n[0]`.
+                    boolean pushed = rec != null && rec.push(bodies, "records", 0, "/" + n);
+                    try {
+                        ctx.getPendingRecords().add(decodeFields(field.getRecords().get(n), ctx));
+                    } finally {
+                        if (rec != null) rec.pop(pushed);
+                    }
                 }
                 continue;
             }
@@ -1659,6 +1706,7 @@ public class Schema {
                         result.put(outputName, reported);
                     }
                 }
+                else recordInternal(ctx, field.getRaw(), value);        // PS-572
                 // Variables are keyed by the schema-level name so $references keep
                 // working when name_from is in play (PS-267).
                 ctx.bind(field.getName(), field, value);       // PS-523
@@ -1702,6 +1750,10 @@ public class Schema {
             throw new SchemaException.DecodeException("Flagged field reference not found: " + fd.getField());
         }
         int flags = toInt(flagsVal, 0);
+        if (ctx.getRecord() != null) {                                      // PS-572
+            String where = ctx.getRecord().loc(fd.getRaw());
+            if (where != null) ctx.getRecord().flagged.put(where, (long) flags);
+        }
         
         Map<String, Object> result = new LinkedHashMap<>();
         
@@ -1996,7 +2048,7 @@ public class Schema {
             }
             
             case MATCH, SWITCH -> {
-                value = decodeMatch(field, ctx);
+                value = decodeMatch(field, ctx, false);
             }
             
             case TLV -> {
@@ -2162,7 +2214,29 @@ public class Schema {
                 && (field.getTransform() == null || field.getTransform().isEmpty());
     }
 
-    private Object decodeMatch(Field field, DecodeContext ctx) {
+    /** PS-572: the case a match took and the discriminator it read, at its location. */
+    private static void recordMatch(boolean record, Field field, DecodeContext ctx, Object key,
+                                    Object discriminator) {
+        if (!record || ctx.getRecord() == null) return;
+        String where = ctx.getRecord().loc(field.getRaw());
+        if (where == null) return;
+        Map<String, Object> entry = new LinkedHashMap<>();
+        entry.put("case", key == null ? "default" : DecodeRecord.caseKey(key));
+        entry.put("value", normalizeOutput(discriminator));
+        ctx.getRecord().matches.put(where, entry);
+    }
+
+    /** PS-572: an internal field's decoded value, at its location in the decode record. */
+    private static void recordInternal(DecodeContext ctx, Object raw, Object value) {
+        DecodeRecord rec = ctx.getRecord();
+        if (rec == null || value == null || value == OMITTED) return;
+        String where = rec.loc(raw);
+        if (where == null) return;
+        Object reported = normalizeOutput(value);
+        if (reported != null) rec.internal.put(where, reported);
+    }
+
+    private Object decodeMatch(Field field, DecodeContext ctx, boolean record) {
         // A long, not an int. A bit-range peek reports a Double, and narrowing a Double
         // above Integer.MAX_VALUE saturates to 2147483647 while narrowing the Long case
         // key 2147483648 wraps to -2147483648 - so a u32 discriminator of 0x80000000 never
@@ -2188,6 +2262,16 @@ public class Schema {
             }
             matchValue = asLong(val);
             discriminator = val;
+            if (val instanceof String text) {
+                // A text discriminator (an `ascii` field) matches a key of the same text,
+                // as the reference compares it (_match_case_pattern).
+                for (Field.Case c : field.getCases()) {
+                    if (!c.isDefault() && text.equals(String.valueOf(c.getCaseValue()))) {
+                        recordMatch(record, field, ctx, c.getCaseValue(), discriminator);
+                        return mergeMatch(inline, decodeFields(c.getFields(), ctx));
+                    }
+                }
+            }
             // A computed discriminator may carry a fraction, which equals no integer key:
             // asLong truncated it, so 2.5 selected case 2 (PS-484's reading, applied to
             // case keys). Only an inclusive range can hold it (PS-398).
@@ -2197,6 +2281,7 @@ public class Schema {
                 for (Field.Case c : field.getCases()) {
                     if (!c.isDefault() && c.getCaseValue() != null
                             && fractionInRange(number.doubleValue(), c.getCaseValue())) {
+                        recordMatch(record, field, ctx, c.getCaseValue(), discriminator);
                         return mergeMatch(inline, decodeFields(c.getFields(), ctx));
                     }
                 }
@@ -2234,6 +2319,7 @@ public class Schema {
         // case matched.
         for (Field.Case c : field.getCases()) {
             if (c.isDefault()) {
+                recordMatch(record, field, ctx, null, discriminator);
                 return mergeMatch(inline, decodeFields(c.getFields(), ctx));
             }
 
@@ -2241,6 +2327,7 @@ public class Schema {
             if (caseVal == null) continue;
 
             if (matchValue != null && matchesCase(matchValue, caseVal)) {
+                recordMatch(record, field, ctx, caseVal, discriminator);
                 return mergeMatch(inline, decodeFields(c.getFields(), ctx));
             }
         }
@@ -2250,6 +2337,7 @@ public class Schema {
         // declaring a fallback got none.
         Object fallback = field.getMatchDefault();
         if (fallback instanceof List<?> fallbackFields) {
+            recordMatch(record, field, ctx, null, discriminator);
             // Already Fields: the parser converts the `default:` list once (CR-2026-027).
             return mergeMatch(inline, decodeFields((List<Field>) fallbackFields, ctx));
         }
@@ -2258,6 +2346,7 @@ public class Schema {
                     "No matching case for value "
                     + (matchValue != null ? matchValue : discriminator));
         }
+        recordMatch(record, field, ctx, null, discriminator);
         return inline;
     }
 
@@ -2398,8 +2487,10 @@ public class Schema {
             }
         }
 
+        int entryIndex = -1;            // PS-572: each entry's index, in payload order
         while (ctx.remaining() > 0) {
             int entryStart = ctx.getOffset();
+            entryIndex++;
             // PS-477: a tag is never partly read. Fewer bytes than the tag at the start of
             // an entry is an error identifying the tlv, not the end of the loop.
             if (ctx.remaining() < tagWidth) {
@@ -2490,7 +2581,14 @@ public class Schema {
             
             if (caseKey != null) {
                 List<Field> caseFields = field.getTlvCases().get(caseKey);
-                Map<String, Object> caseResult = decodeFields(caseFields, ctx);
+                DecodeRecord rec = ctx.getRecord();
+                boolean pushed = rec != null && rec.push(field.getRaw(), "tlv", entryIndex);
+                Map<String, Object> caseResult;
+                try {
+                    caseResult = decodeFields(caseFields, ctx);
+                } finally {
+                    if (rec != null) rec.pop(pushed);
+                }
                 
                 if (merge) {
                     OnRepeat.Modes modes = field.getRepeatModes();
@@ -2901,6 +2999,9 @@ public class Schema {
         List<Map<String, Object>> savedRecords = ctx.getPendingRecords();
         List<Map<String, Object>> records = new ArrayList<>();
         ctx.setPendingRecords(records);
+        DecodeRecord rec = ctx.getRecord();
+        // PS-572: the element's position, in the locations of what it decodes.
+        boolean pushed = rec != null && rec.push(repeat.getRaw(), "repeat", iterations[0]);
         try {
             element = decodeFields(members, ctx);
             for (String carried : carryState.keySet()) {
@@ -2917,6 +3018,7 @@ public class Schema {
             ctx.restoreLabels(outerLabels);
             ctx.setElementNames(savedNames);
             ctx.setPendingRecords(savedRecords);
+            if (rec != null) rec.pop(pushed);
         }
         iterations[0]++;
         if (keep && !records.isEmpty()) {
@@ -3097,6 +3199,12 @@ public class Schema {
                 }
                 if (value == null) continue;
                 ctx.bind(name, member, value);                      // PS-523
+                if (name.startsWith("_")) {
+                    // PS-572: as the reference records a group member - a bool its flag,
+                    // any other the number its name binds.
+                    recordInternal(ctx, member.getRaw(),
+                            member.getType() == FieldType.BOOL ? value : ctx.getVariable(name));
+                }
                 if (!name.startsWith("_")) {
                     String outputName = resolveFieldName(member, ctx);
                     if (!outputName.equals(name)) ctx.produced(member, outputName);   // PS-492

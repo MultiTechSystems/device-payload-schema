@@ -247,6 +247,9 @@ type Field struct {
 	// decl is the field's declaration as written (after $ref splicing), from which its
 	// _meta entry is derived (CR-2026-096). See meta.go.
 	decl map[string]any
+	// tlvInline marks the parsed body of a `- tlv:` block (PS-572: its entries are
+	// counted in the decode record's locations).
+	tlvInline bool
 	// matchDecl is an inline match's mapping as written, whose `cases` give the cases'
 	// declaration order (PS-563) through the schema's keyOrder; Cases are kept sorted.
 	matchDecl map[string]any
@@ -322,6 +325,8 @@ type FlaggedGroup struct {
 type FlaggedDef struct {
 	Field  string         `json:"field" yaml:"field"`
 	Groups []FlaggedGroup `json:"groups" yaml:"groups"`
+	// decl is the construct as written, which the decode record locates (PS-572).
+	decl map[string]any
 }
 
 // PortDef represents a port-specific schema definition.
@@ -357,6 +362,9 @@ type Schema struct {
 	rawVersion any
 	hasVersion bool
 	keyOrder   keyOrder
+	// pointers is each mapping of the $ref-expanded document by identity, with its JSON
+	// Pointer, for the decode record (PS-572, cr162.go).
+	pointers pointerMap
 }
 
 // DecodeContext maintains state during decoding.
@@ -401,6 +409,8 @@ type DecodeContext struct {
 	// pendingRecords collects what a repeat element's `records` entry yields (PS-541);
 	// nil outside an element.
 	pendingRecords *[]map[string]any
+	// trace is the decode record kept for Interpret (PS-572); nil when not asked.
+	trace *decodeTrace
 }
 
 // EncodeContext maintains state during encoding.
@@ -444,6 +454,8 @@ type EncodeContext struct {
 	// which a `remaining` match is not checked either (the reference's tail_unchecked).
 	ps564      *[]remainingCheck
 	ps564Depth int
+	// trace is the decode record the encoder follows (PS-573); nil where none is given.
+	trace *decodeTrace
 }
 
 // NewEncodeContext creates a new encode context.
@@ -483,6 +495,7 @@ func (ctx *EncodeContext) branch() *EncodeContext {
 	child.Definitions = ctx.Definitions
 	child.order = ctx.order
 	child.scope = ctx.scope
+	child.trace = ctx.trace
 	return child
 }
 
@@ -1005,8 +1018,13 @@ func ParseSchema(data string) (*Schema, error) {
 	if err := checkSampled(raw, order); err != nil {
 		return nil, err
 	}
+	// CR-2026-161: a lookup's labels are of one type (PS-571).
+	if err := checkLookupTypes(raw, order); err != nil {
+		return nil, err
+	}
 
-	schema := &Schema{repeatOnly: repeatOnlyNames(raw), keyOrder: order}
+	schema := &Schema{repeatOnly: repeatOnlyNames(raw), keyOrder: order,
+		pointers: buildPointerMap(raw)}
 	schema.rawName = raw["name"]
 	schema.rawVersion, schema.hasVersion = raw["version"]
 	
@@ -1743,7 +1761,7 @@ func parseFieldMap(fm map[string]any, node *yaml.Node) Field {
 
 	// Flagged construct (inline)
 	if flaggedRaw, ok := fm["flagged"].(map[string]any); ok {
-		fd := &FlaggedDef{}
+		fd := &FlaggedDef{decl: flaggedRaw}
 		if field, ok := flaggedRaw["field"].(string); ok {
 			fd.Field = field
 		}
@@ -1770,6 +1788,7 @@ func parseFieldMap(fm map[string]any, node *yaml.Node) Field {
 	if tlvRaw, ok := fm["tlv"].(map[string]any); ok {
 		tlvField := parseFieldMap(tlvRaw, nil)
 		tlvField.Type = "tlv"
+		tlvField.tlvInline = true // its decl is the `tlv:` block the decode record locates
 		// An inline block is a tlv whatever it declares, so its cases are parsed even
 		// with no tag_size (default 1, PS-153). parseFieldMap looks for a marker, and
 		// without one left TLVCases empty: the block decoded to nothing, successfully.
@@ -1972,11 +1991,11 @@ func (s *Schema) DecodeWithPort(data []byte, fPort int) (map[string]any, error) 
 // mark them as such, so no field is returned (PS-288). Pass "" for direction to skip
 // the check.
 func (s *Schema) DecodeWithPortDirection(data []byte, fPort int, direction string) (map[string]any, error) {
-	return s.decodeWithPort(data, fPort, direction, nil)
+	return s.decodeWithPort(data, fPort, direction, nil, nil)
 }
 
 // decodeWithPort is DecodeWithPortDirection with an optional _meta recorder (Interpret).
-func (s *Schema) decodeWithPort(data []byte, fPort int, direction string, producers map[string]map[string]any) (map[string]any, error) {
+func (s *Schema) decodeWithPort(data []byte, fPort int, direction string, producers map[string]map[string]any, trace *decodeTrace) (map[string]any, error) {
 	if err := s.checkDirection(fPort, direction); err != nil {
 		return nil, err
 	}
@@ -1989,6 +2008,7 @@ func (s *Schema) decodeWithPort(data []byte, fPort int, direction string, produc
 	ctx := NewDecodeContext(data, s.Endian)
 	ctx.repeatOnly = s.repeatOnly
 	ctx.metaProducers = producers
+	ctx.trace = trace
 	result := make(map[string]any)
 
 	if len(s.Header) > 0 {
@@ -2029,11 +2049,11 @@ func (s *Schema) decodeWithPort(data []byte, fPort int, direction string, produc
 
 // Decode decodes binary data using the schema.
 func (s *Schema) Decode(data []byte) (map[string]any, error) {
-	return s.decode(data, nil)
+	return s.decode(data, nil, nil)
 }
 
 // decode is Decode with an optional _meta recorder (Interpret).
-func (s *Schema) decode(data []byte, producers map[string]map[string]any) (map[string]any, error) {
+func (s *Schema) decode(data []byte, producers map[string]map[string]any, trace *decodeTrace) (map[string]any, error) {
 	// PS-459, PS-460: a ports schema decoded with no FPort selects nothing. This decoded
 	// the empty top-level field list and returned {} with success.
 	if len(s.Ports) > 0 {
@@ -2042,6 +2062,7 @@ func (s *Schema) decode(data []byte, producers map[string]map[string]any) (map[s
 	ctx := NewDecodeContext(data, s.Endian)
 	ctx.repeatOnly = s.repeatOnly
 	ctx.metaProducers = producers
+	ctx.trace = trace
 	result := make(map[string]any)
 
 	// Decode header fields
@@ -2269,6 +2290,8 @@ func decodeFieldsWithSchema(fields []Field, ctx *DecodeContext, schema *Schema) 
 			// combine two words appeared in the decoded result.
 			if !strings.HasPrefix(field.Name, "_") {
 				result[outputName] = value
+			} else {
+				ctx.recordInternal(field.decl, value) // PS-572
 			}
 			// Keyed by the schema-level name so $references keep working when
 			// name_from is in play (PS-267). A looked-up field binds as PS-523 says.
@@ -2359,11 +2382,13 @@ func decodeByteGroup(field Field, ctx *DecodeContext) (map[string]any, error) {
 		if value == omitted || subfield.Name == "" {
 			// A lookup miss is not reported but its reference is bound (PS-523).
 			ctx.bindReference(subfield.Name, subfield, value)
+			ctx.recordGroupInternal(subfield, r.isBool, value)
 			continue
 		}
 		// Bound here, as PS-523 says, for later references; the caller's copy of the
 		// reported value leaves this binding alone.
 		ctx.bindReference(subfield.Name, subfield, value)
+		ctx.recordGroupInternal(subfield, r.isBool, value)
 		if strings.HasPrefix(subfield.Name, "_") {
 			// Internal: bound for later references, not reported.
 			continue
@@ -2383,6 +2408,7 @@ func decodeFlagged(fd *FlaggedDef, ctx *DecodeContext) (map[string]any, error) {
 		return nil, fmt.Errorf("flagged field reference not found: %s", fd.Field)
 	}
 	flags, _ := toInt(flagsVal)
+	ctx.recordFlags(fd.decl, flags) // PS-572
 
 	result := make(map[string]any)
 
@@ -3250,6 +3276,10 @@ func decodeMatch(field Field, ctx *DecodeContext) (any, error) {
 	// selected case 2 (PS-484's reading, applied to case keys).
 	var matchNumber float64
 	fractional := false
+	// The discriminator as read, for the decode record (PS-572), and a text one, which
+	// matches only a text case key equal to it, as the reference compares it.
+	var recordValue any
+	var matchText *string
 	// What this construct contributes on its own: the discriminator under `name`, where
 	// it was read here and named. nil where there is nothing to report.
 	var inline map[string]any
@@ -3258,6 +3288,7 @@ func decodeMatch(field Field, ctx *DecodeContext) (any, error) {
 		// PS-414: the bytes from here to the end, less any enclosing repeat's reserve -
 		// which the region-limited buffer already excludes. Nothing is read.
 		matchValue = ctx.Remaining()
+		recordValue = matchValue
 	} else if field.On != "" {
 		// Variable-based match
 		varName := strings.TrimPrefix(field.On, "$")
@@ -3268,6 +3299,10 @@ func decodeMatch(field Field, ctx *DecodeContext) (any, error) {
 		matchValue, _ = toInt(val)
 		if f, ok := toFloat64(val); ok && f != math.Trunc(f) {
 			matchNumber, fractional = f, true
+		}
+		recordValue = val
+		if text, ok := val.(string); ok {
+			matchText = &text
 		}
 	} else {
 		// Inline match - read bytes
@@ -3282,6 +3317,7 @@ func decodeMatch(field Field, ctx *DecodeContext) (any, error) {
 			return nil, nameUnderflow(err, field.Name, "match")
 		}
 		matchValue = int(decodeUint(data, ctx.Endian))
+		recordValue = matchValue
 
 		// A discriminator read from the payload is reported where `name` asks for it and
 		// stored where `var` does (CR-2026-020). Both were parsed and then discarded, so
@@ -3316,14 +3352,24 @@ func decodeMatch(field Field, ctx *DecodeContext) (any, error) {
 			continue
 		}
 
+		if matchText != nil {
+			if text, ok := caseVal.(string); ok && text == *matchText {
+				ctx.recordMatch(field, caseVal, recordValue)
+				decoded, err := decodeFields(c.Fields, ctx)
+				return mergeMatchResult(inline, decoded, err)
+			}
+			continue
+		}
 		if fractional {
 			if fractionInRangePattern(matchNumber, caseVal) {
+				ctx.recordMatch(field, caseVal, recordValue)
 				decoded, err := decodeFields(c.Fields, ctx)
 				return mergeMatchResult(inline, decoded, err)
 			}
 			continue
 		}
 		if matchCasePattern(matchValue, caseVal) {
+			ctx.recordMatch(field, caseVal, recordValue)
 			decoded, err := decodeFields(c.Fields, ctx)
 			return mergeMatchResult(inline, decoded, err)
 		}
@@ -3331,6 +3377,7 @@ func decodeMatch(field Field, ctx *DecodeContext) (any, error) {
 
 	// A `default` case inside `cases` takes precedence over the `default` beside them.
 	if defaultCase != nil {
+		ctx.recordMatch(field, "default", recordValue)
 		decoded, err := decodeFields(defaultCase.Fields, ctx)
 		return mergeMatchResult(inline, decoded, err)
 	}
@@ -3341,6 +3388,13 @@ func decodeMatch(field Field, ctx *DecodeContext) (any, error) {
 	shown := strconv.Itoa(matchValue)
 	if fractional {
 		shown = strconv.FormatFloat(matchNumber, 'f', -1, 64)
+	}
+	if matchText != nil {
+		shown = *matchText
+	}
+	if fallback, isText := field.MatchDefault.(string); field.MatchDefault != nil &&
+		(!isText || fallback == "skip") {
+		ctx.recordMatch(field, "default", recordValue) // PS-572: not `error`
 	}
 	switch fallback := field.MatchDefault.(type) {
 	case nil:
@@ -3405,12 +3459,14 @@ func decodeTLV(field Field, ctx *DecodeContext) (map[string]any, error) {
 	// refused at load, so only the modes are needed here.
 	repeat, _ := tlvRepeatModes(field.decl, nil)
 	collected := map[string]bool{} // names already turned into arrays (PS-157)
+	entryIndex := -1               // PS-572: each entry's index, in payload order
 
 	// Parse until end of data
 	for ctx.Remaining() > 0 {
 		// Where this entry begins, so an abandoned remainder is counted from the
 		// unknown tag itself rather than from after it (PS-302).
 		entryStart := ctx.Offset
+		entryIndex++
 
 		// PS-477: a tag is never partly read. Fewer bytes than the tag at the start of an
 		// entry is an error identifying the tlv; this stopped the loop and reported a
@@ -3517,7 +3573,9 @@ func decodeTLV(field Field, ctx *DecodeContext) (map[string]any, error) {
 		if caseKey != "" {
 			ctx.TLVOrder = append(ctx.TLVOrder, caseKey)
 			caseFields := field.TLVCases[caseKey]
+			pushed := ctx.trace.pushTLV(field, entryIndex)
 			caseResult, err := decodeFields(caseFields, ctx)
+			ctx.trace.pop(pushed)
 			if err != nil {
 				return nil, err
 			}
@@ -4137,7 +4195,16 @@ func (s *Schema) EncodeToResult(data map[string]any, fPort int) (*EncodeResult, 
 func (s *Schema) encodeToContext(
 	data map[string]any, fPort int, order []string,
 ) (*EncodeContext, error) {
+	return s.encodeToContextRecord(data, fPort, order, nil)
+}
+
+// encodeToContextRecord is encodeToContext following a decode record (PS-573): the one
+// given, else the input's `_decode`. Neither `_decode` nor `_meta` is input.
+func (s *Schema) encodeToContextRecord(
+	data map[string]any, fPort int, order []string, record map[string]any,
+) (*EncodeContext, error) {
 	ctx := NewEncodeContext(s.Endian)
+	data, ctx.trace = s.takeRecord(data, record)
 	ctx.TLVOrder = order
 	ctx.Definitions = s.Definitions
 	ctx.order = s.keyOrder
@@ -4760,10 +4827,13 @@ func encodeTLV(field Field, data map[string]any, ctx *EncodeContext) error {
 		}
 		return bytes.Compare(out[i].tag, out[j].tag) < 0
 	})
-	for _, w := range out {
+	for entryIndex, w := range out {
 		tag := w.tag
 		inner := ctx.branch()
-		if err := encodeFields(w.fields, w.data, inner); err != nil {
+		pushed := ctx.trace.pushTLV(field, entryIndex) // PS-572: in the order written
+		err := encodeFields(w.fields, w.data, inner)
+		ctx.trace.pop(pushed)
+		if err != nil {
 			return err
 		}
 		inner.flushPending() // a tlv value is measured whole
@@ -4824,15 +4894,61 @@ func encodeMatch(field Field, siblings []Field, data map[string]any, ctx *Encode
 		discriminator = int(decodeUint(ctx.pending[:field.Length], ctx.Endian))
 	}
 
-	if field.Length > 0 {
-		if err := writtenDiscriminatorError(discriminator, field.Name); err != nil {
-			return err // PS-557
+	// PS-573: where the input gives no discriminator, the decode record's is written and
+	// its case taken - before any derivation, which PS-574 makes the fallback.
+	given := discriminator != nil
+	if field.On != "" && ctx.trace != nil && ctx.trace.supplied[strings.TrimPrefix(field.On, "$")] {
+		given = false // an internal value the record supplied, not input
+	}
+	var record map[string]any
+	if ctx.trace != nil {
+		if rec, ok := ctx.trace.lookup(ctx.trace.matches, field.matchDecl); ok {
+			record = asStringMap(rec)
 		}
 	}
 	var chosen []Field
 	chosenKey := ""
-	if discriminator != nil {
-		if f, ok := toFloat64(discriminator); ok && f != math.Trunc(f) {
+	if !given && record != nil {
+		if field.MatchRemaining {
+			c, isDefault, err := recordedCase(field, declared, record["case"])
+			if err != nil {
+				return err
+			}
+			if isDefault {
+				chosen, chosenKey = []Field{}, "default"
+				if d, ok := defaultBody(field); ok && d != nil {
+					chosen = d
+				}
+			} else {
+				chosen, chosenKey = nonNilFields(c.Fields), fmt.Sprintf("%v", c.Case)
+			}
+		} else if discriminator == nil {
+			discriminator = record["value"]
+		}
+	}
+
+	if field.Length > 0 {
+		if err := writtenDiscriminatorError(discriminator, field.Name); err != nil {
+			return err // PS-557
+		}
+		if f, ok := toFloat64(discriminator); ok && discriminator != nil {
+			// PS-168, before a case is looked for, as the spec prototype checks it.
+			if err := integerFitError(math.RoundToEven(f), field.Length*8, false,
+				matchLabel(field), discriminator); err != nil {
+				return err
+			}
+		}
+	}
+	if chosen == nil && discriminator != nil {
+		if text, isText := discriminator.(string); isText {
+			// A text discriminator matches a text case key equal to it (decodeMatch).
+			for _, c := range declared {
+				if key, ok := c.Case.(string); ok && !c.Default && key == text {
+					chosen, chosenKey = nonNilFields(c.Fields), key
+					break
+				}
+			}
+		} else if f, ok := toFloat64(discriminator); ok && f != math.Trunc(f) {
 			// A fraction selects no case toInt would truncate it into (decodeMatch).
 			for _, c := range declared {
 				raw := c.Case
@@ -4879,6 +4995,11 @@ func encodeMatch(field Field, siblings []Field, data map[string]any, ctx *Encode
 		}
 	}
 
+	if record != nil && !given {
+		if err := checkRecordedCase(field, chosenKey, data); err != nil {
+			return err // PS-573
+		}
+	}
 	if chosen == nil && discriminator == nil {
 		// Where the discriminator is not in the output - an inline match with no `name`
 		// reports nothing of itself, and a `remaining` match has none to report - the case
@@ -4944,7 +5065,7 @@ func encodeMatch(field Field, siblings []Field, data map[string]any, ctx *Encode
 			// through a case's fields, nor a bit range before it peeked. This returned no
 			// bytes where the match was nameless or its default `skip`, dropping the bytes
 			// the decoder reads.
-			return missingFieldError(matchLabel(field))
+			return undeterminedCaseError(matchLabel(field)) // PS-574
 		case field.MatchDefault == "skip":
 			// The discriminator, if the match reads one, and nothing for the case.
 			chosen = []Field{}
@@ -4965,7 +5086,7 @@ func encodeMatch(field Field, siblings []Field, data map[string]any, ctx *Encode
 			if label == "" {
 				label = "match"
 			}
-			return missingFieldError(label)
+			return undeterminedCaseError(label) // PS-574
 		}
 	}
 
@@ -4976,7 +5097,7 @@ func encodeMatch(field Field, siblings []Field, data map[string]any, ctx *Encode
 		} else if chosenKey == "" || chosenKey == "default" {
 			// A `default` branch stands for every unlisted value, so it names none to
 			// write: the discriminator is missing, as the reference says.
-			return missingFieldError(matchLabel(field))
+			return undeterminedCaseError(matchLabel(field)) // PS-574
 		} else if v, err := parseIntAny(chosenKey); err == nil {
 			value = v
 		} else {
@@ -5194,7 +5315,10 @@ func encodeRepeatRecords(field Field, records []any, ctx *EncodeContext, count i
 			bound[field.Index] = position + field.IndexBase // PS-530
 			record = bound
 		}
-		if err := encodeFieldsSealed(field.Fields, record, ctx); err != nil {
+		pushed := ctx.trace.pushNode(field.decl, "", "repeat", position) // PS-572
+		err := encodeFieldsSealed(field.Fields, record, ctx)
+		ctx.trace.pop(pushed)
+		if err != nil {
 			return err
 		}
 	}
@@ -5627,8 +5751,13 @@ func encodeFlagged(fd *FlaggedDef, data map[string]any, ctx *EncodeContext) erro
 	// and the list goes through encodeFields, so PS-551 holds for each given group's
 	// members and a run of bit ranges is packed by encodeBitfieldRun (CR-2026-024).
 	var members []Field
+	recorded, fromRecord := recordedFlags(fd, ctx) // PS-573: the groups its flags set
 	for _, group := range fd.Groups {
-		if !flaggedGroupGiven(group, data) {
+		if fromRecord {
+			if (recorded>>uint(group.Bit))&1 == 0 {
+				continue
+			}
+		} else if !flaggedGroupGiven(group, data) {
 			continue
 		}
 		hasConstruct := false

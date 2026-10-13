@@ -44,6 +44,10 @@ type InputContext struct {
 	FPort    *int
 	RecvTime any
 	DevEUI   string
+	// DecodeRecord asks Interpret for `_decode` beside `_meta` (PS-572, CR-2026-162):
+	// each match's case and discriminator, each internal field's value and each flagged
+	// construct's flags, by JSON Pointer. Decode never carries it.
+	DecodeRecord bool
 }
 
 // Interpret is the interpreter output: the decoded result with `_meta` added (PS-174,
@@ -55,12 +59,16 @@ type InputContext struct {
 // Decode warnings are reported under `_warnings`, as Decode reports them.
 func (s *Schema) Interpret(payload []byte, in InputContext) (map[string]any, error) {
 	producers := map[string]map[string]any{}
+	var trace *decodeTrace
+	if in.DecodeRecord {
+		trace = newDecodeTrace(s.pointers, nil) // PS-572
+	}
 	var result map[string]any
 	var err error
 	if in.FPort != nil {
-		result, err = s.decodeWithPort(payload, *in.FPort, "", producers)
+		result, err = s.decodeWithPort(payload, *in.FPort, "", producers, trace)
 	} else {
-		result, err = s.decode(payload, producers)
+		result, err = s.decode(payload, producers, trace)
 	}
 	if err != nil {
 		return nil, err
@@ -123,6 +131,9 @@ func (s *Schema) Interpret(payload []byte, in InputContext) (map[string]any, err
 		out[k] = v
 	}
 	out["_meta"] = meta
+	if trace != nil {
+		out["_decode"] = trace.asMap()
+	}
 	return out, nil
 }
 
@@ -271,7 +282,7 @@ func (s *Schema) metaDeclarations(fields any) *declarations {
 							length = n
 						}
 					}
-					found.setDefault(label, map[string]any{"name": label, "type": fmt.Sprintf("u%d", 8*length)})
+					found.setDefault(label, map[string]any{"name": label, "type": fmt.Sprintf("u%d", 8*length), "_reports": "integer"}) // PS-570
 				}
 			}
 			if t, _ := f["type"].(string); t == "match" {
@@ -373,6 +384,9 @@ func (s *Schema) fieldMeta(decl map[string]any, repeat map[string]any, siblings 
 	declaredType := metaType(decl)
 	if declaredType != "" {
 		entry["type"] = declaredType
+	}
+	if reports := reportsOf(decl); reports != "" {
+		entry["reports"] = reports // PS-570
 	}
 	senml := asStringMap(decl["senml"])
 	if senml == nil {

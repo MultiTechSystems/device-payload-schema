@@ -1,0 +1,241 @@
+# CR-2026-162 (PS-572 to PS-574, la-payload-schema branch cr/0.5.6-apply-158-162, for
+# 0.5.6): the decode record.
+#
+# - PS-572: `interpret(..., decode_record=True)` adds `_decode`, the record of one decode:
+#   `matches` (each match's case key, or "default", and the discriminator it read),
+#   `internal` (each internal field's value) and `flagged` (each flagged construct's
+#   flags), each keyed by an RFC 6901 JSON Pointer into the `$ref`-expanded schema, with
+#   `repeat[i]`, `tlv[k]` and `records/n[0]` occurrence indices. decode() never carries it.
+# - PS-573: an encoder given the record follows it: a recorded case, discriminator,
+#   internal value and flags value is used where the input gives none, and input that
+#   contradicts the record is rejected.
+# - PS-574: where neither gives a match's case, an encoder MAY derive it. This repository
+#   does (PS-551's nested-match rule, PS-563, PS-564), so where the spec prototype rejects
+#   an input as `Missing required field: report_type (PS-574)`, these cases expect the
+#   derived payload; the rejection is pinned where derivation fails too.
+#
+# The spec prototype's TestCR2026162DecodeRecord (13 tests), case for case, and six more:
+# JSON Pointer escapes, a port, a record of `records`, an internal flags field, an internal
+# value only the record has, and a name a nested match's `default` declares. Read by
+# tests/test_cr_2026_162_cases.py (reference and the generated codec's runtime encoder),
+# Go (go/schema/cr162_test.go), Java (CR2026162Test.java) and C# (CR2026_162Tests.cs).
+#
+# Layout. `decode` decodes `payload` (on `fport`, where given) with the record and checks:
+#   record      - the whole `_decode`, exactly (JSON; numbers compared by value);
+#   matches     - only the set of `matches` locations (JSON list);
+#   round_trip  - encoding the interpret output, `_decode` in it, gives `payload` back.
+# Each `encode` step encodes `input` (JSON), with `record`: "decoded" for the record the
+# decode above produced, a JSON record, or nothing; and expects `payload` (hex) or an
+# `error` that one of the encoder's errors contains (and no payload).
+
+cases:
+
+# --- The Clause 5 example (Netvox r718n3's report type) ------------------------------
+
+- name: the_clause_5_example_round_trips_with_its_record
+  schema: "name: r8\nversion: 1\nfields:\n  - match:\n      length: 1\n      var: report_type\n      cases:\n        0: [{name: version, type: u8}]\n      default:\n        - {name: volt, type: u8, div: 10}\n        - match:\n            field: $report_type\n            default: skip\n            cases:\n              1: [{name: temp, type: s16, div: 100}]\n"
+  decode:
+    payload: "011e0a28"
+    record: '{"matches": {"/fields/0/match": {"case": "default", "value": 1}, "/fields/0/match/default/1/match": {"case": 1, "value": 1}}, "internal": {}, "flagged": {}}'
+    round_trip: true
+  encode:
+    - input: '{"volt": 3, "temp": 26}'
+      record: decoded
+      payload: "011e0a28"
+
+- name: without_a_record_the_case_is_derived
+  # The prototype rejects this (`Missing required field: report_type (PS-574)`): it does
+  # not derive. This repository does, as PS-574 permits: the nested match's case 1 is the
+  # one the input fills, so report_type is 1 (PS-551, CR-2026-151). r718n3's pin.
+  schema: "name: r8\nversion: 1\nfields:\n  - match:\n      length: 1\n      var: report_type\n      cases:\n        0: [{name: version, type: u8}]\n      default:\n        - {name: volt, type: u8, div: 10}\n        - match:\n            field: $report_type\n            default: skip\n            cases:\n              1: [{name: temp, type: s16, div: 100}]\n"
+  encode:
+    - input: '{"volt": 3, "temp": 26}'
+      payload: "011e0a28"
+    - input: '{"report_type": 1, "volt": 3, "temp": 26}'
+      payload: "011e0a28"
+    - input: '{"volt": 3}'
+      error: "Missing required field: report_type (PS-574)"
+
+- name: a_downlink_names_its_command
+  schema: "name: dl\nversion: 1\nfields:\n  - match:\n      length: 1\n      name: command\n      cases:\n        1: [{name: interval, type: u16}]\n        2: [{name: reboot, type: u8}]\n"
+  encode:
+    - input: '{"command": 1, "interval": 600}'
+      payload: "010258"
+
+- name: the_written_discriminator_is_checked
+  schema: "name: dl\nversion: 1\nfields:\n  - match:\n      length: 1\n      name: kind\n      cases:\n        1: [{name: a, type: u8}]\n"
+  encode:
+    - input: '{"kind": 1.5, "a": 1}'
+      error: "not an integer, so it cannot be written (PS-557)"
+    - input: '{"kind": 300, "a": 1}'
+      error: "(PS-168)"
+    - input: '{"kind": 9}'
+      error: "No matching case for value 9"
+
+# --- Locations -------------------------------------------------------------------------
+
+- name: locations_carry_repeat_and_tlv_indices
+  schema: "name: t\nversion: 1\nfields:\n  - name: r\n    type: repeat\n    count: 2\n    fields:\n      - {name: _k, type: u8}\n      - match:\n          field: $_k\n          cases:\n            1: [{name: a, type: u8}]\n            2: [{name: b, type: u8}]\n  - tlv:\n      tag_fields: [{name: ch, type: u8}, {name: ty, type: u8}]\n      tag_key: [ch, ty]\n      cases:\n        \"[3, 103]\":\n          - match:\n              length: 1\n              var: _m\n              cases:\n                7: [{name: c, type: u8}]\n"
+  decode:
+    payload: "010502070367070903670708"
+    record: '{"matches": {"/fields/0/repeat[0]/fields/1/match": {"case": 1, "value": 1}, "/fields/0/repeat[1]/fields/1/match": {"case": 2, "value": 2}, "/fields/1/tlv[0]/cases/[3, 103]/0/match": {"case": 7, "value": 7}, "/fields/1/tlv[1]/cases/[3, 103]/0/match": {"case": 7, "value": 7}}, "internal": {"/fields/0/repeat[0]/fields/0": 1, "/fields/0/repeat[1]/fields/0": 2}, "flagged": {}}'
+    round_trip: true
+
+- name: a_pointer_escapes_tilde_and_slash
+  # RFC 6901: `~` is written `~0` and `/` is written `~1` in a reference token.
+  schema: "name: t\nversion: 1\nfields:\n  - {name: kind, type: ascii, length: 3}\n  - match:\n      field: $kind\n      cases:\n        \"a/b\": [{name: _x, type: u8}, {name: v, type: u8}]\n        \"c~d\": [{name: _y, type: u8}, {name: w, type: u8}]\n"
+  decode:
+    payload: "612f620102"
+    record: '{"matches": {"/fields/1/match": {"case": "a/b", "value": "a/b"}}, "internal": {"/fields/1/match/cases/a~1b/0": 1}, "flagged": {}}'
+    round_trip: true
+
+- name: a_port_is_in_the_location
+  schema: "name: t\nversion: 1\nports:\n  5:\n    fields:\n      - {name: _k, type: u8}\n      - match:\n          field: $_k\n          cases:\n            1: [{name: a, type: u8}]\n            2: [{name: b, type: u8}]\n"
+  fport: 5
+  decode:
+    payload: "0207"
+    record: '{"matches": {"/ports/5/fields/1/match": {"case": 2, "value": 2}}, "internal": {"/ports/5/fields/0": 2}, "flagged": {}}'
+    round_trip: true
+
+- name: a_record_of_records_is_located_by_its_body
+  # `records/n[0]`: a record always has index 0 within its element; the enclosing
+  # repeat's index tells them apart. `records` cannot be encoded (PS-542).
+  schema: "name: t\nversion: 1\nfields:\n  - name: r\n    type: repeat\n    count: 2\n    fields:\n      - records:\n          - [{name: _a, type: u8}, {name: x, type: u8}]\n          - [{name: y, type: u8}]\n"
+  decode:
+    payload: "010203040506"
+    record: '{"matches": {}, "internal": {"/fields/0/repeat[0]/fields/0/records/0[0]/0": 1, "/fields/0/repeat[1]/fields/0/records/0[0]/0": 4}, "flagged": {}}'
+
+# --- PS-564 and PS-573 --------------------------------------------------------------------
+
+- name: a_remaining_match_writes_bytes_that_select_its_case
+  # Case 1 recorded, but its u16 leaves 2 bytes, which select case 2 (PS-564). Without a
+  # record the prototype rejects {b: 1} (PS-574); this repository derives case 2.
+  schema: "name: t\nversion: 1\nfields:\n  - match:\n      remaining: true\n      cases:\n        1: [{name: a, type: u16}]\n        2: [{name: b, type: u16}]\n"
+  encode:
+    - input: '{"a": 1}'
+      record: '{"matches": {"/fields/0/match": {"case": 1, "value": 1}}}'
+      error: "select case 2, not case 1, the case its input gives (PS-564)"
+    - input: '{"b": 1}'
+      payload: "0001"
+
+- name: a_contradicting_input_is_rejected
+  schema: "name: t\nversion: 1\nfields:\n  - {name: _k, type: u8}\n  - match:\n      field: $_k\n      cases:\n        1: [{name: a, type: u8}]\n        2: [{name: b, type: u8}]\n"
+  decode:
+    payload: "0105"
+    record: '{"matches": {"/fields/1/match": {"case": 1, "value": 1}}, "internal": {"/fields/0": 1}, "flagged": {}}'
+  encode:
+    - input: '{"a": 5}'
+      record: decoded
+      payload: "0105"
+    - input: '{"_k": 2, "b": 5}'
+      record: decoded
+      error: "Field '_k' is given 2, but the decode record holds 1 (PS-573)"
+    - input: '{"_k": 2.0, "b": 5}'
+      record: decoded
+      # A number in a message is written as JavaScript's String(n): `2`, not `2.0` (CR-2026-164).
+      error: "Field '_k' is given 2, but the decode record holds 1 (PS-573)"
+    - input: '{"b": 5}'
+      record: decoded
+      error: "Field an unnamed match: the input gives 'b', which only another case declares, against the recorded case (PS-573)"
+    - input: '{"a": 5}'
+      # No record: this repository derives `_k` from the case the input fills (PS-551).
+      payload: "0105"
+
+- name: a_name_a_nested_default_declares_is_not_another_cases
+  # Case 2 reports `a` through a nested match's `default`. The prototype's declared_fields
+  # does not look into a `default`, so it reads `a` as declared only by case 1 and rejects
+  # this round trip; this repository counts the default's fields (dingtek df702's `angle`).
+  schema: "name: t\nversion: 1\nfields:\n  - match:\n      length: 1\n      var: k\n      cases:\n        1: [{name: a, type: u8}]\n        2:\n          - match:\n              field: $k\n              cases:\n                9: [{name: b, type: u8}]\n              default: [{name: a, type: u8}]\n"
+  decode:
+    payload: "0205"
+    record: '{"matches": {"/fields/0/match": {"case": 2, "value": 2}, "/fields/0/match/cases/2/0/match": {"case": "default", "value": 2}}, "internal": {}, "flagged": {}}'
+    round_trip: true
+  encode:
+    - input: '{"a": 5}'
+      record: decoded
+      payload: "0205"
+
+- name: a_name_declared_outside_the_match_is_still_only_another_cases
+  # CR-2026-164: "only another case declares" is read within the match. `b` is also a field
+  # of the message outside it, and the input giving it against case 1 is still rejected.
+  schema: "name: t\nversion: 1\nfields:\n  - {name: _k, type: u8}\n  - match:\n      field: $_k\n      cases:\n        1: [{name: a, type: u8}]\n        2: [{name: b, type: u8}]\n  - {name: b, type: u8}\n"
+  decode:
+    payload: "010507"
+    record: '{"matches": {"/fields/1/match": {"case": 1, "value": 1}}, "internal": {"/fields/0": 1}, "flagged": {}}'
+  encode:
+    - input: '{"a": 5, "b": 7}'
+      record: decoded
+      error: "Field an unnamed match: the input gives 'b', which only another case declares, against the recorded case (PS-573)"
+
+# --- flagged and byte_group ---------------------------------------------------------------
+
+- name: flagged_writes_its_flags_from_the_groups_given
+  schema: "name: f\nversion: 1\nfields:\n  - {name: flags, type: u8}\n  - flagged:\n      field: flags\n      groups:\n        - bit: 0\n          fields: [{name: t, type: u8}]\n        - bit: 1\n          fields: [{name: h, type: u8}]\n"
+  decode:
+    payload: "030507"
+    record: '{"matches": {}, "internal": {}, "flagged": {"/fields/1/flagged": 3}}'
+    round_trip: true
+  encode:
+    - input: '{"h": 7}'
+      payload: "0207"
+
+- name: an_internal_flags_field_comes_from_the_record
+  schema: "name: f\nversion: 1\nfields:\n  - {name: _flags, type: u8}\n  - flagged:\n      field: _flags\n      groups:\n        - bit: 0\n          fields: [{name: t, type: u8}]\n        - bit: 1\n          fields: [{name: h, type: u8}]\n"
+  decode:
+    payload: "830507"
+    record: '{"matches": {}, "internal": {"/fields/0": 131}, "flagged": {"/fields/1/flagged": 131}}'
+    round_trip: true
+
+- name: a_byte_group_assembles_its_members
+  schema: "name: b\nversion: 1\nfields:\n  - byte_group:\n      fields:\n        - {name: a, type: \"u8[0:3]\"}\n        - {name: _r, type: \"u8[4:5]\"}\n        - {name: \"on\", type: bool, bit: 7}\n  - {name: c, type: u8}\n"
+  decode:
+    payload: "a709"
+    record: '{"matches": {}, "internal": {"/fields/0/byte_group/fields/1": 2}, "flagged": {}}'
+    round_trip: true
+  encode:
+    - input: '{"a": 7, "on": true, "c": 9}'
+      error: "_r"
+
+# --- The prototype's four reused schemas, round-tripped through the record ----------------
+
+- name: dispatch_on_length_two_bytes
+  schema: "name: t\nversion: 1\nfields:\n  - match:\n      remaining: true\n      cases:\n        2: [{name: cfg, type: u16}]\n        3: [{name: a, type: u8}, {name: b, type: u16}]\n"
+  decode:
+    payload: "0102"
+    record: '{"matches": {"/fields/0/match": {"case": 2, "value": 2}}, "internal": {}, "flagged": {}}'
+    round_trip: true
+
+- name: dispatch_on_length_three_bytes
+  schema: "name: t\nversion: 1\nfields:\n  - match:\n      remaining: true\n      cases:\n        2: [{name: cfg, type: u16}]\n        3: [{name: a, type: u8}, {name: b, type: u16}]\n"
+  decode:
+    payload: "010203"
+    round_trip: true
+
+- name: the_clause_5_example_round_trips
+  schema: "name: r8\nversion: 1\nfields:\n  - match:\n      length: 1\n      var: report_type\n      cases:\n        0: [{name: version, type: u8}]\n      default:\n        - {name: volt, type: u8, div: 10}\n        - match:\n            field: $report_type\n            default: skip\n            cases:\n              1: [{name: temp, type: s16, div: 100}]\n"
+  decode:
+    payload: "011e0a28"
+    round_trip: true
+
+- name: the_clause_5_version_report_round_trips
+  schema: "name: r8\nversion: 1\nfields:\n  - match:\n      length: 1\n      var: report_type\n      cases:\n        0: [{name: version, type: u8}]\n      default:\n        - {name: volt, type: u8, div: 10}\n        - match:\n            field: $report_type\n            default: skip\n            cases:\n              1: [{name: temp, type: s16, div: 100}]\n"
+  decode:
+    payload: "0007"
+    record: '{"matches": {"/fields/0/match": {"case": 0, "value": 0}}, "internal": {}, "flagged": {}}'
+    round_trip: true
+
+# --- An internal value the record supplies (PS-434 without the record) -------------------
+
+- name: an_internal_value_only_the_record_has
+  # Without the record the internal byte is PS-434's error; with it the frame round-trips.
+  schema: "name: t\nversion: 1\nfields:\n  - {name: _hw, type: u8}\n  - {name: v, type: u16, div: 10}\n"
+  decode:
+    payload: "07012c"
+    record: '{"matches": {}, "internal": {"/fields/0": 7}, "flagged": {}}'
+    round_trip: true
+  encode:
+    - input: '{"v": 30}'
+      error: "_hw"
+    - input: '{"v": 30}'
+      record: decoded
+      payload: "07012c"

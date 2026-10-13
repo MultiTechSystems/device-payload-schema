@@ -110,7 +110,7 @@ func TestCR123TwoArraysAndTheMetaIdentity(t *testing.T) {
 	if got := asJSON(t, out); got != `{"codes":["1.8.1","2.8.1"],"values":[123,456]}` {
 		t.Errorf("decode = %s", got)
 	}
-	want := `{"element":{"type":"u32"},"identity":{"open":true,"repeat":"codes","values":["1.8.1","2.8.1","${value}"]},"type":"repeat"}`
+	want := `{"element":{"reports":"integer","type":"u32"},"identity":{"open":true,"repeat":"codes","values":["1.8.1","2.8.1","${value}"]},"reports":"array","type":"repeat"}`
 	if got := asJSON(t, meta); got != want {
 		t.Errorf("_meta = %s\nwant %s", got, want)
 	}

@@ -121,6 +121,67 @@ def test_the_generated_encoder_matches_the_reference_on_the_corpus():
     )
 
 
+RECORD_RUNNER = """
+var C = %s, O = [];
+C.forEach(function (c) {
+  var o = {};
+  try {
+    var e = encodeDownlink({ data: c.d, fPort: c.p });
+    if (e.errors.length) o.error = e.errors[0]; else o.bytes = e.bytes;
+  } catch (x) { o.error = "threw: " + x; }
+  O.push(o);
+});
+process.stdout.write(JSON.stringify(O));
+"""
+
+
+def test_the_generated_encoder_follows_the_decode_record_as_the_reference_does():
+    """CR-2026-162 (PS-573): the reference's interpreter output, `_decode` included, given
+    to the runtime encoder and to the reference encoder, gives the same bytes - or both
+    fail. The codec never produces a record (PS-467); it follows one it is given."""
+    compared = same = 0
+    differ = []
+    for rel, schema, vectors in corpus_schemas():
+        cases, expected = [], []
+        for vector in vectors:
+            payload = bytes.fromhex(str(vector["payload"]).replace(" ", ""))
+            fport = vector.get("fPort") or vector.get("fport")
+            interpreter = SchemaInterpreter(schema)
+            decoded = interpreter.interpret(payload, fport, decode_record=True)
+            if not decoded.success:
+                continue
+            result = SchemaInterpreter(schema).encode(decoded.data, fport)
+            want = None if result.errors else list(result.payload)
+            cases.append({"d": decoded.data, "p": fport})
+            expected.append((vector.get("name"), want))
+        if not cases:
+            continue
+        code = TS013Generator(schema).generate()
+        out = subprocess.run(
+            ["node"],
+            input=code + RECORD_RUNNER % json.dumps(cases),
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        for (name, want), got in zip(expected, json.loads(out.stdout)):
+            compared += 1
+            if (want is None and "error" in got) or (
+                want is not None and got.get("bytes") == want
+            ):
+                same += 1
+            else:
+                differ.append(
+                    "%s::%s reference %s, generated %s" % (rel, name, want, got)
+                )
+    assert compared > 2000, compared
+    assert not differ, "%d of %d differ:\n  %s" % (
+        len(differ),
+        compared,
+        "\n  ".join(differ[:40]),
+    )
+
+
 def encode(schema, data, fport=None):
     code = TS013Generator(schema).generate()
     script = code + "\nprocess.stdout.write(JSON.stringify(encodeDownlink(%s)));" % (

@@ -29,7 +29,8 @@ test_vectors:
   expected_meta:
     schema: probe_repeat_element_named
     fields:
-      n: {type: u8}
+      n: {type: u8, reports: integer}
       readings:
         type: repeat
-        element: {type: s16, unit: Cel}
+        reports: array
+        element: {type: s16, reports: number, unit: Cel}

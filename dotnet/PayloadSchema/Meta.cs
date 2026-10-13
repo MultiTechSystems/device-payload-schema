@@ -25,7 +25,7 @@ public record InputContext(int? FPort = null, object? RecvTime = null, string? D
 /// from - because the typed model has already dropped what `_meta` reports: whether a
 /// key was present, lookup labels in schema order, the declared type spelling.
 /// </summary>
-public static class Meta
+public static partial class Meta
 {
     /// <summary>Alias type names written as their canonical name (PS-493).</summary>
     static readonly Dictionary<string, string> TypeAliases = BuildAliases();
@@ -130,7 +130,7 @@ public static class Meta
     }
 
     /// <summary>A mapping key as the text Python's str() gives the resolved key.</summary>
-    static string KeyText(YamlNode key) => key is YamlScalarNode s ? PyStr(Scalar(s)) : key.ToString() ?? "";
+    internal static string KeyText(YamlNode key) => key is YamlScalarNode s ? PyStr(Scalar(s)) : key.ToString() ?? "";
 
     static YamlNode? Get(YamlMappingNode? map, string key)
     {
@@ -268,7 +268,8 @@ public static class Meta
                         };
                         found[label] = new YamlMappingNode(
                             new YamlScalarNode("name"), new YamlScalarNode(label) { Style = ScalarStyle.DoubleQuoted },
-                            new YamlScalarNode("type"), new YamlScalarNode($"u{8 * width}") { Style = ScalarStyle.DoubleQuoted });
+                            new YamlScalarNode("type"), new YamlScalarNode($"u{8 * width}") { Style = ScalarStyle.DoubleQuoted },
+                            new YamlScalarNode("_reports"), new YamlScalarNode("integer") { Style = ScalarStyle.DoubleQuoted });  // PS-570
                     }
                 }
                 if (Value(f, "type") is "match" && Get(f, "cases") is YamlMappingNode legacy)
@@ -396,6 +397,8 @@ public static class Meta
         var declaredType = MetaType(field);
         if (declaredType != null)
             entry["type"] = declaredType;
+        if (ReportsOf(field) is { } reports)
+            entry["reports"] = reports;    // PS-570
         var senml = Get(field, "senml") as YamlMappingNode;
         var senmlUnit = Value(senml, "unit");
         var unit = Truthy(senmlUnit) ? senmlUnit : Value(field, "unit");      // PS-178

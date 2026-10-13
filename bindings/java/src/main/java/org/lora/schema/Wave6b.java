@@ -24,7 +24,7 @@ final class Wave6b {
     private Wave6b() {}
 
     /** Names clause 7 reserves for interpreter metadata (PS-176, PS-433). */
-    static final List<String> RESERVED_OUTPUT_NAMES = List.of("_meta", "_quality", "_warnings");
+    static final List<String> RESERVED_OUTPUT_NAMES = List.of("_meta", "_quality", "_warnings", "_decode");
 
     private static final Pattern INTEGER = Pattern.compile("-?\\d+");
 

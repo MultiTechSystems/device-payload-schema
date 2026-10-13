@@ -120,6 +120,42 @@ on `unit`, `senml` and `ipso`, or the schema is rejected at load. No corpus sche
 `make gate-verdicts` compares every corpus vector's `_meta` across Python, Go, Java and C#
 (rule 3). A test vector may pin it with `expected_meta`, which is compared exactly.
 
+
+### The decode record (`_decode`, PS-572 to PS-574)
+
+Asked for, the interpreter output also carries `_decode`, the record of what one decode
+chose. It is not information about the device; it is what an encoder needs to write the
+same bytes back without inferring them: the case each `match` took and the discriminator
+it read, each internal field's value, and each `flagged` construct's flags.
+
+```json
+"_decode": {
+  "matches":  {"/fields/0/match": {"case": "default", "value": 1},
+               "/fields/0/match/default/1/match": {"case": 1, "value": 1}},
+  "internal": {"/fields/2": 3},
+  "flagged":  {"/fields/4/flagged": 5}
+}
+```
+
+Each key is an RFC 6901 JSON Pointer into the `$ref`-expanded schema, with an occurrence
+index after each node that repeats: `/fields/5/repeat[2]/fields/1/match`, a tlv entry in
+payload order `/fields/0/tlv[4]/cases/103/0/match`, a record `.../records/1[0]/...`.
+
+| Language | Decode with the record | Encode following it |
+|---|---|---|
+| Python | `interpret(payload, fPort, decode_record=True)` | `encode(data, fPort, decode_record=rec)`, or `data["_decode"]` |
+| Go | `s.Interpret(payload, schema.InputContext{DecodeRecord: true})` | `s.EncodeWithRecord(data, fPort, rec)`, or `data["_decode"]` |
+| Java | `schema.interpret(payload, ctx, true)` | `encode(data, rec)`, `encodeWithPort(data, port, dir, rec)`, or `_decode` in data |
+| C# | `SchemaDecoder.Interpret(schema, payload, ctx, decodeRecord: true)` | `SchemaEncoder.Encode(schema, data, decodeRecord: rec)`, or `_decode` in data |
+| TS013 codec | never produced (PS-467) | `encodeDownlink({data: {..., _decode: rec}})` |
+
+`decode()` never carries it. An encoder given the record writes each recorded
+discriminator, takes each recorded case and supplies each recorded internal value and flags
+value where the input gives none. It rejects input that contradicts the record (PS-573).
+Where neither the input nor the record settles a match's case, the encoders here derive it
+(PS-551, PS-563, PS-564), which PS-574 makes optional. The C interpreter produces no
+`_meta` and no record.
+
 ---
 
 ## 2. IPSO Smart Objects Format

@@ -104,6 +104,9 @@ type corpusMetaEntry struct {
 	Index  int    `json:"index"`
 	Vector string `json:"vector"`
 	Meta   any    `json:"meta"`
+	// Decode is the vector's decode record (CR-2026-162, PS-572), from the same
+	// interpretation; tools/verdicts-gate.py's rule 4 compares it with the reference's.
+	Decode any `json:"decode"`
 }
 
 type corpusMetaReport struct {
@@ -118,10 +121,14 @@ func newCorpusMetaReport() *corpusMetaReport {
 func (r *corpusMetaReport) enabled() bool { return r.path != "" }
 
 func (r *corpusMetaReport) add(schema string, index int, vector string, meta any) {
+	r.addWithRecord(schema, index, vector, meta, nil)
+}
+
+func (r *corpusMetaReport) addWithRecord(schema string, index int, vector string, meta, record any) {
 	if r.path == "" {
 		return
 	}
-	r.entries = append(r.entries, corpusMetaEntry{schema, index, vector, meta})
+	r.entries = append(r.entries, corpusMetaEntry{schema, index, vector, meta, record})
 }
 
 func (r *corpusMetaReport) write(t *testing.T) {

@@ -214,6 +214,14 @@ func deriveInputs(fields []Field, data map[string]any, ctx *EncodeContext) (map[
 		v, ok := derived[name]
 		return !ok || v == nil
 	}
+	if ctx.trace != nil {
+		// PS-573: what the decode record supplies, before anything is derived.
+		set("", nil)
+		delete(derived, "")
+		if err := recordedInputs(fields, data, derived, ctx.trace); err != nil {
+			return nil, err
+		}
+	}
 	for _, f := range fields {
 		switch {
 		case f.Type == TypeRepeat || f.Type == TypeRepeatLower:
@@ -251,6 +259,15 @@ func deriveInputs(fields []Field, data map[string]any, ctx *EncodeContext) (map[
 				if flaggedGroupGiven(group, data) {
 					bits |= 1 << uint(group.Bit)
 				}
+			}
+			if _, recorded := recordedFlags(f.Flagged, ctx); recorded && data[name] == nil {
+				// PS-573: the record's flags; the groups written are the ones they set
+				// (encodeFlagged), so there is nothing to check.
+				if absent(name) {
+					flags, _ := recordedFlags(f.Flagged, ctx)
+					set(name, float64(flags))
+				}
+				continue
 			}
 			given, present := derived[name]
 			if !present || given == nil {

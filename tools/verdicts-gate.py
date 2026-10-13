@@ -29,6 +29,14 @@ Two rules, both failing the gate:
 A vector with no payload (an encode vector, PS-047) is `skip` in every runner and is never
 a divergence.
 
+Two more, for Go, Java and C#, read from the `_meta` report each runner writes beside its
+verdicts (CORPUS_META_REPORT):
+
+3. Every vector's interpreter `_meta` equals the reference's (CR-2026-096).
+4. Every vector's decode record, `_decode`, equals the reference's (CR-2026-162, PS-572):
+   each entry of the report carries it as `decode`, from the same interpretation asked for
+   with the record.
+
 Usage:
     python3 tools/verdicts-gate.py --run                     # drive all five, gate
     python3 tools/verdicts-gate.py --run --base origin/master --only-changed
@@ -305,11 +313,12 @@ def meta_report_path(report: str) -> str:
 
 
 def python_meta_report(
-    root: Path, only: Optional[Set[str]]
+    root: Path, only: Optional[Set[str]], table: str = "_meta"
 ) -> Dict[Key, Optional[dict]]:
     """The reference interpreter's `_meta` for every vector with a payload: the vector's
     fPort and its input_metadata as the input context (PS-495), None where the decode
-    fails (PS-497)."""
+    fails (PS-497). With `table="_decode"`, its decode record (PS-572) instead: the same
+    interpretation, asked for with decode_record."""
     sys.path.insert(0, str(REPO_ROOT / "tools"))
     import yaml  # noqa: E402
     from schema_interpreter import SchemaInterpreter  # noqa: E402
@@ -334,17 +343,63 @@ def python_meta_report(
                     bytes.fromhex(str(vector["payload"]).replace(" ", "")),
                     fPort=vector.get("fPort", vector.get("fport")),
                     input_metadata=vector.get("input_metadata"),
+                    decode_record=table == "_decode",
                 )
             except Exception:  # noqa: BLE001 - a crash is a failed decode here
                 out[(rel, index)] = None
                 continue
-            out[(rel, index)] = result.data.get("_meta") if result.success else None
+            out[(rel, index)] = result.data.get(table) if result.success else None
     return out
 
 
-def load_meta_report(path: Path) -> Dict[Key, Optional[dict]]:
+def load_meta_report(path: Path, key: str = "meta") -> Dict[Key, Optional[dict]]:
+    """A runner's `_meta` report; with `key="decode"`, the decode records it carries."""
     entries = json.loads(path.read_text())
-    return {(e["schema"], int(e["index"])): e.get("meta") for e in entries}
+    return {(e["schema"], int(e["index"])): e.get(key) for e in entries}
+
+
+def json_same(want, got) -> bool:
+    """JSON values equal, numbers by value: 1 and 1.0 alike, a boolean only a boolean."""
+    if isinstance(want, bool) or isinstance(got, bool):
+        return want is got
+    if isinstance(want, (int, float)) and isinstance(got, (int, float)):
+        return want == got
+    if isinstance(want, dict) and isinstance(got, dict):
+        return want.keys() == got.keys() and all(json_same(want[k], got[k]) for k in want)
+    if isinstance(want, list) and isinstance(got, list):
+        return len(want) == len(got) and all(json_same(a, b) for a, b in zip(want, got))
+    return want == got
+
+
+def decode_record_differences(
+    reference: Dict[Key, Optional[dict]], other: Dict[Key, Optional[dict]]
+) -> List[Tuple[Key, str]]:
+    """Rule 4 (CR-2026-162): every vector's `_decode`, compared exactly with the
+    reference's - each location, case key, discriminator, internal value and flags."""
+    problems = []
+    for key in sorted(set(reference) | set(other)):
+        want, got = reference.get(key, "missing"), other.get(key, "missing")
+        if want == "missing" or got == "missing":
+            problems.append((key, "no _decode entry in %s" % (
+                "the reference" if want == "missing" else "this report")))
+            continue
+        if not json_same(want, got):
+            for table in ("matches", "internal", "flagged"):
+                w = (want or {}).get(table) or {}
+                g = (got or {}).get(table) or {}
+                for where in sorted(set(w) | set(g)):
+                    if not json_same(w.get(where, "missing"), g.get(where, "missing")):
+                        problems.append((key, "%s %s: reference %s, this %s" % (
+                            table, where, json.dumps(w.get(where, "missing")),
+                            json.dumps(g.get(where, "missing")))))
+                        break
+                else:
+                    continue
+                break
+            else:
+                problems.append((key, "reference %s, this %s" % (
+                    json.dumps(want), json.dumps(got))))
+    return problems
 
 
 def meta_differences(
@@ -698,6 +753,34 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             else:
                 print(
                     "  %s: identical to python on all %d" % (impl, len(reference_meta))
+                )
+
+        # Rule 4 (CR-2026-162): the decode record, vector by vector, is the reference's
+        # in every interpreter that produces it. The runners write it beside `_meta`.
+        reference_record = python_meta_report(
+            meta_root, set(only) if only is not None else None, table="_decode"
+        )
+        print("\n_decode (rule 4), %d vector(s):" % len(reference_record))
+        for impl in meta_impls:
+            path = reports_dir / ("%s.meta.json" % impl)
+            if not path.exists():
+                continue                # reported under rule 3
+            other = load_meta_report(path, key="decode")
+            if only is not None:
+                other = {k: v for k, v in other.items() if k[0] in only}
+            problems = decode_record_differences(reference_record, other)
+            if problems:
+                ok = False
+                print(
+                    "  FAIL: %s differs from python on %d vector(s):"
+                    % (impl, len(problems))
+                )
+                for (schema, index), detail in problems[:20]:
+                    print("    %s [%d]: %s" % (schema, index, detail))
+            else:
+                print(
+                    "  %s: identical to python on all %d"
+                    % (impl, len(reference_record))
                 )
 
     baseline_path = Path(args.baseline)

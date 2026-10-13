@@ -143,7 +143,7 @@ public class CR2026121123126Test {
         assertEquals("codes", identity.get("repeat"));
         assertEquals(List.of("1.8.1", "2.8.1", "${value}"), identity.get("values"));
         assertEquals(Boolean.TRUE, identity.get("open"));
-        assertEquals(List.of("type", "element", "identity"), new ArrayList<>(entry.keySet()));
+        assertEquals(List.of("type", "reports", "element", "identity"), new ArrayList<>(entry.keySet()));
     }
 
     @Test

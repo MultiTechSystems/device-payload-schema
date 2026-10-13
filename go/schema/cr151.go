@@ -117,7 +117,7 @@ func nestedDiscriminator(field Field, data map[string]any, label string) (int64,
 		return 0, nil, "", false, nil
 	}
 	if len(filled) != 1 {
-		return 0, nil, "", false, missingFieldError(label)
+		return 0, nil, "", false, undeterminedCaseError(label)
 	}
 	raw := filled[0].c.Case
 	if raw == nil {
@@ -125,7 +125,7 @@ func nestedDiscriminator(field Field, data map[string]any, label string) (int64,
 	}
 	value, single := exactCaseValue(filled[0].c)
 	if !single {
-		return 0, nil, "", false, missingFieldError(label)
+		return 0, nil, "", false, undeterminedCaseError(label)
 	}
 	for _, step := range filled[0].path {
 		selected := -1
@@ -146,7 +146,7 @@ func nestedDiscriminator(field Field, data map[string]any, label string) (int64,
 			selected = -1
 		}
 		if selected != step.branch {
-			return 0, nil, "", false, missingFieldError(label)
+			return 0, nil, "", false, undeterminedCaseError(label)
 		}
 	}
 	outer := filled[0].path[0]

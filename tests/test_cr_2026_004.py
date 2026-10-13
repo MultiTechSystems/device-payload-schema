@@ -77,7 +77,7 @@ name: with_default
 fields:
   - name: state
     type: u8
-    lookup: {1: on, default: unknown}
+    lookup: {1: "on", default: unknown}
 """
         assert decoded(schema, "09") == {"state": "unknown"}
 

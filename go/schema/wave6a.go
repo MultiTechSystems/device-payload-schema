@@ -157,7 +157,7 @@ func elementRepeatError(f map[string]any) error {
 // Interpreter metadata beside it is not the value.
 func elementValue(record map[string]any) any {
 	for key, value := range record {
-		if key != "_quality" && key != "_warnings" && key != "_meta" {
+		if key != "_quality" && key != "_warnings" && key != "_meta" && key != "_decode" {
 			return value
 		}
 	}
@@ -624,7 +624,9 @@ func (r *repeatElements) element() error {
 	savedRecords := ctx.pendingRecords
 	records := []map[string]any{}
 	ctx.pendingRecords = &records
+	pushed := ctx.trace.pushNode(r.field.decl, "", "repeat", r.iterations) // PS-572
 	element, err := decodeFields(r.field.Fields, ctx)
+	ctx.trace.pop(pushed)
 	ctx.pendingRecords = savedRecords
 	keep := true
 	if err == nil {

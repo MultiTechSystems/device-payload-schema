@@ -44,16 +44,19 @@ test_vectors:
   expected_meta:
     schema: probe_sampled_history
     fields:
-      period: {type: u16}
+      period: {type: u16, reports: integer}
       recent:
         type: repeat
-        element: {type: u16, unit: ug/m3}
+        reports: array
+        element: {type: u16, reports: integer, unit: ug/m3}
         sampled: {interval: {field: period}, order: newest_first, at: rx_time}
       older:
         type: repeat
-        element: {type: u16, unit: ug/m3}
+        reports: array
+        element: {type: u16, reports: integer, unit: ug/m3}
         sampled: {interval: {configured: history_period}, order: oldest_first, at: rx_time}
       daily:
         type: repeat
-        element: {type: u8}
+        reports: array
+        element: {type: u8, reports: integer}
         sampled: {interval: 86400, order: newest_first, at: rx_time}

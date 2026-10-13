@@ -215,11 +215,11 @@ func TestCorpusConformance(t *testing.T) {
 			var interpretErr error
 			if metaReport.enabled() || vector.ExpectedMeta != nil {
 				interpreted, interpretErr = corpusInterpret(parsed, vector, payload)
-				var produced any
+				var produced, record any
 				if interpretErr == nil {
-					produced = interpreted["_meta"]
+					produced, record = interpreted["_meta"], interpreted["_decode"]
 				}
-				metaReport.add(rel, index, vector.Name, produced)
+				metaReport.addWithRecord(rel, index, vector.Name, produced, record)
 			}
 			// Recover per vector: a panic in the decoder is a defect to report, not
 			// a reason to abandon the remaining vectors.
@@ -458,7 +458,9 @@ func corpusInterpret(parsed *Schema, vector corpusVector, payload []byte) (out m
 			err = fmt.Errorf("panic: %v", recovered)
 		}
 	}()
-	return parsed.Interpret(payload, corpusInputContext(vector))
+	in := corpusInputContext(vector)
+	in.DecodeRecord = true // CR-2026-162: the report carries `_decode` beside `_meta`
+	return parsed.Interpret(payload, in)
 }
 
 // corpusMetaMatches is validate_schema.meta_matches: `_meta` exactly as expected. The
