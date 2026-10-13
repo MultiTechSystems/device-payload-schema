@@ -3416,6 +3416,11 @@ Known weaknesses, so you neither trip over them nor assume they are intentional:
   `raw`, ...) and no medium that lacks a TTN path (`internal`, `leaf`, `board`, ...).
   The old name-to-object table, under which `battery`, `voltage`, `current` or
   `latitude` each demanded an object, is gone. A unit never selects an object (IL-203).
+  A field whose `lookup` reports text (string labels, or only a `${value}` default) is a
+  label, not a reading, so a quantity word in its name asks for nothing
+  (`temperature_sensor_status`, `temperature_unit`); a lookup with numeric labels feeds
+  arithmetic and its field stays a reading (`lookup_reports_text`). This replaced the
+  `sensor: none` opt-out; the IL agreed the scorer may refine IL-204 this way.
   A generic object (3300, 3320, 3325, 3332) is never a mismatch (IL-199). A
   name-silent field's annotation is neither expected nor flagged. See
   `docs/IPSO-REFERENCE.md`. **A schema with no field IL-204 places gets half the

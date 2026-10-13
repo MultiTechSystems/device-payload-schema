@@ -112,6 +112,18 @@ class TestSensorDetection:
         assert detect_sensor(field) is None
         assert classify_il204(field).step == "labelled"
 
+    def test_a_numeric_lookup_is_still_a_reading(self):
+        """Numeric labels feed arithmetic (Elvaco's exponent table): still a reading."""
+        field = {"name": "temperature", "type": "u8", "lookup": {0: 0.001, 1: 0.01}}
+        assert classify_il204(field).step != "labelled"
+        assert detect_sensor(field) == ("temperature", 3303)
+
+    def test_a_value_template_default_is_a_label(self):
+        """A lookup listing no label but a `${value}` default reports a string."""
+        field = {"name": "temperature_mode", "type": "u8",
+                 "lookup": {"default": "mode ${value}"}}
+        assert classify_il204(field).step == "labelled"
+
     def test_the_sensor_key_is_not_read(self):
         """`sensor:` is outside the key vocabulary (PS-448) and changes nothing."""
         assert detect_sensor({"name": "probe_a", "type": "u16", "sensor": "humidity"}) is None

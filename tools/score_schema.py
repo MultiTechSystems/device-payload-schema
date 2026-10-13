@@ -893,11 +893,30 @@ def il204_words(field_name: str) -> List[str]:
     return _name_tokens(field_name)
 
 
+def lookup_reports_text(lookup: Any) -> bool:
+    """True where a lookup reports text: every label it lists is a string, or it lists
+    none and its `default` is a `${value}` template (which yields a string).
+
+    A lookup whose labels are numbers feeds arithmetic - Elvaco's exponent table - and
+    its field stays a reading, keeping its IPSO and SenML demands.
+    """
+    if isinstance(lookup, list):
+        labels, default = lookup, None
+    elif isinstance(lookup, dict):
+        labels = [v for k, v in lookup.items() if str(k) != 'default']
+        default = lookup.get('default')
+    else:
+        return False
+    if labels:
+        return all(isinstance(v, str) for v in labels)
+    return isinstance(default, str) and '${value}' in default
+
+
 def classify_il204(field: Dict[str, Any]) -> Il204Placement:
     """Place a field by IL-204's steps 2 and 3 (step 1 is `field_map`, which a
     schema does not carry).
 
-    A field with a `lookup` reports a label, not a measured value, so it is not a
+    A field whose `lookup` reports text is a label, not a measured value, so it is not a
     reading whatever its name says: `temperature_sensor_status` with the labels
     "read error" and "out of range" is a status. This stands where an earlier
     revision read a `sensor: none` hint, which the key vocabulary does not
@@ -908,7 +927,7 @@ def classify_il204(field: Dict[str, Any]) -> Il204Placement:
     if qualifier is not None:
         return Il204Placement('qualifier', word=qualifier)
 
-    if field.get('lookup') is not None:
+    if lookup_reports_text(field.get('lookup')):
         return Il204Placement('labelled')
     quantity = next((w for w in words if w in IL204_QUANTITY_PATHS), None)
     if quantity is None:
