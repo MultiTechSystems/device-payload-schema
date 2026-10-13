@@ -52,14 +52,6 @@
           "type": "number",
           "description": "Add this offset to raw value"
         },
-        "formula": {
-          "type": "string",
-          "description": "Custom formula using 'x' for raw value and $field for cross-references"
-        },
-        "encode_formula": {
-          "type": "string",
-          "description": "Custom inverse formula for encoding (Phase 3)"
-        },
         "unit": {
           "type": "string",
           "description": "Engineering unit (e.g., degC, %RH, mV)"
@@ -249,12 +241,12 @@
           "type": "integer",
           "minimum": 0,
           "default": 1000,
-          "description": "`type: repeat`: iteration ceiling, a guard against a malformed payload. Honoured by the four interpreters and not read by the TS013 generator, which relies on its own no-progress check instead."
+          "description": "`type: repeat` only; on any other field `max` is withdrawn - declare a value range with `valid_range` (CR-2026-159). Iteration ceiling, a guard against a malformed payload. Honoured by the four interpreters and not read by the TS013 generator, which relies on its own no-progress check instead."
         },
         "min": {
           "type": "integer",
           "minimum": 0,
-          "description": "`type: repeat`: fewest iterations that count as a valid decode; fewer is an error. Honoured by the four interpreters, not read by the TS013 generator."
+          "description": "`type: repeat` only; on any other field `min` is withdrawn - declare a value range with `valid_range` (CR-2026-159). Fewest iterations that count as a valid decode; fewer is an error. Honoured by the four interpreters, not read by the TS013 generator."
         },
           "reserve": {
             "type": "integer",

@@ -130,7 +130,8 @@ public class Schema {
         schema.endian = (String) raw.getOrDefault("endian", "big");
         schema.direction = (String) raw.get("direction");
         checkPortDeclarations(raw);
-        
+        Cr159.checkPorts(raw);             // CR-2026-159
+
         // Parse fields, splicing any `$ref` into the list first.
         Object fieldsRaw = raw.get("fields");
         if (fieldsRaw instanceof List) {
@@ -197,6 +198,7 @@ public class Schema {
             if ((rawType == null || String.valueOf(rawType).isBlank()) && !hasConstruct(fm)) {
                 throw new SchemaException("Field '" + fm.get("name") + "' declares no type");
             }
+            Cr159.checkField(fm);              // CR-2026-159
             checkBytesFormat(fm);
             if (fm.containsKey("byte_group")) checkByteGroup(fm);        // PS-070, PS-397
             checkCaseBodies(fm);               // PS-441
@@ -688,7 +690,7 @@ public class Schema {
 
     /** The stages PS-098 and the PS-115 table define, by name; {@code op} names one instead. */
     private static final List<String> TRANSFORM_OPERATIONS = List.of("add", "mult", "div",
-            "sqrt", "abs", "pow", "log10", "log", "floor", "ceiling", "clamp", "op");
+            "sqrt", "abs", "pow", "log10", "log", "floor", "ceiling", "op");
     /** Parameters of an {@code op:} stage, part of its one operation (PS-452). */
     private static final List<String> TRANSFORM_OP_PARAMETERS = List.of("decimals", "ties");
 
@@ -737,6 +739,9 @@ public class Schema {
         @SuppressWarnings("unchecked")
         Map<String, Object> stage = (Map<String, Object>) rawStage;
         String at = "Field '" + fieldName + "' transform stage " + stage + ": ";
+        if (stage.containsKey("clamp")) {
+            throw new SchemaException(Cr159.CLAMP);     // CR-2026-159
+        }
         if (stage.containsKey("round")) {
             throw new SchemaException(at + "`{round: n}` is not a transform stage; write "
                     + "{op: round, decimals: n} (PS-390)");
@@ -877,7 +882,6 @@ public class Schema {
         f.setVar((String) fm.get("var"));
         f.setOn((String) fm.get("on"));
         f.setValue(fm.get("value"));
-        f.setFormula((String) fm.get("formula"));
 
         // Enumeration type: base integer plus an integer-to-name mapping (PS-067),
         // with `default` naming what an unmapped value reports (PS-068). None of
@@ -963,9 +967,6 @@ public class Schema {
                     if (tm.containsKey("pow")) t.setPow(toDouble(tm.get("pow")));
                     if (tm.containsKey("floor")) t.setFloor(toDouble(tm.get("floor")));
                     if (tm.containsKey("ceiling")) t.setCeiling(toDouble(tm.get("ceiling")));
-                    if (tm.get("clamp") instanceof List<?> bounds && bounds.size() == 2) {
-                        t.setClamp(new double[] {toDouble(bounds.get(0)), toDouble(bounds.get(1))});
-                    }
                     if (tm.containsKey("ties")) t.setTies(String.valueOf(tm.get("ties")));
                     transforms.add(t);
                 }
@@ -1990,7 +1991,7 @@ public class Schema {
     }
 
     /**
-     * What happens to a value once it is read: formula or modifiers, lookup, and the
+     * What happens to a value once it is read: modifiers, lookup, and the
      * field's variable. Split out so a byte_group member, whose value comes from the
      * group's assembled bytes (PS-364), runs the same pipeline.
      */
@@ -2006,16 +2007,12 @@ public class Schema {
     private Object applyGroupMember(Object value, Field field, DecodeContext ctx, boolean fieldRules,
             boolean asDeclared) {
         ctx.clearLookup(field);
-        // Apply formula if present (takes precedence). A computed field has already
+        // A computed field has already
         // had its own arithmetic applied by decodeComputed, in the order the
         // interpreter uses: polynomial, then modifiers, then transform. Running the
         // block below over it again would apply the modifiers twice, and would apply
         // them to a guard's fallback, which must be reported as declared.
-        if (field.getFormula() != null && !field.getFormula().isEmpty() && field.getType() != FieldType.NUMBER) {
-            if (value instanceof Number) {
-                value = FormulaEvaluator.evaluate(field.getFormula(), ((Number) value).doubleValue(), ctx);
-            }
-        } else if (reportsAsInteger(field)) {
+        if (reportsAsInteger(field)) {
             // PS-293, PS-294: an integer-typed field carrying no modifier keeps the exact
             // long it was read as. The doubleValue() below is what used to lose it - a u64
             // of 2^53+1 came back as 9007199254740992.
@@ -2135,8 +2132,7 @@ public class Schema {
                 return false;
         }
         return field.getMult() == null && field.getDiv() == null && field.getAdd() == null
-                && (field.getTransform() == null || field.getTransform().isEmpty())
-                && (field.getFormula() == null || field.getFormula().isEmpty());
+                && (field.getTransform() == null || field.getTransform().isEmpty());
     }
 
     private Object decodeMatch(Field field, DecodeContext ctx) {
@@ -3213,10 +3209,6 @@ public class Schema {
     }
 
     private Object decodeComputed(Field field, DecodeContext ctx) {
-        if (field.getFormula() != null && !field.getFormula().isEmpty()) {
-            return FormulaEvaluator.evaluate(field.getFormula(), 0, ctx);
-        }
-
         boolean computed = field.getRef() != null || field.getCompute() != null;
         if (computed && field.getGuard() != null && !guardPasses(field.getGuard(), ctx, false)) {
             // PS-444: a failing guard reports the declared fallback untouched - no
@@ -3293,10 +3285,6 @@ public class Schema {
             }
             if (stage.getFloor() != null) { value = Math.max(value, stage.getFloor()); continue; }
             if (stage.getCeiling() != null) { value = Math.min(value, stage.getCeiling()); continue; }
-            if (stage.getClamp() != null) {
-                value = Math.max(stage.getClamp()[0], Math.min(stage.getClamp()[1], value));
-                continue;
-            }
             // Unary maths stages, each exclusive of the others and of the arithmetic
             // ops, in the order the Python interpreter checks them. sqrt clamps a
             // negative input at 0 (PS-116). The log of a non-positive number has no

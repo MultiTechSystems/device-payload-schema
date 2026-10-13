@@ -1168,11 +1168,11 @@ def validate_field_list(fields: List[Dict], path: str, errors: List[str],
                     errors.append(f"{path}[{i}] ({name}): bitfield_string should have explicit 'length'")
                 continue
             
-            # Computed field (type: number - supports ref, polynomial, compute, guard, or deprecated formula)
+            # Computed field (type: number - supports ref, polynomial, compute, guard)
             if ftype == 'number':
-                has_valid_source = any(key in fld for key in ('ref', 'compute', 'formula', 'value'))
+                has_valid_source = any(key in fld for key in ('ref', 'compute', 'value'))
                 if not has_valid_source:
-                    errors.append(f"{path}[{i}] ({name}): type 'number' requires 'ref', 'compute', 'value', or deprecated 'formula'")
+                    errors.append(f"{path}[{i}] ({name}): type 'number' requires 'ref', 'compute' or 'value'")
                 
                 # Validate ref field reference
                 if 'ref' in fld:
@@ -1235,14 +1235,6 @@ def validate_field_list(fields: List[Dict], path: str, errors: List[str],
                                     if not any(op in cond for op in valid_ops):
                                         errors.append(f"{path}[{i}] ({name}): guard.when[{ci}] missing comparison operator")
                 continue
-            
-            # Formula on regular field (uses x variable) - DEPRECATED
-            if 'formula' in fld:
-                formula = fld['formula']
-                refs = re.findall(r'\$([a-zA-Z_][a-zA-Z0-9_]*)', formula)
-                for ref in refs:
-                    if ref not in known_field_names:
-                        errors.append(f"{path}[{i}] ({name}): formula references unknown field '${ref}'")
             
             # Bitfield form and bounds (PS-274, PS-275). This runs before the
             # base-type check because a withdrawn spelling like `u8:2` has a base
@@ -1332,7 +1324,7 @@ def validate_field_list(fields: List[Dict], path: str, errors: List[str],
                 # named `op` form were absent, so a schema the interpreters decode
                 # correctly was reported invalid - round-half-to-even.yaml and
                 # transform-maths.yaml are the fixtures that exercise them.
-                valid_ops = ('sqrt', 'abs', 'pow', 'floor', 'ceiling', 'clamp', 'log10',
+                valid_ops = ('sqrt', 'abs', 'pow', 'floor', 'ceiling', 'log10',
                              'log', 'round', 'op', 'add', 'mult', 'div')
                 # `op:` names the operation instead of keying it (`{op: round,
                 # decimals: 2}`), so the name needs checking too.
@@ -1354,10 +1346,6 @@ def validate_field_list(fields: List[Dict], path: str, errors: List[str],
                             errors.append(f"{path}[{i}] ({name}): transform[{ti}].floor must be a number")
                         if 'ceiling' in op_def and not isinstance(op_def['ceiling'], (int, float)):
                             errors.append(f"{path}[{i}] ({name}): transform[{ti}].ceiling must be a number")
-                        if 'clamp' in op_def:
-                            clamp = op_def['clamp']
-                            if not isinstance(clamp, list) or len(clamp) < 2:
-                                errors.append(f"{path}[{i}] ({name}): transform[{ti}].clamp must be [min, max]")
 
 
 # Types whose byte count can be "everything that is left". `length: remaining` is

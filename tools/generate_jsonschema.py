@@ -73,14 +73,6 @@ def generate_payload_schema() -> dict:
                 "type": "number",
                 "description": "Add this offset to raw value"
             },
-            "formula": {
-                "type": "string",
-                "description": "DEPRECATED: Custom formula. Use polynomial, compute, or ref+transform instead."
-            },
-            "encode_formula": {
-                "type": "string",
-                "description": "Custom inverse formula for encoding (Phase 3)"
-            },
             "ref": {
                 "type": "string",
                 "description": "Reference to another field value ($field_name) for computed fields"
@@ -140,7 +132,7 @@ def generate_payload_schema() -> dict:
                 "type": "array",
                 "items": {
                     "type": "object",
-                    "description": "Transform operation: sqrt, abs, pow, floor, ceiling, clamp, log10, log, add, mult, div"
+                    "description": "Transform operation: sqrt, abs, pow, floor, ceiling, log10, log, add, mult, div"
                 },
                 "description": "Sequential math operations to apply"
             },
