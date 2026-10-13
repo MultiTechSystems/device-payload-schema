@@ -69,8 +69,11 @@ func decodeRecords(field Field, ctx *DecodeContext, schema *Schema) error {
 	if ctx.pendingRecords == nil {
 		return errors.New("`records` belongs in a repeat's element, or a match case within it (PS-541)")
 	}
-	for _, body := range field.Records {
+	for n, body := range field.Records {
+		// PS-572: a record's location is `records/n[0]`.
+		pushed := ctx.trace.pushNode(field.decl, fmt.Sprintf("/records/%d", n), "records", 0)
 		record, err := decodeFieldsWithSchema(body, ctx, schema)
+		ctx.trace.pop(pushed)
 		if err != nil {
 			return err
 		}

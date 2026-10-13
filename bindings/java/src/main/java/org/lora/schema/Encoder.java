@@ -50,6 +50,12 @@ final class Encoder {
     private final boolean little;
     private final List<String> warnings = new ArrayList<>();
     private final List<String> errors = new ArrayList<>();
+    /** The decode record this encode follows (PS-573); null where none was given. */
+    private DecodeRecord rec;
+    /** Names whose value the record, not the input, supplied. */
+    private final Set<String> recordSupplied = new java.util.HashSet<>();
+    /** The names the encode's input gives. */
+    private final Set<String> inputNames = new java.util.HashSet<>();
 
     Encoder(Schema schema, List<Field> fields) {
         this.schema = schema;
@@ -60,7 +66,31 @@ final class Encoder {
     // --- entry point ---------------------------------------------------------------
 
     EncodeResult run(Map<String, Object> data) {
+        return run(data, null);
+    }
+
+    /**
+     * Encodes {@code data}, following {@code decodeRecord} - or, where that is null, the
+     * {@code _decode} the input carries - as PS-573 says: each recorded case, discriminator,
+     * internal value and flags value is used where the input gives none, and input that
+     * contradicts the record is rejected. Where neither the input nor the record gives a
+     * match's case, this encoder derives it (PS-551, PS-563, PS-564), as PS-574 permits.
+     * {@code _meta} describes a decode and is not input either.
+     */
+    @SuppressWarnings("unchecked")
+    EncodeResult run(Map<String, Object> data, Map<?, ?> decodeRecord) {
         Map<String, Object> input = data == null ? Map.of() : data;
+        if (input.containsKey("_decode") || input.containsKey("_meta")) {
+            if (decodeRecord == null && input.get("_decode") instanceof Map<?, ?> given) {
+                decodeRecord = given;
+            }
+            Map<String, Object> stripped = new LinkedHashMap<>(input);
+            stripped.remove("_decode");
+            stripped.remove("_meta");
+            input = stripped;
+        }
+        if (decodeRecord != null) rec = new DecodeRecord(schema.pointers(), decodeRecord);
+        inputNames.addAll(input.keySet());
         ByteBuf out = new ByteBuf();
 
         // PS-551: a value the input omits but the rest of it fixes - a repeat's count or
@@ -207,8 +237,20 @@ final class Encoder {
         final String field;
 
         MissingFieldException(String field) {
-            super(missingFieldMessage(field));
+            this(field, missingFieldMessage(field));
+        }
+
+        private MissingFieldException(String field, String message) {
+            super(message);
             this.field = field;
+        }
+
+        /**
+         * PS-574: a match whose case neither the input nor a decode record gives, and
+         * which this encoder could not derive either, named by its discriminator.
+         */
+        static MissingFieldException undetermined(String field) {
+            return new MissingFieldException(field, missingFieldMessage(field) + " (PS-574)");
         }
     }
 
@@ -244,7 +286,7 @@ final class Encoder {
             return encodeTLV(field.getTlvInline(), data);
         }
         if (field.getMatchInline() != null) {
-            return encodeMatch(field.getMatchInline(), data);
+            return encodeMatch(field.getMatchInline(), data, field.getRaw(), siblings);
         }
         if (field.getByteGroup() != null) {
             return encodeByteGroup(field, data);
@@ -443,8 +485,10 @@ final class Encoder {
      */
     private byte[] encodeFlagged(Field.FlaggedDef fd, Map<String, Object> data) {
         List<Field> members = new ArrayList<>();
+        Long recorded = recordedFlags(fd);              // PS-573: the groups its flags set
         for (Field.FlaggedGroup group : fd.getGroups()) {
-            if (!groupHasData(group, data)) continue;
+            if (recorded != null ? ((recorded >> group.getBit()) & 1) == 0
+                                 : !groupHasData(group, data)) continue;
             boolean hasConstruct = false;
             for (Field gf : group.getFields()) {
                 if (gf.getName() == null || gf.getName().isEmpty()) hasConstruct = true;
@@ -1071,7 +1115,14 @@ final class Encoder {
                 element = new LinkedHashMap<>(element);
                 element.put(index, (long) position + field.getIndexBase());   // PS-530
             }
-            byte[] encoded = encodeFieldList(field.getFields(), element);
+            // PS-572: the element's position, as its decode recorded it.
+            boolean pushed = rec != null && rec.push(field.getRaw(), "repeat", position);
+            byte[] encoded;
+            try {
+                encoded = encodeFieldList(field.getFields(), element);
+            } finally {
+                if (rec != null) rec.pop(pushed);
+            }
             checkPeeks(encoded);            // PS-551: an element's bytes close with it
             out.write(encoded);
         }
@@ -1299,6 +1350,7 @@ final class Encoder {
      */
     private Map<String, Object> deriveInputs(List<Field> list, Map<String, Object> data) {
         Map<String, Object> derived = new LinkedHashMap<>(data);
+        if (rec != null) recordedInputs(list, data, derived);                   // PS-573
         for (Field f : list) {
             if (f.getType() == FieldType.REPEAT && f.getMatchInline() == null) {
                 List<Object> records = repeatRecords(f, data);
@@ -1332,6 +1384,18 @@ final class Encoder {
                     if (groupHasData(group, data)) bits |= 1L << group.getBit();
                 }
                 Object given = data.get(name);
+                Long recordedFlags = recordedFlags(fd);
+                if (given == null && recordedFlags != null) {
+                    // PS-573: the flags the decode record holds; the groups written are
+                    // the ones they set (encodeFlagged), so there is nothing to check.
+                    derived.putIfAbsent(name, recordedFlags);
+                    continue;
+                }
+                if (given == null && derived.get(name) != null) {
+                    // An internal mask the decode record supplied, checked as a supplied
+                    // one is.
+                    given = derived.get(name);
+                }
                 if (given == null) {
                     derived.put(name, bits);
                     continue;
@@ -1352,6 +1416,171 @@ final class Encoder {
         return derived;
     }
 
+    // --- PS-573: the decode record ----------------------------------------------------
+
+    /**
+     * What the decode record supplies for this field list (the reference's
+     * {@code _recorded_inputs}): each internal field's recorded value where the input does
+     * not give it, an input giving another value being rejected; and each flagged
+     * construct's recorded flags under its flags field. A byte_group's members are looked
+     * into, as the record locates them.
+     */
+    private void recordedInputs(List<Field> list, Map<String, Object> data,
+                                Map<String, Object> derived) {
+        for (Field f : list) {
+            if (f.getByteGroup() != null) {
+                for (Field member : f.getByteGroup()) recordedInternal(member, data, derived);
+                continue;
+            }
+            if (f.getFlagged() != null) {
+                String mask = f.getFlagged().getField() == null ? "" : f.getFlagged().getField();
+                if (mask.startsWith("$")) mask = mask.substring(1);
+                Object flags = rec.lookup(rec.flagged, f.getFlagged().getRaw());
+                if (!mask.isEmpty() && flags != DecodeRecord.UNRECORDED
+                        && data.get(mask) == null && derived.get(mask) == null) {
+                    derived.put(mask, flags);
+                }
+                continue;
+            }
+            recordedInternal(f, data, derived);
+        }
+    }
+
+    private void recordedInternal(Field f, Map<String, Object> data, Map<String, Object> derived) {
+        String name = f.getName();
+        if (name == null || !name.startsWith("_") || isComputed(f) || isLiteral(f)
+                || f.getValue() != null) return;
+        Object recorded = rec.lookup(rec.internal, f.getRaw());
+        if (recorded == DecodeRecord.UNRECORDED) return;
+        if (data.containsKey(name) && !recordSupplied.contains(name)) {
+            if (!sameValue(data.get(name), recorded)) {
+                throw new SchemaException.EncodeException("Field '" + name + "' is given "
+                        + Meta.pyRepr(data.get(name)) + ", but the decode record holds "
+                        + Meta.pyRepr(recorded) + " (PS-573)");
+            }
+            return;
+        }
+        derived.put(name, recorded);
+        recordSupplied.add(name);
+    }
+
+    private static boolean sameValue(Object a, Object b) {
+        if (a instanceof Number x && b instanceof Number y
+                && !(a instanceof Boolean) && !(b instanceof Boolean)) {
+            return x.doubleValue() == y.doubleValue();
+        }
+        return java.util.Objects.equals(a, b);
+    }
+
+    /** The flags the record holds for a flagged construct the input gives no flags for. */
+    private Long recordedFlags(Field.FlaggedDef fd) {
+        if (rec == null) return null;
+        String mask = fd.getField() == null ? "" : fd.getField();
+        if (mask.startsWith("$")) mask = mask.substring(1);
+        if (inputNames.contains(mask)) return null;
+        Object recorded = rec.lookup(rec.flagged, fd.getRaw());
+        if (recorded instanceof Number n && !(recorded instanceof Boolean)) {
+            return (long) Math.floor(n.doubleValue());
+        }
+        return null;
+    }
+
+    /** The case of a match a decode record names: a case, or "default". */
+    private static Object recordedCase(Field match, Object key) {
+        if ("default".equals(key)) return "default";
+        for (Field.Case c : match.getCases() == null ? List.<Field.Case>of() : match.getCases()) {
+            if (!c.isDefault() && String.valueOf(c.getCaseValue()).trim()
+                    .equals(String.valueOf(key).trim())) return c;
+        }
+        throw new SchemaException.EncodeException("Field " + matchLabel(match) + ": the recorded case "
+                + Meta.pyRepr(key) + " is not a case of the match (PS-573)");
+    }
+
+    /** How a message names a match: its name, else its var, quoted; else 'an unnamed match'. */
+    static String matchLabel(Field match) {
+        String n = match.getName() != null && !match.getName().isEmpty() ? match.getName()
+                : match.getVar() != null && !match.getVar().isEmpty() ? match.getVar() : null;
+        return n != null ? "'" + n + "'" : "an unnamed match";
+    }
+
+    /** The names declared beside a match, in its field list and in the whole message's. */
+    private Set<String> declaredBeside(Object holder, List<Field> siblings) {
+        Set<String> names = new java.util.HashSet<>();
+        for (List<Field> scope : java.util.Arrays.asList(siblings, fields)) {
+            if (scope == null) continue;
+            List<Object> raws = new ArrayList<>();
+            for (Field f : scope) if (f.getRaw() != null) raws.add(f.getRaw());
+            names.addAll(recordDeclaredFields(raws, holder));
+        }
+        return names;
+    }
+
+    /**
+     * PS-573: under a case taken from the decode record, the input may not give a field
+     * only another case of the match declares ({@code chosen} null for the default). A
+     * name declared beside the match is not one only another case declares.
+     */
+    private static void checkRecordedCase(Field match, String chosen, Map<String, Object> data,
+                                          Set<String> beside) {
+        Map<?, ?> raw = match.getRaw();
+        Map<?, ?> cases = raw != null && raw.get("cases") instanceof Map<?, ?> m ? m : Map.of();
+        Object dflt = raw != null && raw.get("default") instanceof List<?> l ? l
+                : cases.get("default") instanceof List<?> l2 ? l2 : null;
+        Set<String> mine = new java.util.HashSet<>(recordDeclaredFields(
+                chosen != null && cases.containsKey(chosen) ? cases.get(chosen) : dflt, null));
+        java.util.TreeSet<String> others = new java.util.TreeSet<>();
+        for (Map.Entry<?, ?> e : cases.entrySet()) {
+            String key = String.valueOf(e.getKey());
+            if ("default".equals(key) || key.equals(chosen)) continue;
+            others.addAll(recordDeclaredFields(e.getValue(), null));
+        }
+        if (chosen != null && dflt != null) others.addAll(recordDeclaredFields(dflt, null));
+        for (String n : others) {
+            if (!mine.contains(n) && !beside.contains(n) && data.containsKey(n)) {
+                throw new SchemaException.EncodeException("Field " + matchLabel(match)
+                        + ": the input gives '" + n + "', which only another case declares, "
+                        + "against the recorded case (PS-573)");
+            }
+        }
+    }
+
+    /** The reference's {@code record_declared_fields}, over a raw field list. */
+    static List<String> recordDeclaredFields(Object fields, Object skip) {
+        List<String> found = new ArrayList<>();
+        walkDeclared(fields, skip, found);
+        return found;
+    }
+
+    private static void walkDeclared(Object items, Object skip, List<String> found) {
+        if (!(items instanceof List<?> list)) return;
+        for (Object item : list) {
+            if (!(item instanceof Map<?, ?> m) || item == skip) continue;
+            if (m.containsKey("type")) {
+                if (m.get("name") instanceof String n && !n.isEmpty() && !found.contains(n)) found.add(n);
+                walkDeclared(m.get("trailer"), skip, found);
+                continue;
+            }
+            Object spec = null;
+            for (String k : List.of("match", "tlv", "flagged", "byte_group", "records")) {
+                if (m.containsKey(k)) { spec = m.get(k); break; }
+            }
+            if (spec instanceof List<?> parts) {
+                for (Object part : parts) walkDeclared(part instanceof List<?> ? part : List.of(part), skip, found);
+            } else if (spec instanceof Map<?, ?> sm) {
+                walkDeclared(sm.get("fields"), skip, found);
+                if (sm.get("cases") instanceof Map<?, ?> cs) {
+                    for (Object body : cs.values()) walkDeclared(body, skip, found);
+                }
+                if (sm.get("default") instanceof List<?> def) walkDeclared(def, skip, found);
+                if (sm.get("groups") instanceof List<?> groups) {
+                    for (Object g : groups) {
+                        if (g instanceof Map<?, ?> gm) walkDeclared(gm.get("fields"), skip, found);
+                    }
+                }
+            }
+        }
+    }
+
     /**
      * Rebuild a {@code match} construct's bytes from decoded output.
      *
@@ -1360,7 +1589,8 @@ final class Encoder {
      * {@code field: $var} read nothing, so writing the discriminator here would duplicate
      * the earlier field that produced it.
      */
-    private byte[] encodeMatch(Field match, Map<String, Object> data) {
+    private byte[] encodeMatch(Field match, Map<String, Object> data, Object holder,
+                               List<Field> siblings) {
         List<Field.Case> cases = match.getCases();
         if (cases == null) cases = List.of();
 
@@ -1406,10 +1636,43 @@ final class Encoder {
             }
             discriminator = v;
         }
+        // PS-573: where the input gives no discriminator, the decode record's is written and
+        // its case taken - before any derivation, which PS-574 makes the fallback.
+        boolean given = discriminator != null;
+        String onName = match.getOn() == null ? null
+                : match.getOn().startsWith("$") ? match.getOn().substring(1) : match.getOn();
+        if (onName != null && recordSupplied.contains(onName)) given = false;
+        Map<?, ?> record = null;
+        if (rec != null && rec.lookup(rec.matches, match.getRaw()) instanceof Map<?, ?> m) record = m;
+        Object recordedKey = null;              // a Field.Case, or "default"
+        if (!given && record != null) {
+            if (match.isMatchRemaining()) recordedKey = recordedCase(match, record.get("case"));
+            else if (discriminator == null) discriminator = record.get("value");
+        }
         if (match.getLength() > 0) checkWrittenDiscriminator(discriminator, name);  // PS-557
+        if (match.getLength() > 0 && discriminator instanceof Number number
+                && !(discriminator instanceof Boolean)) {
+            // PS-168, before a case is looked for, as the spec prototype checks it.
+            long[] db = integerBounds(match.getLength() * 8, false);
+            String fitName = name != null && !name.isEmpty() ? name
+                    : match.getVar() != null && !match.getVar().isEmpty() ? match.getVar() : "match";
+            checkFits((long) Math.rint(number.doubleValue()), db[0], db[1], fitName, discriminator);
+        }
 
         Field.Case matched = null;
-        if (discriminator != null) {
+        List<Field> fallbackFields = null;
+        if (recordedKey instanceof Field.Case c) {
+            matched = c;
+        } else if (recordedKey != null) {
+            for (Field.Case c : cases) {
+                if (c.isDefault()) matched = c;
+            }
+            if (matched == null) {
+                fallbackFields = match.getMatchDefault() instanceof List<?> declared
+                        ? (List<Field>) declared : List.of();
+            }
+        }
+        if (discriminator != null && matched == null && fallbackFields == null) {
             for (Field.Case c : cases) {
                 if (c.isDefault()) continue;
                 if (caseMatches(discriminator, c.getCaseValue())) {
@@ -1422,8 +1685,7 @@ final class Encoder {
         // ahead of the claimable-name heuristic: the schema said what an unmatched value
         // means, so guessing a case from the names present would contradict it. The
         // heuristic stays for an inline match whose discriminator is not in the data.
-        List<Field> fallbackFields = null;
-        if (matched == null && discriminator != null) {
+        if (matched == null && fallbackFields == null && discriminator != null) {
             for (Field.Case c : cases) {
                 if (c.isDefault()) {
                     matched = c;
@@ -1437,6 +1699,11 @@ final class Encoder {
                 // Already Fields; the parser converts the list once.
                 fallbackFields = (List<Field>) declared;
             }
+        }
+        if (record != null && !given) {                                     // PS-573
+            checkRecordedCase(match, matched != null && !matched.isDefault()
+                    ? String.valueOf(matched.getCaseValue()) : null, data,
+                    declaredBeside(holder, siblings));
         }
         if (matched == null && fallbackFields == null && discriminator == null) {
             // An inline match with no name reports nothing of itself, and a `remaining`
@@ -1497,7 +1764,7 @@ final class Encoder {
                 // PS-551, PS-442: an inline discriminator the input neither gives nor fixes
                 // through a case's fields, nor a bit range before it peeked. This returned
                 // no bytes where the match was nameless or its default `skip`.
-                throw new MissingFieldException(label);   // named by the discriminator (CR-2026-151)
+                throw MissingFieldException.undetermined(label);   // named by the discriminator (CR-2026-151)
             } else if ("skip".equals(match.getMatchDefault())) {
                 // The discriminator, if the match reads one, and nothing for the case.
                 fallbackFields = List.of();
@@ -1510,7 +1777,7 @@ final class Encoder {
                 // fields the input gives. This wrote nothing and reported nothing.
                 String on = match.getOn();
                 if (on != null && on.startsWith("$")) on = on.substring(1);
-                throw new MissingFieldException(!"match".equals(label) ? label
+                throw MissingFieldException.undetermined(!"match".equals(label) ? label
                         : (on != null && !on.isEmpty() ? on : "match"));
             }
         }
@@ -1520,7 +1787,7 @@ final class Encoder {
                 Long value = asLong(discriminator);
                 // A `default` stands for every unlisted value, so it names none to write;
                 // a zero was written here (PS-551).
-                if (value == null) throw new MissingFieldException(label);
+                if (value == null) throw MissingFieldException.undetermined(label);
                 long[] db = integerBounds(match.getLength() * 8, false);
                 checkFits(value, db[0], db[1], label, discriminator);              // PS-168
                 fallbackOut.write(writeInt(value, match.getLength(), false));
@@ -1538,7 +1805,7 @@ final class Encoder {
             Long value = asLong(discriminator);
             if (value == null) {
                 if (matched.isDefault()) {
-                    throw new MissingFieldException(label);
+                    throw MissingFieldException.undetermined(label);
                 }
                 Object key = matched.getCaseValue();
                 Long fromKey = key == null ? null : parseIntAny(String.valueOf(key));
@@ -1715,11 +1982,11 @@ final class Encoder {
             walk[0].accept((List<Field>) fb, path);
         }
         if (filled.isEmpty()) return null;
-        if (filled.size() != 1) throw new MissingFieldException(label);
+        if (filled.size() != 1) throw MissingFieldException.undetermined(label);
         List<Object[]> path = (List<Object[]>) filled.get(0)[0];
         Field.Case filledCase = (Field.Case) filled.get(0)[1];
         Long value = exactCaseValue(filledCase.getCaseValue());
-        if (value == null) throw new MissingFieldException(label);
+        if (value == null) throw MissingFieldException.undetermined(label);
         for (Object[] step : path) {
             Field enclosing = (Field) step[0];
             Field.Case selected = null;
@@ -1734,7 +2001,7 @@ final class Encoder {
                     selected = (Field.Case) step[1];      // an in-cases default
                 }
             }
-            if (selected != step[1]) throw new MissingFieldException(label);
+            if (selected != step[1]) throw MissingFieldException.undetermined(label);
         }
         Object outer = path.get(0)[1];
         if (outer instanceof Field.Case c) return new Object[] {value, c, null};
@@ -2287,9 +2554,17 @@ final class Encoder {
         written.sort((x, y) -> x.position() != y.position()
                 ? Integer.compare(x.position(), y.position()) : Integer.compare(x.seq(), y.seq()));
         ByteBuf out = new ByteBuf();
-        for (Written w : written) {
+        for (int entryIndex = 0; entryIndex < written.size(); entryIndex++) {
+            Written w = written.get(entryIndex);
             out.write(encodeTLVTag(w.key(), tlv));
-            byte[] value = encodeFieldList(w.fields(), w.data());
+            // PS-572: the entry's index in payload order, as its decode recorded it.
+            boolean pushed = rec != null && rec.push(tlv.getRaw(), "tlv", entryIndex);
+            byte[] value;
+            try {
+                value = encodeFieldList(w.fields(), w.data());
+            } finally {
+                if (rec != null) rec.pop(pushed);
+            }
             checkPeeks(value);              // PS-551: a tlv value is measured whole
             if (lengthSize > 0) {
                 out.write(writeInt(value.length, lengthSize, false));

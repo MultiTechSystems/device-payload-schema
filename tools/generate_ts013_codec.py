@@ -1969,6 +1969,7 @@ function encRecordDeclared(fields, skip) {            // record_declared_fields
         walk(spec.fields);
         var cs = spec.cases || {};
         Object.keys(cs).forEach(function (k) { if (k.indexOf("__") !== 0) walk(cs[k]); });
+        if (Array.isArray(spec["default"])) walk(spec["default"]);
         (spec.groups || []).forEach(function (g) { walk(g && g.fields); });
       }
     });

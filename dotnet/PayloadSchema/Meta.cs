@@ -130,7 +130,7 @@ public static class Meta
     }
 
     /// <summary>A mapping key as the text Python's str() gives the resolved key.</summary>
-    static string KeyText(YamlNode key) => key is YamlScalarNode s ? PyStr(Scalar(s)) : key.ToString() ?? "";
+    internal static string KeyText(YamlNode key) => key is YamlScalarNode s ? PyStr(Scalar(s)) : key.ToString() ?? "";
 
     static YamlNode? Get(YamlMappingNode? map, string key)
     {

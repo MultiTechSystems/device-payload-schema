@@ -38,9 +38,13 @@ public static class SchemaDecoder
     /// Mirrors interpret in tools/schema_interpreter.py.
     /// </summary>
     public static Dictionary<string, object?> Interpret(PayloadSchemaDefinition schema, byte[] payload,
-        InputContext context, string? direction = null)
+        InputContext context, string? direction = null, bool decodeRecord = false)
     {
-        var (result, ctx, fields) = Run(schema, payload, context.FPort, direction);
+        // PS-572 (CR-2026-162): with decodeRecord, the output also carries `_decode`, the
+        // record of each match's case and discriminator, each internal field's value and
+        // each flagged construct's flags, which SchemaEncoder follows (PS-573).
+        var trace = decodeRecord ? new DecodeTrace(schema) : null;
+        var (result, ctx, fields) = Run(schema, payload, context.FPort, direction, trace);
 
         var meta = new Dictionary<string, object?>();
         var root = schema.Root;
@@ -81,7 +85,9 @@ public static class SchemaDecoder
         }
         meta["fields"] = entries;
 
-        return new Dictionary<string, object?>(result) { ["_meta"] = meta };
+        var output = new Dictionary<string, object?>(result) { ["_meta"] = meta };
+        if (trace != null) output["_decode"] = trace.AsDict();
+        return output;
     }
 
     static YamlNode? FindKey(YamlMappingNode map, string key)
@@ -98,7 +104,8 @@ public static class SchemaDecoder
     /// it used to decode the empty top-level list and return {} with success.
     /// </summary>
     static (Dictionary<string, object?> result, DecodeContext ctx, List<SchemaField> fields) Run(
-        PayloadSchemaDefinition schema, byte[] data, int? fPort, string? direction)
+        PayloadSchemaDefinition schema, byte[] data, int? fPort, string? direction,
+        DecodeTrace? trace = null)
     {
         List<SchemaField> fields;
         if (fPort == null)
@@ -113,7 +120,7 @@ public static class SchemaDecoder
             SchemaDirection.Check(schema, fPort.Value, direction);
             fields = ResolveFields(schema, fPort.Value);
         }
-        var ctx = new DecodeContext(data, schema.Endian) { RepeatOnlyNames = schema.RepeatOnlyNames };
+        var ctx = new DecodeContext(data, schema.Endian) { RepeatOnlyNames = schema.RepeatOnlyNames, Trace = trace };
         var result = new Dictionary<string, object?>();
 
         MergeTo(result, DecodeFields(fields, ctx, schema));
@@ -214,8 +221,13 @@ public static class SchemaDecoder
                 if (ctx.PendingRecords == null)
                     throw new InvalidOperationException(
                         "`records` belongs in a repeat's element, or a match case within it (PS-541)");
-                foreach (var body in field.Records)
-                    ctx.PendingRecords.Add(DecodeFields(body, ctx, schema));
+                for (int n = 0; n < field.Records.Count; n++)
+                {
+                    // PS-572: a record's location is `records/n[0]`.
+                    var pushed = ctx.Trace?.Push(field.Anchor, "records", 0, "/" + n) ?? false;
+                    try { ctx.PendingRecords.Add(DecodeFields(field.Records[n], ctx, schema)); }
+                    finally { ctx.Trace?.Pop(pushed); }
+                }
                 continue;
             }
 
@@ -319,12 +331,25 @@ public static class SchemaDecoder
                 // working when name_from is in play (PS-267). A looked-up field binds
                 // PS-523's value and keeps its label for templates (PS-532).
                 ctx.Bind(field, field.Name, value);
+                if (field.Name.StartsWith("_"))
+                    RecordInternal(ctx, field.Node, value);                       // PS-572
                 if (field.ValidRange is { Length: >= 2 })
                     ctx.CheckValidRange(value, field);
             }
         }
 
         return result;
+    }
+
+    /// <summary>PS-572: an internal field's decoded value - what it would report, its
+    /// label where it has a lookup - at its location in the decode record.</summary>
+    static void RecordInternal(DecodeContext ctx, YamlNode? node, object? value)
+    {
+        if (ctx.Trace == null || value == null || ReferenceEquals(value, Omitted)) return;
+        var where = ctx.Trace.Loc(node);
+        if (where == null) return;
+        var (ok, normalized) = DecodeTrace.Normalize(value);
+        if (ok) ctx.Trace.Internal[where] = normalized;
     }
 
     static Dictionary<string, object?> ResolveRef(string refPath, DecodeContext ctx, PayloadSchemaDefinition schema)
@@ -386,7 +411,14 @@ public static class SchemaDecoder
             // member is bound and not reported.
             ctx.Bind(subfield, subfield.Name, value);
             if (subfield.Name.StartsWith("_"))
+            {
+                // PS-572: as the prototype records a group member - a bool its flag, any
+                // other the number its name binds.
+                if (ctx.Trace != null)
+                    RecordInternal(ctx, subfield.Node, subfield.Type == FieldType.Bool ? value
+                        : ctx.Variables.TryGetValue(subfield.Name, out var bound) ? bound : null);
                 continue;
+            }
             result[subfield.Name] = value;
         }
 
@@ -404,6 +436,8 @@ public static class SchemaDecoder
 
         var (_, flags) = Helpers.ToInt(flagsVal);
         var result = new Dictionary<string, object?>();
+        if (ctx.Trace?.Loc(fd.Anchor) is { } where)
+            ctx.Trace.Flagged[where] = (long)flags;                             // PS-572
 
         foreach (var group in fd.Groups)
         {
@@ -1344,7 +1378,10 @@ public static class SchemaDecoder
             {
                 foreach (var c in field.Cases)
                     if (!c.IsDefault && c.CaseValue != null && FractionInRange(number, c.CaseValue))
+                    {
+                        RecordMatch(field, ctx, c, discriminator);
                         return MergeMatch(inline, DecodeFields(c.Fields, ctx, null));
+                    }
                 matchValue = null;
             }
         }
@@ -1378,23 +1415,52 @@ public static class SchemaDecoder
         foreach (var c in field.Cases)
         {
             if (c.IsDefault)
+            {
+                RecordMatch(field, ctx, null, discriminator);
                 return MergeMatch(inline, DecodeFields(c.Fields, ctx, null));
+            }
 
             var caseVal = c.CaseValue;
             if (caseVal == null) continue;
 
-            if (matchValue is long numeric && MatchesCase(numeric, caseVal))
+            if ((matchValue is long numeric && MatchesCase(numeric, caseVal))
+                // A text discriminator (an `ascii` field) equals a text key, as the reference
+                // compares it; a list or range key holds numbers only.
+                || (discriminator is string textValue && caseVal is string textKey
+                    && !textKey.TrimStart().StartsWith('[') && !textKey.Contains("..")
+                    && textKey == textValue))
+            {
+                RecordMatch(field, ctx, c, discriminator);
                 return MergeMatch(inline, DecodeFields(c.Fields, ctx, null));
+            }
         }
 
         // `default` decides what an unmatched value means and defaults to "error".
         // Nothing read the key, so every value of it behaved as "skip" and a schema
         // declaring a fallback got none.
         if (field.MatchDefault is List<SchemaField> fallbackFields)
+        {
+            RecordMatch(field, ctx, null, discriminator);
             return MergeMatch(inline, DecodeFields(fallbackFields, ctx, null));
+        }
         if (field.MatchDefault is null || (field.MatchDefault as string) != "skip")
             throw new InvalidOperationException($"No matching case for value {matchValue?.ToString() ?? discriminator?.ToString()}");
+        RecordMatch(field, ctx, null, discriminator);
         return inline;
+    }
+
+    /// <summary>
+    /// PS-572: the case a match took - its key as written, or "default" - and the
+    /// discriminator it read, at the match's location, before the case body decodes.
+    /// </summary>
+    static void RecordMatch(SchemaField match, DecodeContext ctx, MatchCase? chosen, object? discriminator)
+    {
+        if (ctx.Trace?.Loc(match.Anchor) is not { } where) return;
+        ctx.Trace.Matches[where] = new Dictionary<string, object?>
+        {
+            ["case"] = chosen == null ? "default" : DecodeTrace.CaseKey(chosen.KeyNode),
+            ["value"] = DecodeTrace.Normalize(discriminator).value,
+        };
     }
 
     /// <summary>
@@ -1513,12 +1579,14 @@ public static class SchemaDecoder
         var result = new Dictionary<string, object?>();
         var channels = new List<Dictionary<string, object?>>();
         var collected = new HashSet<string>();      // names already turned into arrays (PS-157)
+        int entryIndex = -1;                        // PS-572: each entry's index, in payload order
 
         while (ctx.Remaining > 0)
         {
             // Where this entry begins, so an abandoned remainder is counted from the
             // unknown tag itself rather than from after it (PS-302).
             var entryStart = ctx.Offset;
+            entryIndex++;
 
             var tag = new List<int>();
 
@@ -1639,7 +1707,10 @@ public static class SchemaDecoder
             if (caseKey != null && field.TLVCases != null)
             {
                 var caseFields = field.TLVCases[caseKey];
-                var caseResult = DecodeFields(caseFields, ctx, null);
+                Dictionary<string, object?> caseResult;
+                var pushed = ctx.Trace?.Push(field.Anchor, "tlv", entryIndex) ?? false;
+                try { caseResult = DecodeFields(caseFields, ctx, null); }
+                finally { ctx.Trace?.Pop(pushed); }
 
                 if (merge)
                 {
@@ -1933,6 +2004,8 @@ public static class SchemaDecoder
             var savedRecords = ctx.PendingRecords;
             var records = new List<Dictionary<string, object?>>();
             ctx.PendingRecords = records;
+            // PS-572: the element's position, in the locations of what it decodes.
+            var pushed = ctx.Trace?.Push(field.Node, "repeat", iterations) ?? false;
             try
             {
                 element = DecodeFields(field.Fields, ctx, schema);
@@ -1953,6 +2026,7 @@ public static class SchemaDecoder
                     ctx.Reported[kv.Key] = kv.Value;
                 ctx.ElementNames = savedNames;
                 ctx.PendingRecords = savedRecords;
+                ctx.Trace?.Pop(pushed);
             }
             iterations++;
             if (keep && records.Count > 0)

@@ -73,6 +73,11 @@ public class DecodeContext {
     private final Map<String, Map<String, Object>> producers = new HashMap<>();
     /** How deep inside an object's members or a repeat's elements the decode is. */
     private int metaDepth;
+    /** The decode record being kept (PS-572); null where none was asked for. */
+    private DecodeRecord record;
+
+    DecodeRecord getRecord() { return record; }
+    void setRecord(DecodeRecord record) { this.record = record; }
 
     /**
      * Records the declaration about to report {@code key} (its name where null), unless

@@ -139,3 +139,10 @@ def test_a_generated_codec_never_reports_the_record():
     done = subprocess.run(["node"], input=script, capture_output=True, text=True, check=True)
     data = json.loads(done.stdout)["data"]
     assert "_decode" not in data and "_meta" not in data
+
+
+def test_a_field_may_not_be_named_decode():
+    """PS-433 as amended: `_decode` is reserved for interpreter metadata."""
+    schema = {"name": "t", "fields": [{"name": "_decode", "type": "u8"}]}
+    out = SchemaInterpreter(schema).decode(b"\x01")
+    assert any("PS-433" in e for e in out.errors), out.errors

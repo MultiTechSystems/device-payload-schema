@@ -14,8 +14,9 @@
 #   an input as `Missing required field: report_type (PS-574)`, these cases expect the
 #   derived payload; the rejection is pinned where derivation fails too.
 #
-# The spec prototype's TestCR2026162DecodeRecord (13 tests), case for case, and four more:
-# JSON Pointer escapes, a port, a record of `records`, and the r718n3 pins. Read by
+# The spec prototype's TestCR2026162DecodeRecord (13 tests), case for case, and six more:
+# JSON Pointer escapes, a port, a record of `records`, an internal flags field, an internal
+# value only the record has, and a name a nested match's `default` declares. Read by
 # tests/test_cr_2026_162_cases.py (reference and the generated codec's runtime encoder),
 # Go (go/schema/cr162_test.go), Java (CR2026162Test.java) and C# (CR2026_162Tests.cs).
 #
@@ -135,6 +136,20 @@ cases:
     - input: '{"a": 5}'
       # No record: this repository derives `_k` from the case the input fills (PS-551).
       payload: "0105"
+
+- name: a_name_a_nested_default_declares_is_not_another_cases
+  # Case 2 reports `a` through a nested match's `default`. The prototype's declared_fields
+  # does not look into a `default`, so it reads `a` as declared only by case 1 and rejects
+  # this round trip; this repository counts the default's fields (dingtek df702's `angle`).
+  schema: "name: t\nversion: 1\nfields:\n  - match:\n      length: 1\n      var: k\n      cases:\n        1: [{name: a, type: u8}]\n        2:\n          - match:\n              field: $k\n              cases:\n                9: [{name: b, type: u8}]\n              default: [{name: a, type: u8}]\n"
+  decode:
+    payload: "0205"
+    record: '{"matches": {"/fields/0/match": {"case": 2, "value": 2}, "/fields/0/match/cases/2/0/match": {"case": "default", "value": 2}}, "internal": {}, "flagged": {}}'
+    round_trip: true
+  encode:
+    - input: '{"a": 5}'
+      record: decoded
+      payload: "0205"
 
 # --- flagged and byte_group ---------------------------------------------------------------
 

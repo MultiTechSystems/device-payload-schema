@@ -505,6 +505,11 @@ public class Field {
     public static class FlaggedDef {
         private String field;
         private List<FlaggedGroup> groups;
+        /** The `flagged:` mapping as written, which the decode record locates (PS-572). */
+        private Map<String, Object> raw;
+
+        public Map<String, Object> getRaw() { return raw; }
+        public void setRaw(Map<String, Object> raw) { this.raw = raw; }
 
         public String getField() { return field; }
         public void setField(String field) { this.field = field; }

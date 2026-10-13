@@ -95,7 +95,7 @@ class CorpusConformanceTest {
                         report.add(rel, index, vector.get("name"), "skip", "no payload (encode vector)");
                     } else {
                         report.add(rel, index, vector.get("name"), "error", "parse: " + e.getMessage());
-                        report.addMeta(rel, index, vector.get("name"), null);
+                        report.addMeta(rel, index, vector.get("name"), null, null);
                     }
                 }
                 continue;
@@ -118,14 +118,20 @@ class CorpusConformanceTest {
                 // vector carries `expected_meta`. Null where the interpret fails (PS-497).
                 Object expectedMeta = vector.get("expected_meta");
                 Object meta = null;
+                Object decodeRecord = null;
                 String metaError = null;
                 if (expectedMeta != null || report.wantsMeta()) {
                     try {
-                        meta = schema.interpret(hexToBytes(payloadHex), inputContext(vector)).get("_meta");
+                        // With the decode record (CR-2026-162) where the report asks, for
+                        // rule 4; it changes nothing in `_meta`.
+                        Map<String, Object> out = schema.interpret(hexToBytes(payloadHex),
+                                inputContext(vector), report.wantsMeta());
+                        meta = out.get("_meta");
+                        decodeRecord = out.get("_decode");
                     } catch (RuntimeException e) {
                         metaError = e.getClass().getSimpleName() + ": " + e.getMessage();
                     }
-                    report.addMeta(rel, index, vectorName, meta);
+                    report.addMeta(rel, index, vectorName, meta, decodeRecord);
                 }
                 Object expectedRaw = vector.get("expected");
                 if (!(expectedRaw instanceof Map<?, ?> expected)) {

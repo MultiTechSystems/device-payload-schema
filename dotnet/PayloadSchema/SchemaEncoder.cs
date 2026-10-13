@@ -57,9 +57,17 @@ public static class SchemaEncoder
     /// <summary>A number as JavaScript writes it, for the messages of the helpers beside this class.</summary>
     internal static string JsNumber(object? value) => Encoding.JsNumber(value);
 
+    /// <param name="decodeRecord">The `_decode` that <see cref="SchemaDecoder.Interpret"/>
+    /// produced with decodeRecord (PS-572), or null; it may instead arrive inside
+    /// <paramref name="data"/> as `_decode`, and the argument wins. The encoder follows it
+    /// (PS-573): each recorded case and discriminator, internal field and flags value is used
+    /// where the input gives none, and input contradicting it is rejected. Where neither the
+    /// input nor the record gives a match's case, this encoder derives it (PS-551's
+    /// nested-match rule, PS-563, PS-564), as PS-574 permits.</param>
     public static EncodeResult Encode(PayloadSchemaDefinition schema,
-        Dictionary<string, object?> data, IReadOnlyList<string>? order = null)
-        => new Encoding(schema, schema.Fields, order).Run(data);
+        Dictionary<string, object?> data, IReadOnlyList<string>? order = null,
+        Dictionary<string, object?>? decodeRecord = null)
+        => new Encoding(schema, schema.Fields, order).Run(data, decodeRecord);
 
     /// <summary>
     /// Encode with port-based schema selection.
@@ -71,10 +79,10 @@ public static class SchemaEncoder
     /// </summary>
     public static EncodeResult EncodeWithPort(PayloadSchemaDefinition schema,
         Dictionary<string, object?> data, int fPort, IReadOnlyList<string>? order = null,
-        string? direction = null)
+        string? direction = null, Dictionary<string, object?>? decodeRecord = null)
     {
         SchemaDirection.Check(schema, fPort, direction);
-        return new Encoding(schema, ResolveFieldsForEncode(schema, fPort), order).Run(data);
+        return new Encoding(schema, ResolveFieldsForEncode(schema, fPort), order).Run(data, decodeRecord);
     }
 
     static List<SchemaField> ResolveFieldsForEncode(PayloadSchemaDefinition schema, int fPort)
@@ -186,9 +194,26 @@ public static class SchemaEncoder
 
         // --- entry point -------------------------------------------------------------
 
-        internal EncodeResult Run(Dictionary<string, object?> data)
+        /// <summary>The decode record followed (PS-573); null when none was given.</summary>
+        DecodeTrace? _trace;
+
+        internal EncodeResult Run(Dictionary<string, object?> data,
+            Dictionary<string, object?>? decodeRecord = null)
         {
             data ??= new Dictionary<string, object?>();
+            // PS-573: the record, given beside the input or inside it as `_decode`; `_meta`
+            // describes a decode and is not input either.
+            if (data.ContainsKey("_decode") || data.ContainsKey("_meta"))
+            {
+                decodeRecord ??= data.GetValueOrDefault("_decode") as Dictionary<string, object?>;
+                data = data.Where(kv => kv.Key is not ("_decode" or "_meta"))
+                    .ToDictionary(kv => kv.Key, kv => kv.Value);
+            }
+            if (decodeRecord != null)
+            {
+                _trace = new DecodeTrace(_schema, decodeRecord);
+                foreach (var key in data.Keys) _trace.InputNames.Add(key);
+            }
             var output = new List<byte>();
             _t564.Clear();
             _d564 = 0;          // PS-564 is checked from here, outside any tlv or repeat
@@ -291,7 +316,7 @@ public static class SchemaEncoder
             if (field.Type == FieldType.TLV && field.TLVCases != null)
                 return EncodeTLV(field, data);
             if (field.MatchInline != null)
-                return EncodeMatch(field.MatchInline, data, frame?.Pending);
+                return EncodeMatch(field.MatchInline, data, frame?.Pending, field, siblings);
             if (field.Flagged != null)
                 return EncodeFlagged(field.Flagged, data);
             if (field.Type == FieldType.Match && string.IsNullOrEmpty(field.Name))
@@ -780,6 +805,79 @@ public static class SchemaEncoder
         /// </summary>
         internal static string MissingFieldMessage(string name) => $"Missing required field: {name}";
 
+        /// <summary>PS-574: a match whose case neither the input nor a decode record gives,
+        /// and which this encoder could not derive either, named by its discriminator.</summary>
+        internal static string UndeterminedCaseMessage(string name) => MissingFieldMessage(name) + " (PS-574)";
+
+        static string MatchLabel(SchemaField match)
+            => !string.IsNullOrEmpty(match.Name) ? $"'{match.Name}'"
+               : !string.IsNullOrEmpty(match.Var) ? $"'{match.Var}'" : "an unnamed match";
+
+        static MatchCase? DefaultCaseOf(SchemaField match) => match.Cases.FirstOrDefault(IsDefaultCase);
+
+        /// <summary>The case a decode record names (PS-573): null for "default", else the
+        /// case whose key reads the same. A key the match does not have is rejected.</summary>
+        static MatchCase? RecordedCase(SchemaField match, object? key)
+        {
+            if (key is string { } text && text == "default") return null;
+            var wanted = (key is string str ? str : PayloadSchema.Meta.PyRepr(key)).Trim();
+            foreach (var c in match.Cases)
+            {
+                if (IsDefaultCase(c) || c.KeyNode == null) continue;
+                if (PayloadSchema.Meta.KeyText(c.KeyNode).Trim() == wanted) return c;
+            }
+            throw new InvalidOperationException($"Field {MatchLabel(match)}: the recorded case "
+                + $"{PayloadSchema.Meta.PyRepr(key)} is not a case of the match (PS-573)");
+        }
+
+        /// <summary>
+        /// The names the field list a match sits in, and the message's whole field list,
+        /// declare outside that match: a name one of them reports is the input's to give
+        /// whichever case the match takes (_declared_beside).
+        /// </summary>
+        HashSet<string> DeclaredBeside(SchemaField? owner, List<SchemaField>? siblings)
+        {
+            var names = new HashSet<string>();
+            foreach (var scope in new[] { siblings, _fields })
+                if (scope != null)
+                    foreach (var n in DecodeTrace.DeclaredFields(
+                                 scope.Select(f => (YamlDotNet.RepresentationModel.YamlNode?)f.Node)
+                                     .Where(n => n != null)!, owner?.Node))
+                        names.Add(n);
+            return names;
+        }
+
+        static IEnumerable<YamlDotNet.RepresentationModel.YamlNode> Nodes(List<SchemaField>? fields)
+            => (fields ?? new List<SchemaField>()).Select(f => (YamlDotNet.RepresentationModel.YamlNode?)f.Node)
+                .Where(n => n != null)!;
+
+        /// <summary>
+        /// PS-573: under a case taken from the decode record, the input may not give a field
+        /// only another case of the match declares (<paramref name="chosen"/> null for the
+        /// default). A name declared outside the match as well is not one only another case
+        /// declares (_check_recorded_case).
+        /// </summary>
+        static void CheckRecordedCase(SchemaField match, MatchCase? chosen,
+            Dictionary<string, object?> data, HashSet<string> beside)
+        {
+            var defaultBody = DefaultBody(match);
+            var mine = new HashSet<string>(DecodeTrace.DeclaredFields(
+                Nodes(chosen != null ? chosen.Fields : defaultBody)));
+            var others = new HashSet<string>();
+            foreach (var c in match.Cases)
+            {
+                if (IsDefaultCase(c) || ReferenceEquals(c, chosen)) continue;
+                others.UnionWith(DecodeTrace.DeclaredFields(Nodes(c.Fields)));
+            }
+            if (chosen != null && defaultBody != null)
+                others.UnionWith(DecodeTrace.DeclaredFields(Nodes(defaultBody)));
+            var clash = others.Where(n => !mine.Contains(n) && !beside.Contains(n) && data.ContainsKey(n))
+                .OrderBy(n => n, StringComparer.Ordinal).ToList();
+            if (clash.Count > 0)
+                throw new InvalidOperationException($"Field {MatchLabel(match)}: the input gives "
+                    + $"'{clash[0]}', which only another case declares, against the recorded case (PS-573)");
+        }
+
         /// <summary>
         /// The field of this list a <c>$ref</c> names, by its name or its <c>var:</c>.
         /// Searched into a byte_group's members, since a count is often a few bits of a
@@ -1003,6 +1101,7 @@ public static class SchemaEncoder
         Dictionary<string, object?> DeriveInputs(List<SchemaField> fields, Dictionary<string, object?> data)
         {
             var derived = new Dictionary<string, object?>(data);
+            if (_trace != null) RecordedInputs(fields, data, derived);             // PS-573
             foreach (var f in fields)
             {
                 if (f.Type == FieldType.Repeat)
@@ -1038,7 +1137,23 @@ public static class SchemaEncoder
                         declared |= 1L << group.Bit;
                         if (GroupHasData(group, data)) bits |= 1L << group.Bit;
                     }
-                    if (!data.TryGetValue(name, out var given) || given == null)
+                    data.TryGetValue(name, out var given);
+                    if (given == null && RecordedFlags(flagged) is { } recordedFlags)
+                    {
+                        // PS-573: the flags the decode record holds; the groups written are
+                        // the ones they set (EncodeFlagged), so there is nothing to check.
+                        if (!derived.TryGetValue(name, out var already) || already == null)
+                            derived[name] = recordedFlags;
+                        continue;
+                    }
+                    if (given == null && derived.TryGetValue(name, out var supplied) && supplied != null)
+                    {
+                        // An internal mask the decode record supplied (PS-573), checked as a
+                        // supplied one is.
+                        given = supplied;
+                        data = new Dictionary<string, object?>(data) { [name] = given };
+                    }
+                    if (given == null)
                     {
                         derived[name] = bits;
                         continue;
@@ -1064,6 +1179,78 @@ public static class SchemaEncoder
         /// Whether the input gives any of a flagged group's values: a member's own name, or
         /// a name inside a construct the group holds (a nested flagged block, a byte_group).
         /// </summary>
+        /// <summary>
+        /// PS-573: what the decode record supplies for this field list - each internal
+        /// field's recorded value where the input does not give it (an input giving another
+        /// value is rejected, naming the field), and each flagged construct's recorded flags
+        /// under its flags field where the input gives it no value. A byte_group's internal
+        /// members are looked into, as the record locates them. Mirrors _recorded_inputs.
+        /// </summary>
+        void RecordedInputs(List<SchemaField> fields, Dictionary<string, object?> data,
+            Dictionary<string, object?> derived)
+        {
+            var trace = _trace!;
+            void Internal(SchemaField f)
+            {
+                var name = f.Name;
+                if (string.IsNullOrEmpty(name) || !name.StartsWith('_') || IsComputed(f) || IsLiteral(f)
+                    || f.Value != null || f.Node == null)
+                    return;
+                var (found, recorded) = trace.Lookup(trace.Internal, f.Node);
+                if (!found) return;
+                if (data.TryGetValue(name, out var given) && !trace.Supplied.Contains(name))
+                {
+                    if (!SameValue(given, recorded))
+                        throw new InvalidOperationException($"Field '{name}' is given {PayloadSchema.Meta.PyRepr(given)}, "
+                            + $"but the decode record holds {PayloadSchema.Meta.PyRepr(recorded)} (PS-573)");
+                    return;
+                }
+                derived[name] = recorded;
+                trace.Supplied.Add(name);
+            }
+            foreach (var f in fields)
+            {
+                if (f.ByteGroup.Count > 0)
+                {
+                    foreach (var member in f.ByteGroup) Internal(member);
+                    continue;
+                }
+                if (f.Flagged is { } flagged)
+                {
+                    var mask = flagged.Field.TrimStart('$');
+                    var (found, recorded) = trace.Lookup(trace.Flagged, flagged.Anchor);
+                    if (mask.Length > 0 && found
+                        && (!data.TryGetValue(mask, out var given) || given == null)
+                        && (!derived.TryGetValue(mask, out var have) || have == null))
+                        derived[mask] = recorded;
+                    continue;
+                }
+                Internal(f);
+            }
+        }
+
+        /// <summary>Python's == on two decoded values: numbers by value, True as 1.</summary>
+        static bool SameValue(object? a, object? b)
+        {
+            object? AsNumber(object? v) => v is bool flag ? (flag ? 1.0 : 0.0) : v;
+            var (aok, an) = Helpers.ToFloat64(AsNumber(a));
+            var (bok, bn) = Helpers.ToFloat64(AsNumber(b));
+            if (aok && bok && a is not string && b is not string) return an == bn;
+            return Equals(a, b);
+        }
+
+        /// <summary>The flags the decode record holds for a flagged construct (PS-573), where
+        /// the input gives its flags field no value; else null.</summary>
+        long? RecordedFlags(FlaggedDef fd)
+        {
+            if (_trace == null) return null;
+            if (_trace.InputNames.Contains(fd.Field.TrimStart('$'))) return null;
+            var (found, recorded) = _trace.Lookup(_trace.Flagged, fd.Anchor);
+            if (!found || recorded is bool or string or null) return null;
+            var (ok, numeric) = Helpers.ToFloat64(recorded);
+            return ok ? (long)Math.Floor(numeric) : null;
+        }
+
         static bool GroupHasData(FlaggedGroup group, Dictionary<string, object?> data)
             => group.Fields.Any(f => !string.IsNullOrEmpty(f.Name) && data.ContainsKey(f.Name))
                || ClaimableFields(group.Fields).Any(f => data.ContainsKey(f.Name));
@@ -1080,9 +1267,13 @@ public static class SchemaEncoder
             // name is taken only where it is a construct in its group, as the reference
             // takes it.
             var members = new List<SchemaField>();
+            // PS-573: with a decode record and no flags in the input, the groups its recorded
+            // flags set.
+            var recordedFlags = RecordedFlags(fd);
             foreach (var group in fd.Groups)
             {
-                if (!GroupHasData(group, data)) continue;
+                if (recordedFlags is { } set ? ((set >> group.Bit) & 1) == 0 : !GroupHasData(group, data))
+                    continue;
                 if (group.Fields.Any(gf => string.IsNullOrEmpty(gf.Name)))
                 {
                     // A construct in the group - a nested flagged block, a byte_group - is
@@ -1327,7 +1518,11 @@ public static class SchemaEncoder
                     // while each was decoded, so a name_from template resolves the same way.
                     asMap = new Dictionary<string, object?>(asMap) { [field.Index!] = position + field.IndexBase };
                 }
-                var element = EncodeFieldList(field.Fields, asMap);
+                // PS-572: the element's position, as its decode recorded it.
+                var pushed = _trace?.Push(field.Node, "repeat", position) ?? false;
+                byte[] element;
+                try { element = EncodeFieldList(field.Fields, asMap); }
+                finally { _trace?.Pop(pushed); }
                 FrameMeta.Check(element, MetaOf(element));   // PS-551: an element closes with it
                 output.AddRange(element);
                 position++;
@@ -1345,7 +1540,8 @@ public static class SchemaEncoder
         /// earlier field that produced it.
         /// </remarks>
         byte[] EncodeMatch(SchemaField match, Dictionary<string, object?> data,
-            IReadOnlyList<byte>? peeked = null)
+            IReadOnlyList<byte>? peeked = null, SchemaField? owner = null,
+            List<SchemaField>? siblings = null)
         {
             object? discriminator = null;
             if (!string.IsNullOrEmpty(match.Name) && data.TryGetValue(match.Name, out var named))
@@ -1396,9 +1592,48 @@ public static class SchemaEncoder
                 discriminator = (double)peekValue;
             }
 
+            // PS-573: where the input gives no discriminator, the decode record's is written
+            // and its case taken - before any derivation, which PS-574 makes the fallback.
+            bool given = discriminator != null;
+            if (!string.IsNullOrEmpty(match.On) && _trace != null
+                && _trace.Supplied.Contains(match.On.TrimStart('$')))
+                given = false;          // an internal value the record supplied, not input
+            Dictionary<string, object?>? record = null;
+            if (_trace != null)
+            {
+                var (found, entry) = _trace.Lookup(_trace.Matches, match.Anchor);
+                if (found) record = entry as Dictionary<string, object?>;
+            }
+            bool fromRecord = false;
+            MatchCase? recordedCase = null;
+            List<SchemaField>? recordedFallback = null;
+            if (!given && record != null)
+            {
+                if (match.MatchRemaining)
+                {
+                    fromRecord = true;
+                    recordedCase = RecordedCase(match, record.GetValueOrDefault("case"));
+                    if (recordedCase == null)
+                        recordedFallback = DefaultCaseOf(match) == null
+                            ? (DefaultBody(match) ?? new List<SchemaField>()) : null;
+                    recordedCase ??= DefaultCaseOf(match);
+                }
+                else if (discriminator == null)
+                    discriminator = record.GetValueOrDefault("value");
+            }
+
             if (match.Length > 0)
                 CheckWrittenDiscriminator(discriminator, match.Name);              // PS-557
-            MatchCase? matched = null;
+            if (match.Length > 0 && discriminator != null
+                && Helpers.ToFloat64(discriminator) is (true, var early))
+            {
+                // PS-168, before a case is looked for, as the spec prototype checks it.
+                var (elow, ehigh) = IntegerBounds(match.Length * 8, false);
+                CheckFits(Math.Round(early, MidpointRounding.ToEven), elow, ehigh,
+                    !string.IsNullOrEmpty(match.Name) ? match.Name!
+                    : !string.IsNullOrEmpty(match.Var) ? match.Var! : "match", discriminator);
+            }
+            MatchCase? matched = recordedCase;
             if (discriminator != null)
             {
                 foreach (var c in match.Cases)
@@ -1411,10 +1646,15 @@ public static class SchemaEncoder
                     }
                 }
             }
+            if (record != null && !given)
+                CheckRecordedCase(match, matched != null && !IsDefaultCase(matched) ? matched : null,
+                    data, DeclaredBeside(owner, siblings));                      // PS-573
             // A known discriminator that matched no case takes the default, and takes it
             // ahead of the claimable-name heuristic: the schema said what an unmatched
             // value means, so guessing a case from the names present would contradict it.
-            List<SchemaField>? fallbackFields = null;
+            List<SchemaField>? fallbackFields = recordedFallback;
+            if (fromRecord && matched == null && fallbackFields == null)
+                fallbackFields = DefaultBody(match) ?? new List<SchemaField>();
             if (matched == null && discriminator != null)
             {
                 matched = match.Cases.FirstOrDefault(IsDefaultCase);
@@ -1472,7 +1712,7 @@ public static class SchemaEncoder
                     // fixes through a case's fields, nor a bit range before it peeked. This
                     // returned no bytes at all where the match was nameless or its default
                     // `skip`. Named by the discriminator, its `var` where it has no `name`.
-                    throw new InvalidOperationException(MissingFieldMessage(label));
+                    throw new InvalidOperationException(UndeterminedCaseMessage(label));
                 if (mode == "skip")
                     // The discriminator, if the match reads one, and nothing for the case.
                     fallbackFields = new List<SchemaField>();
@@ -1483,7 +1723,7 @@ public static class SchemaEncoder
                 else
                     // PS-442, PS-551: no discriminator given or derivable, and no case
                     // whose fields the input gives. This wrote nothing and reported nothing.
-                    throw new InvalidOperationException(MissingFieldMessage(
+                    throw new InvalidOperationException(UndeterminedCaseMessage(
                         label != "match" ? label
                         : !string.IsNullOrEmpty(match.On) ? match.On.TrimStart('$') : "match"));
             }
@@ -1496,7 +1736,7 @@ public static class SchemaEncoder
                     var (ok, numeric) = Helpers.ToFloat64(discriminator);
                     // A `default` stands for every unlisted value, so it names none to
                     // write; a zero was written here (PS-551).
-                    if (!ok) throw new InvalidOperationException(MissingFieldMessage(label));
+                    if (!ok) throw new InvalidOperationException(UndeterminedCaseMessage(label));
                     var rounded = Math.Round(numeric, MidpointRounding.ToEven);
                     var (dlow, dhigh) = IntegerBounds(match.Length * 8, false);
                     CheckFits(rounded, dlow, dhigh, label, discriminator);                 // PS-168
@@ -1529,7 +1769,7 @@ public static class SchemaEncoder
                     if (IsDefaultCase(matched!))
                         // PS-551: the default case names no value to write for the
                         // discriminator the input left out.
-                        throw new InvalidOperationException(MissingFieldMessage(label));
+                        throw new InvalidOperationException(UndeterminedCaseMessage(label));
                     var fromKey = ExactCaseValue(matched!.CaseValue);
                     if (fromKey == null)
                         throw new InvalidOperationException(
@@ -1667,17 +1907,17 @@ public static class SchemaEncoder
             if (match.MatchDefault is List<SchemaField> outerDefault)
                 Walk(outerDefault, new List<(SchemaField, MatchCase?)> { (match, null) });
             if (filled.Count == 0) return null;
-            if (filled.Count != 1) throw new InvalidOperationException(MissingFieldMessage(label));
+            if (filled.Count != 1) throw new InvalidOperationException(UndeterminedCaseMessage(label));
             var (steps, filledCase) = filled[0];
             var value = ExactCaseValue(filledCase.CaseValue);
-            if (value == null) throw new InvalidOperationException(MissingFieldMessage(label));
+            if (value == null) throw new InvalidOperationException(UndeterminedCaseMessage(label));
             foreach (var (m, branch) in steps)
             {
                 MatchCase? selected = m.Cases.FirstOrDefault(c => !IsDefaultCase(c)
                     && CaseMatches((double)value.Value, c.CaseValue));
                 if (selected == null && branch != null && IsDefaultCase(branch)) selected = branch;
                 if (!ReferenceEquals(selected, branch))
-                    throw new InvalidOperationException(MissingFieldMessage(label));
+                    throw new InvalidOperationException(UndeterminedCaseMessage(label));
             }
             var outer = steps[0].branch;
             return outer != null
@@ -2228,10 +2468,15 @@ public static class SchemaEncoder
 
             // Payload order, so a payload round-trips; entries of one name keep the order taken.
             var output = new List<byte>();
+            int entryIndex = 0;
             foreach (var w in written.OrderBy(w => w.position).ThenBy(w => w.seq))
             {
                 var tag = EncodeTLVTag(w.key, tlv);
-                var value = EncodeFieldList(w.fields, w.data);
+                // PS-572: the entry's index in payload order, as its decode recorded it.
+                var pushed = _trace?.Push(tlv.Anchor, "tlv", entryIndex++) ?? false;
+                byte[] value;
+                try { value = EncodeFieldList(w.fields, w.data); }
+                finally { _trace?.Pop(pushed); }
                 FrameMeta.Check(value, MetaOf(value));   // PS-551: a tlv value is measured whole
                 output.AddRange(tag);
                 if (lengthSize > 0)

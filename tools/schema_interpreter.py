@@ -244,8 +244,10 @@ def record_declared_fields(fields: Any, skip: Any = None) -> List[str]:
     """Every data field a field list can report, by name, looking through the constructs
     whose fields merge into the enclosing object (match, tlv, flagged, byte_group,
     records): the spec prototype's `declared_fields`, which PS-573's "a field that only
-    another case declares" is checked against. A match's `default` beside its cases is not
-    looked into, as the prototype does not."""
+    another case declares" is checked against. A match's `default` list beside its cases is
+    looked into too, where the prototype's is not: a name a default branch reports is
+    declared by that branch (dingtek df702's `angle`, in a nested match's default, read as
+    declared only by another case)."""
     found: List[str] = []
 
     def walk(items):
@@ -266,6 +268,7 @@ def record_declared_fields(fields: Any, skip: Any = None) -> List[str]:
                 walk(spec.get('fields'))
                 for body in (spec.get('cases') or {}).values():
                     walk(body if isinstance(body, list) else None)
+                walk(spec.get('default') if isinstance(spec.get('default'), list) else None)
                 for group in spec.get('groups') or []:
                     walk(group.get('fields') if isinstance(group, dict) else None)
     walk(fields if isinstance(fields, list) else None)
@@ -970,7 +973,7 @@ def fixed_element_size(fields):
 
 
 #: Names clause 7 reserves for interpreter metadata (PS-176, PS-433).
-RESERVED_OUTPUT_NAMES = ('_meta', '_quality', '_warnings')
+RESERVED_OUTPUT_NAMES = ('_meta', '_quality', '_warnings', '_decode')    # _decode: CR-2026-162
 
 
 def internal_name_errors(schema):
@@ -6234,11 +6237,11 @@ class SchemaInterpreter:
             result.errors.append(direction_error)
             return result
 
+        # Track current data for match references
+        self._current_data = result.data
         # PS-572: the record `interpret(..., decode_record=True)` keeps; decode() itself
         # never reports it.
         self._trace = trace
-        # Track current data for match references
-        self._current_data = result.data
         # Variable storage for Option B match references
         self._variables = {}
         # PS-523, PS-532: the value a looked-up field reports, by the names it binds,

@@ -59,7 +59,8 @@ func parseWave6bKeys(f *Field, fm map[string]any) {
 
 // reservedOutputNames are the names clause 7 reserves for interpreter metadata (PS-176,
 // PS-433).
-var reservedOutputNames = map[string]bool{"_meta": true, "_quality": true, "_warnings": true}
+var reservedOutputNames = map[string]bool{"_meta": true, "_quality": true, "_warnings": true,
+	"_decode": true} // `_decode`: PS-433 as CR-2026-162 amends it
 
 // internalNameError is internal_name_errors: no field may take a name reserved for
 // interpreter metadata (PS-433).

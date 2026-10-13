@@ -14,7 +14,7 @@ namespace PayloadSchema;
 public static partial class SchemaParser
 {
     /// <summary>Names clause 7 reserves for interpreter metadata (PS-176, PS-433).</summary>
-    static readonly string[] ReservedOutputNames = { "_meta", "_quality", "_warnings" };
+    static readonly string[] ReservedOutputNames = { "_meta", "_quality", "_warnings", "_decode" };
 
     /// <summary>PS-427: sentinel is a non-empty list of integers. PS-428: omit or flag.</summary>
     static void CheckFieldRules(YamlMappingNode fm)
