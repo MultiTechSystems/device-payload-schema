@@ -51,7 +51,7 @@ func TestUnmappedValueOmitsField(t *testing.T) {
 }
 
 func TestLookupDefault(t *testing.T) {
-	s, _ := ParseSchema("name: def\nfields:\n  - name: state\n    type: u8\n    lookup: {1: on, default: unknown}\n")
+	s, _ := ParseSchema("name: def\nfields:\n  - name: state\n    type: u8\n    lookup: {1: 'on', default: unknown}\n")
 	out, _ := s.Decode([]byte{0x09})
 	if out["state"] != "unknown" {
 		t.Errorf("state = %#v, want \"unknown\"", out["state"])

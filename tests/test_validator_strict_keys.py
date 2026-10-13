@@ -87,8 +87,8 @@ def test_duplicate_lookup_key_fails():
           - name: mode
             type: u8
             lookup:
-              0: off
-              1: on
+              0: "off"
+              1: "on"
               0x00: idle
         """)
     with pytest.raises(DuplicateKeyError) as info:

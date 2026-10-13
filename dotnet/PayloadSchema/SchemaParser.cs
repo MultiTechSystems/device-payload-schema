@@ -13,6 +13,8 @@ public static partial class SchemaParser
         var yaml = new YamlStream();
         yaml.Load(new StringReader(yamlOrJson));
         var root = (YamlMappingNode)yaml.Documents[0].RootNode;
+        // CR-2026-164 (PS-575): a plain YAML 1.1 boolean scalar, before anything is read.
+        CheckYamlBooleans(root);
         // CR-2026-045: splice every $ref first, rejecting what cannot be (PS-345 to PS-349).
         return ParseRoot(ExpandRefs(root));
     }

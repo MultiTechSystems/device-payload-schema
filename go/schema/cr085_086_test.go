@@ -187,8 +187,8 @@ func TestCR086AValueTheGuardLetsThroughIsCompared(t *testing.T) {
 // sequence lacking the index would fail the decode.
 func TestCR086RangeBeforeLookup(t *testing.T) {
 	schema := "name: probe\nfields:\n" +
-		"  - {name: m, type: u8, valid_range: [0, 1], out_of_range: omit, lookup: {0: off, 1: on, 5: odd}}\n" +
-		"  - {name: s, type: u8, valid_range: [0, 1], lookup: [off, on, mid, high, x, y]}\n"
+		"  - {name: m, type: u8, valid_range: [0, 1], out_of_range: omit, lookup: {0: 'off', 1: 'on', 5: odd}}\n" +
+		"  - {name: s, type: u8, valid_range: [0, 1], lookup: ['off', 'on', mid, high, x, y]}\n"
 	out, err := cr085Decode(t, schema, "0505")
 	if err != nil {
 		t.Fatal(err)

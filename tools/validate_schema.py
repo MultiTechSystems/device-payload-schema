@@ -25,7 +25,7 @@ from dataclasses import dataclass, field
 
 # Add tools to path
 sys.path.insert(0, str(Path(__file__).parent))
-from schema_interpreter import (SchemaInterpreter, DecodeResult, byte_group_errors,
+from schema_interpreter import (SchemaInterpreter, YamlBooleanError, check_yaml_booleans, DecodeResult, byte_group_errors,
                                 byte_group_endian,
                                 encoding_errors, expand_refs, fport_declaration_errors,
                                 annotation_schema_errors, reference_errors,
@@ -166,6 +166,7 @@ def load_schema_text(text: str, filename: str = "") -> Any:
             except yaml.YAMLError:
                 pass
             raise exc
+    check_yaml_booleans(text)  # PS-575, before any value is constructed
     return yaml.load(text, Loader=DuplicateKeyLoader)  # noqa: S506 - SafeLoader
 
 
@@ -2078,7 +2079,7 @@ def main():
     # grepping for "Schema: INVALID" sees it.
     try:
         schema = load_schema_file(args.schema)
-    except DuplicateKeyError as e:
+    except (DuplicateKeyError, YamlBooleanError) as e:
         result = ValidationResult(schema_valid=False)
         result.schema_errors.append(str(e))
         result.messages.append(ValidationMessage(ValidationLevel.ERROR, str(e)))
