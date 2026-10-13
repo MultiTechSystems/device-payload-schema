@@ -60,14 +60,12 @@ fields:
         "[255, 254]":
           - name: reset_event
             type: u8
-            sensor: none
             lookup: {1: "reset", default: "reset"}
             # raw: readResetEvent(1)
         # DEVICE STATUS
         "[255, 11]":
           - name: device_status
             type: u8
-            sensor: none
             lookup: {1: "on", default: "on"}
             # raw: readDeviceStatus(1)
         # SWITCH STATE
@@ -101,7 +99,6 @@ fields:
         "[255, 43]":
           - name: function_key_event
             type: u8
-            sensor: none
             lookup: {1: "yes", default: "yes"}
             # raw: readYesNoStatus(1)
 

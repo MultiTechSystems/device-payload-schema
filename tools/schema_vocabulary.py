@@ -174,7 +174,6 @@ VOCABULARY: Dict[str, Dict[str, Tuple[Tuple[str, ...], str]]] = {
         "ipso": (("py", "score"), "annotation"),
         "senml": (("py", "score"), "annotation"),
         "semantic": (("py", "score"), "annotation"),
-        "sensor": (("score",), "scorer hint overriding keyword detection"),
     },
     "match": {
         "field": (_DECODERS, "discriminator reference"),

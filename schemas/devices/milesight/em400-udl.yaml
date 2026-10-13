@@ -16,7 +16,6 @@ fields:
         "[1, 117]":
           - name: battery
             unit: "%"
-            sensor: percentage
             ipso: {object: 3320, instance: 0, resource: 5700}
             senml: {name: "battery", unit: "/100"}
             semantic: "battery"
@@ -25,7 +24,6 @@ fields:
         "[3, 103]":
           - name: temperature
             unit: "°C"
-            sensor: temperature
             ipso: {object: 3303, instance: 0, resource: 5700}
             senml: {name: "temperature", unit: "Cel"}
             semantic: "temperature"
@@ -45,7 +43,6 @@ fields:
         "[131, 103]":
           - name: temperature
             unit: "°C"
-            sensor: temperature
             ipso: {object: 3303, instance: 0, resource: 5700}
             senml: {name: "temperature", unit: "Cel"}
             semantic: "temperature"

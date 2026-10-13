@@ -60,14 +60,12 @@ fields:
         "[255, 254]":
           - name: reset_event
             type: u8
-            sensor: none
             lookup: {1: "reset", default: "reset"}
             # raw: readResetEvent(1)
         # DEVICE STATUS
         "[255, 11]":
           - name: device_status
             type: u8
-            sensor: none
             lookup: {1: "on", default: "on"}
             # raw: readDeviceStatus(1)
         # VOLTAGE
@@ -96,7 +94,6 @@ fields:
         "[8, 112]":
           - name: socket_status
             type: u8
-            sensor: none
             lookup: ["off", "on"]
             # raw: readSocketStatus(bytes[i])
         # TEMPERATURE (@since v1.9)
@@ -116,12 +113,10 @@ fields:
           - name: temperature_sensor_status
             type: u16[0:15]
             consume: 0
-            sensor: none
             lookup: {65535: "read failed"}
             # raw: readSensorStatus(1) / readSensorStatus(2)
           - name: temperature
             unit: "°C"
-            sensor: temperature
             ipso: {object: 3303, instance: 0, resource: 5700}
             senml: {name: "temperature", unit: "Cel"}
             semantic: "temperature"
@@ -131,7 +126,6 @@ fields:
         "[137, 103]":
           - name: temperature
             unit: "°C"
-            sensor: temperature
             ipso: {object: 3303, instance: 0, resource: 5700}
             senml: {name: "temperature", unit: "Cel"}
             semantic: "temperature"
@@ -139,14 +133,12 @@ fields:
             div: 10
           - name: temperature_alarm
             type: u8
-            sensor: none
             lookup: ["threshold alarm release", "threshold alarm", "overheat alarm", "mutation alarm"]
             # raw: readTemperatureAlarm(bytes[i + 2])
         # TEMPERATURE MUTATION ALARM (@since v1.9 @deprecated v2.1)
         "[153, 103]":
           - name: temperature
             unit: "°C"
-            sensor: temperature
             ipso: {object: 3303, instance: 0, resource: 5700}
             senml: {name: "temperature", unit: "Cel"}
             semantic: "temperature"
@@ -157,7 +149,6 @@ fields:
             div: 10
           - name: temperature_alarm
             type: u8
-            sensor: none
             lookup: ["threshold alarm release", "threshold alarm", "overheat alarm", "mutation alarm"]
             # raw: readTemperatureAlarm(3)
 

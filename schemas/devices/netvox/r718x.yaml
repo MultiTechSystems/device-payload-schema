@@ -86,7 +86,6 @@ ports:
                     - name: FillLevel
                       type: u8
                       unit: "%"
-                      sensor: percentage
                       ipso: {object: 3320, instance: 0, resource: 5700}
                       senml: {name: "fill_level", unit: "/100"}
                       semantic: "fill.level"
@@ -98,7 +97,6 @@ ports:
                   - name: FillLevel
                     type: u8
                     unit: "%"
-                    sensor: percentage
                     ipso: {object: 3320, instance: 0, resource: 5700}
                     senml: {name: "fill_level", unit: "/100"}
                     semantic: "fill.level"
@@ -180,20 +178,16 @@ ports:
               - name: MinTime
                 type: u16
                 unit: "s"
-                sensor: none
               - name: MaxTime
                 type: u16
                 unit: "s"
-                sensor: none
               - name: BatteryChange
                 type: u8
                 div: 10
                 unit: "V"
-                sensor: none
               - name: DistanceChange
                 type: u16
                 unit: "mm"
-                sensor: none
               - match:
                   field: $device_type
                   default: skip
@@ -204,22 +198,18 @@ ports:
                         div: 10
                         unit: "°C"
                         senml: {unit: Cel}
-                        sensor: none
             132:  # GetOnDistanceThresholdRsp
               - name: OnDistanceThreshold
                 type: u16
                 unit: "mm"
-                sensor: none
             134:  # GetFillMaxDistanceRsp
               - name: FillMaxDistance
                 type: u16
                 unit: "mm"
-                sensor: none
             140:  # GetDeadZoneDistanceRsp
               - name: DeadZoneDistance
                 type: u16
                 unit: "mm"
-                sensor: none
       # Command frames are fixed at 11 bytes too: CmdID, DeviceType and a 9-byte payload
       # whose unused tail is "Reserved (n Bytes, Fixed 0x00)" - 8 after a response's
       # Status, 7 after a 2-byte value, 9 for a request with no body (R718X and R718PE

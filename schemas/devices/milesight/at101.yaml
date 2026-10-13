@@ -60,21 +60,18 @@ fields:
         "[255, 254]":
           - name: reset_event
             type: u8
-            sensor: none
             lookup: {1: "reset", default: "reset"}
             # raw: readResetEvent(1)
         # DEVICE STATUS
         "[255, 11]":
           - name: device_status
             type: u8
-            sensor: none
             lookup: {1: "on", default: "on"}
             # raw: readDeviceStatus(1)
         # BATTERY
         "[1, 117]":
           - name: battery
             unit: "%"
-            sensor: percentage
             ipso: {object: 3320, instance: 0, resource: 5700}
             senml: {name: "battery", unit: "/100"}
             semantic: "battery"
@@ -84,7 +81,6 @@ fields:
         "[3, 103]":
           - name: temperature
             unit: "°C"
-            sensor: temperature
             ipso: {object: 3303, instance: 0, resource: 5700}
             senml: {name: "temperature", unit: "Cel"}
             semantic: "temperature"
@@ -100,14 +96,12 @@ fields:
         "[7, 0]":
           - name: tamper_status
             type: u8
-            sensor: none
             lookup: ["install", "uninstall"]
             # raw: readTamperStatus(bytes[i])
         # TEMPERATURE WITH ABNORMAL
         "[131, 103]":
           - name: temperature
             unit: "°C"
-            sensor: temperature
             ipso: {object: 3303, instance: 0, resource: 5700}
             senml: {name: "temperature", unit: "Cel"}
             semantic: "temperature"
@@ -115,7 +109,6 @@ fields:
             div: 10
           - name: temperature_alarm
             type: u8
-            sensor: none
             lookup: ["normal", "abnormal"]
             # raw: readTemperatureAlarm(bytes[i + 2])
 

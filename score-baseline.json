@@ -10855,9 +10855,9 @@
     },
     {
       "schema_path": "schemas/devices/milesight/ts201v2.yaml",
-      "timestamp": "2026-10-11T18:41:05.443206-05:00",
-      "score": 92.0,
-      "tier": "GOLD",
+      "timestamp": "2026-10-12T20:27:42.995003-05:00",
+      "score": 97.0,
+      "tier": "PLATINUM",
       "details": {
         "schema_valid": true,
         "schema_errors": [],
@@ -10884,15 +10884,12 @@
           "total_fields": 16,
           "ipso_mapped": 2,
           "ipso_missing": [
-            "temperature_unit: add ipso: {object: 3303}",
             "event.humidity: add ipso: {object: 3304}"
           ],
           "senml_mapped": 3,
-          "senml_missing": [
-            "temperature_unit: add senml: {unit: \"Cel\"}"
-          ],
+          "senml_missing": [],
           "semantic_mapped": 3,
-          "detectable_sensors": 4,
+          "detectable_sensors": 3,
           "annotation_errors": []
         },
         "provenance": {
@@ -10905,11 +10902,8 @@
         }
       },
       "recommendations": [
-        "Add IPSO object mappings for standard sensors (2 fields)",
-        "  \u2192 temperature_unit: add ipso: {object: 3303}",
-        "  \u2192 event.humidity: add ipso: {object: 3304}",
-        "Add SenML units for standard sensors (1 fields)",
-        "  \u2192 temperature_unit: add senml: {unit: \"Cel\"}"
+        "Add IPSO object mappings for standard sensors (1 fields)",
+        "  \u2192 event.humidity: add ipso: {object: 3304}"
       ]
     },
     {

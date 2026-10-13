@@ -60,14 +60,12 @@ fields:
         "[255, 254]":
           - name: reset_event
             type: u8
-            sensor: none
             lookup: {1: "reset", default: "reset"}
             # raw: readResetEvent(1)
         # DEVICE STATUS
         "[255, 11]":
           - name: device_status
             type: u8
-            sensor: none
             lookup: {1: "on", default: "on"}
             # raw: readDeviceStatus(1)
         # BATTERY(MAIN)
@@ -100,7 +98,6 @@ fields:
             type: u16
           - name: total_count_alarm
             type: u8
-            sensor: none
             # raw: readAlarmType(bytes[i + 4])
             lookup: {1: "threshold_alarm", default: "unknown"}
         # PERIOD IN / OUT ALARM
@@ -111,7 +108,6 @@ fields:
             type: u16
           - name: period_count_alarm
             type: u8
-            sensor: none
             # raw: readAlarmType(bytes[i + 4])
             lookup: {1: "threshold_alarm", default: "unknown"}
         # TIMESTAMP

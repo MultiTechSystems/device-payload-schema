@@ -40,7 +40,6 @@ fields:
         "[255, 11]":
           - name: device_status
             type: u8
-            sensor: none
             lookup: {1: "on", default: "on"}
             # raw: readOnOffStatus(1)
         # LORAWAN CLASS
@@ -67,7 +66,6 @@ fields:
         "[1, 117]":
           - name: battery
             unit: "%"
-            sensor: percentage
             ipso: {object: 3320, instance: 0, resource: 5700}
             senml: {name: "battery", unit: "/100"}
             semantic: "battery"
@@ -77,7 +75,6 @@ fields:
         "[2, 103]":
           - name: temperature
             unit: "°C"
-            sensor: temperature
             ipso: {object: 3303, instance: 0, resource: 5700}
             senml: {name: "temperature", unit: "Cel"}
             semantic: "temperature"
@@ -87,7 +84,6 @@ fields:
         "[3, 104]":
           - name: humidity
             unit: "%"
-            sensor: humidity
             ipso: {object: 3304, instance: 0, resource: 5700}
             senml: {name: "humidity", unit: "%RH"}
             semantic: "humidity"
@@ -110,7 +106,6 @@ fields:
           - name: nh3_sensor_status
             type: u16[0:15]
             consume: 0
-            sensor: none
             lookup: {65535: "device error"}
             # raw: readSensorStatus(nh3_raw_data)
           - name: nh3
@@ -133,7 +128,6 @@ fields:
           - name: h2s_sensor_status
             type: u16[0:15]
             consume: 0
-            sensor: none
             lookup: {65535: "device error"}
             # raw: readSensorStatus(h2s_raw_data)
           - name: h2s
@@ -156,7 +150,6 @@ fields:
           - name: h2s_sensor_status
             type: u16[0:15]
             consume: 0
-            sensor: none
             lookup: {65535: "device error"}
             # raw: readSensorStatus(h2s_raw_data)
           - name: h2s

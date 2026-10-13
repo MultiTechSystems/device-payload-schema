@@ -38,7 +38,7 @@ Generated inventory of this repository: what lives where, what each document cov
 | [`FUTURE-FEATURES.md`](FUTURE-FEATURES.md) | Status of semantic enhancements for the Payload Schema language. | 230 |
 | [`GETTING-STARTED.md`](GETTING-STARTED.md) | Create one schema, generate codecs for all platforms. | 401 |
 | [`INTEGRATION-LAYER.md`](INTEGRATION-LAYER.md) | How decoded payloads are transformed into WoT Thing Descriptions, SenML, IPSO, and other output... | 562 |
-| [`IPSO-REFERENCE.md`](IPSO-REFERENCE.md) | Complete reference for IPSO Smart Objects (OMA LwM2M) used in LoRaWAN payload schemas. | 138 |
+| [`IPSO-REFERENCE.md`](IPSO-REFERENCE.md) | Complete reference for IPSO Smart Objects (OMA LwM2M) used in LoRaWAN payload schemas. | 139 |
 | [`LANGUAGE-ANALYSIS.md`](LANGUAGE-ANALYSIS.md) | This document explains the design decisions behind the Payload Schema language. | 390 |
 | [`OUTPUT-FORMATS.md`](OUTPUT-FORMATS.md) | The Payload Schema decoder can output data in multiple formats for different platforms and... | 602 |
 | [`SCHEMA-DEVELOPMENT-GUIDE.md`](SCHEMA-DEVELOPMENT-GUIDE.md) | Best practices for creating complete, validated payload schemas. | 215 |
@@ -124,14 +124,14 @@ Generated inventory of this repository: what lives where, what each document cov
 ## Device schemas
 
 355 schemas under `schemas/devices/`.
-Mean quality score 82.0% (PLATINUM 43, GOLD 50, SILVER 241, BRONZE 6, REJECTED 15). Tiers follow the specification's Section 10: Platinum 95-100%, Gold 85-94%, Silver 70-84%, Bronze 60-69%, Rejected below 60%. Gold and Platinum also have gates (PS-239) -- see `../AGENTS.md`. A high score shows self-consistency with a schema's own test vectors, not that the vectors are right.
+Mean quality score 82.0% (PLATINUM 44, GOLD 49, SILVER 241, BRONZE 6, REJECTED 15). Tiers follow the specification's Section 10: Platinum 95-100%, Gold 85-94%, Silver 70-84%, Bronze 60-69%, Rejected below 60%. Gold and Platinum also have gates (PS-239) -- see `../AGENTS.md`. A high score shows self-consistency with a schema's own test vectors, not that the vectors are right.
 
 ### By vendor
 
 | Vendor | Schemas | Vectors | Tiers |
 |---|---|---|---|
 | _language-conformance | 143 | 312 | GOLD 1, SILVER 138, BRONZE 4 |
-| milesight | 84 | 1427 | PLATINUM 30, GOLD 35, SILVER 16, REJECTED 3 |
+| milesight | 84 | 1427 | PLATINUM 31, GOLD 34, SILVER 16, REJECTED 3 |
 | decentlab | 58 | 204 | PLATINUM 10, GOLD 11, SILVER 32, BRONZE 1, REJECTED 4 |
 | _library-composed | 49 | 57 | SILVER 49 |
 | makerfabs | 6 | 0 | REJECTED 6 |
@@ -466,7 +466,7 @@ Mean quality score 82.0% (PLATINUM 43, GOLD 50, SILVER 241, BRONZE 6, REJECTED 1
 | `milesight/gs301` | 23 | 31 | fields | 100% | PLATINUM |
 | `milesight/ts101` | 14 | 15 | fields | 100% | PLATINUM |
 | `milesight/ts201` | 16 | 23 | fields | 100% | PLATINUM |
-| `milesight/ts201v2` | 24 | 20 | fields | 92% | GOLD |
+| `milesight/ts201v2` | 24 | 20 | fields | 97% | PLATINUM |
 | `milesight/ts30x` | 26 | 20 | fields | 80% | SILVER |
 | `milesight/uc100` | 7 | 11 | fields | 88% | SILVER |
 | `milesight/uc1114` | 6 | 0 | fields | 28% | REJECTED |
