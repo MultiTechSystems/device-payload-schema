@@ -83,9 +83,6 @@ public class Field {
     private String delimiter;
     private String prefix;
     
-    // Formula
-    private String formula;
-
     // Computed fields (type: number)
     /** Source of a computed value: {@code $field_name}, or a literal number. */
     private String ref;
@@ -359,8 +356,6 @@ public class Field {
     public String getPrefix() { return prefix; }
     public void setPrefix(String prefix) { this.prefix = prefix; }
     
-    public String getFormula() { return formula; }
-    public void setFormula(String formula) { this.formula = formula; }
 
     public String getRef() { return ref; }
     public void setRef(String ref) { this.ref = ref; }
@@ -445,7 +440,6 @@ public class Field {
         /** Bound stages (PS-115). This binding had none and passed the value through. */
         private Double floor;
         private Double ceiling;
-        private double[] clamp;
 
         public String getTies() { return ties; }
         public void setTies(String ties) { this.ties = ties; }
@@ -453,8 +447,6 @@ public class Field {
         public void setFloor(Double floor) { this.floor = floor; }
         public Double getCeiling() { return ceiling; }
         public void setCeiling(Double ceiling) { this.ceiling = ceiling; }
-        public double[] getClamp() { return clamp; }
-        public void setClamp(double[] clamp) { this.clamp = clamp; }
 
         public Boolean getSqrt() { return sqrt; }
         public void setSqrt(Boolean sqrt) { this.sqrt = sqrt; }

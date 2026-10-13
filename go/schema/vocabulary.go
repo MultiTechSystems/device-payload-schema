@@ -1,6 +1,7 @@
 package schema
 
 import (
+	"errors"
 	"fmt"
 	"sort"
 	"strconv"
@@ -234,6 +235,9 @@ func checkTypeVocabulary(raw map[string]any) error {
 	if err := checkPortDeclarations(raw); err != nil {
 		return err
 	}
+	if err := checkWithdrawnPorts(raw); err != nil { // CR-2026-159
+		return err
+	}
 	if err := check(raw["fields"], "fields"); err != nil {
 		return err
 	}
@@ -281,7 +285,7 @@ func asStringMap(v any) map[string]any {
 // transformOperations are the stages PS-098 and the PS-115 table define, keyed by name.
 // `op` names an operation instead; `round` is the only one (PS-390).
 var transformOperations = []string{"add", "mult", "div", "sqrt", "abs", "pow", "log10", "log",
-	"floor", "ceiling", "clamp", "op"}
+	"floor", "ceiling", "op"}
 
 // checkFieldRules holds the per-field rules a schema is rejected for at load, as the
 // specification requires of each.
@@ -295,6 +299,10 @@ var unsignedTypes = map[string]bool{"u8": true, "u16": true, "u24": true, "u32":
 	"uint8": true, "uint16": true, "uint24": true, "uint32": true, "uint64": true}
 
 func checkFieldRules(field map[string]any, at string) error {
+	// CR-2026-159: formula, encode_formula, and min/max on a field that is no repeat.
+	if err := checkWithdrawnField(field); err != nil {
+		return err
+	}
 	// PS-426: match_value is withdrawn. PS-422: `encoding` is a named code on a uN.
 	if _, ok := field["match_value"]; ok {
 		return fmt.Errorf("%s: match_value is withdrawn; write a signed type (sN), a signed bit range (sN[start:end]), encoding, match or guard instead (PS-426)", at)
@@ -443,6 +451,10 @@ func checkTransformStages(transform any, at string) error {
 		if _, ok := stage["round"]; ok {
 			return fmt.Errorf("%s: `{round: n}` is not a transform stage; write "+
 				"{op: round, decimals: n} (PS-390)", where)
+		}
+		// CR-2026-159: `clamp` is withdrawn, with what replaces it.
+		if _, ok := stage["clamp"]; ok {
+			return errors.New(withdrawnClamp)
 		}
 		var unknown, operations []string
 		for _, key := range sortedKeys(stage) {

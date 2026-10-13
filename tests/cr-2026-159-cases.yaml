@@ -1,0 +1,184 @@
+# CR-2026-159: constructs withdrawn for want of any use or of any test.
+#
+# `formula`, `encode_formula`, a transform's `clamp` and a port's `confirmed` are rejected at
+# load with what replaces them; `min` and `max` are rejected on every field that is not a
+# repeat (they bound a repeat's element count - a value range is `valid_range`, PS-395).
+# `ties: even` written out, a repeat's `min`/`max` and a `valid_range` stay valid, and a
+# `valid_range` does not reject on encode.
+#
+# One case list, read by the reference (tests/test_cr_2026_159_withdrawals.py, which also runs
+# the validator, the TS013 generator and the binary converter for C over it), Go
+# (go/schema/cr159_test.go), Java (CR2026159Test.java) and C# (CR2026_159Tests.cs), so every
+# loader refuses the same schemas with the same text. A rejected schema cannot be a corpus
+# vector, which is why this is here rather than in schemas/devices.
+#
+# Each case gives `schema` (YAML text) and either `error` - the whole message the load
+# reports, which is the spec prototype's text - or `payload` (hex) and `expected` (JSON
+# text): the schema loads, decodes the payload to exactly that object and re-encodes it to
+# the payload; a case with `encode` (JSON text) also encodes that object to `encoded` (hex).
+# A rejected case with `fport` is decoded on that port (a `ports` schema).
+
+cases:
+
+# --- Rejected, naming what replaces it -----------------------------------------------
+
+- name: formula
+  schema: |
+    name: t
+    fields:
+      - {name: v, type: u8, formula: "x * 2"}
+  error: "`formula` is withdrawn; use `compute`, `polynomial`, `transform` or `guard` (CR-2026-159, PS-448)"
+
+- name: formula_on_a_computed_field
+  schema: |
+    name: t
+    fields:
+      - {name: a, type: u8}
+      - {name: b, type: number, formula: "$a + 1"}
+  error: "`formula` is withdrawn; use `compute`, `polynomial`, `transform` or `guard` (CR-2026-159, PS-448)"
+
+- name: formula_in_a_tlv_case
+  schema: |
+    name: t
+    fields:
+      - tlv:
+          tag_size: 1
+          cases:
+            1:
+              - {name: v, type: u8, formula: "x / 2"}
+  error: "`formula` is withdrawn; use `compute`, `polynomial`, `transform` or `guard` (CR-2026-159, PS-448)"
+
+- name: encode_formula
+  schema: |
+    name: t
+    fields:
+      - {name: v, type: u8, encode_formula: "x / 2"}
+  error: "`encode_formula` is withdrawn with `formula` (CR-2026-159, PS-448)"
+
+- name: clamp_stage
+  schema: |
+    name: t
+    fields:
+      - name: v
+        type: u8
+        transform:
+          - {clamp: [0, 100]}
+  error: "`clamp` is withdrawn; use a `floor` stage and a `ceiling` stage (CR-2026-159, PS-115)"
+
+- name: clamp_stage_after_other_stages
+  schema: |
+    name: t
+    fields:
+      - name: v
+        type: u8
+        transform:
+          - {add: -20}
+          - {div: 12}
+          - {clamp: [0, 100]}
+  error: "`clamp` is withdrawn; use a `floor` stage and a `ceiling` stage (CR-2026-159, PS-115)"
+
+- name: confirmed_on_a_port
+  fport: 1
+  schema: |
+    name: t
+    ports:
+      1:
+        confirmed: true
+        fields:
+          - {name: v, type: u8}
+  error: "`confirmed` is withdrawn: confirmed or unconfirmed is chosen per transmission, not by the schema (CR-2026-159, PS-448)"
+
+- name: min_on_a_field
+  schema: |
+    name: t
+    fields:
+      - {name: v, type: u8, min: 10}
+  error: "`min` on field 'v' is withdrawn: it bounds a repeat's element count only; declare a value range with `valid_range` (CR-2026-159, PS-395)"
+
+- name: max_on_a_field
+  schema: |
+    name: t
+    fields:
+      - {name: v, type: u8, max: 100}
+  error: "`max` on field 'v' is withdrawn: it bounds a repeat's element count only; declare a value range with `valid_range` (CR-2026-159, PS-395)"
+
+- name: max_on_a_field_in_an_object
+  schema: |
+    name: t
+    fields:
+      - name: o
+        type: object
+        fields:
+          - {name: w, type: u16, max: 1440}
+  error: "`max` on field 'w' is withdrawn: it bounds a repeat's element count only; declare a value range with `valid_range` (CR-2026-159, PS-395)"
+
+- name: min_on_a_field_of_a_port
+  fport: 3
+  schema: |
+    name: t
+    ports:
+      3:
+        fields:
+          - {name: interval, type: u16, min: 1}
+  error: "`min` on field 'interval' is withdrawn: it bounds a repeat's element count only; declare a value range with `valid_range` (CR-2026-159, PS-395)"
+
+- name: max_in_a_repeat_element
+  schema: |
+    name: t
+    fields:
+      - name: r
+        type: repeat
+        count: 2
+        fields:
+          - {name: x, type: u8, max: 9}
+  error: "`max` on field 'x' is withdrawn: it bounds a repeat's element count only; declare a value range with `valid_range` (CR-2026-159, PS-395)"
+
+# --- Still valid ----------------------------------------------------------------------
+
+- name: ties_even_written_out
+  schema: |
+    name: t
+    fields:
+      - name: v
+        type: u8
+        transform:
+          - {op: round, decimals: 0, ties: even}
+  payload: "07"
+  expected: '{"v": 7}'
+
+- name: a_repeat_keeps_min_and_max
+  schema: |
+    name: t
+    fields:
+      - name: r
+        type: repeat
+        count: 2
+        min: 1
+        max: 4
+        fields:
+          - {name: x, type: u8}
+  payload: "0102"
+  expected: '{"r": [{"x": 1}, {"x": 2}]}'
+
+- name: valid_range_is_not_checked_on_encode
+  schema: |
+    name: t
+    fields:
+      - {name: v, type: u8, valid_range: [10, 100]}
+  payload: "32"
+  expected: '{"v": 50}'
+  # the encoder takes a value outside the range as it takes any other
+  encode: '{"v": 5}'
+  encoded: "05"
+
+- name: floor_and_ceiling_stages
+  schema: |
+    name: t
+    fields:
+      - name: v
+        type: u8
+        transform:
+          - {floor: 10}
+          - {ceiling: 100}
+  payload: "32"
+  expected: '{"v": 50}'

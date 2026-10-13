@@ -511,20 +511,12 @@ operator (PS-126), so a range of values is two conditions, not one, and a condit
 none or two is rejected. The same conditions serve
 `present_if`.
 
-### Formula (Deprecated)
+### Formula (Withdrawn)
 
-Legacy string-expression syntax. **Do not use it in new schemas; use `ref` + `transform`
-or `compute`.**
-
-```yaml
-- name: temp_c
-  type: number
-  formula: "($raw_temp - 4000) / 100"  # raw_temp 5000 -> 10
-```
-
-`formula` is evaluated by the Python, Go and Java interpreters and the TS013 generator.
-C# parses the key but never evaluates it, and the C interpreter has no formula support,
-so a schema relying on it does not decode the same everywhere. The same result portably:
+`formula` and `encode_formula` are withdrawn (CR-2026-159, PS-448): a schema declaring one is
+rejected at load, in every implementation, the validator and the TS013 generator:
+"`formula` is withdrawn; use `compute`, `polynomial`, `transform` or `guard` (CR-2026-159,
+PS-448)". No registry, device or example schema used either. The same result portably:
 
 ```yaml
 - name: temp_c
@@ -549,12 +541,12 @@ transform:
   - log: true         # Natural logarithm; likewise
   - floor: 0          # Lower bound: max(x, 0)
   - ceiling: 100      # Upper bound: min(x, 100)
-  - clamp: [0, 100]   # Both bounds
   - {op: round, decimals: 2}              # Half-to-even: `ties: even`, the default
   - {op: round, decimals: 2, ties: away}  # A tie rounds away from zero (toFixed)
 ```
 
-All five implementations support every stage. Any other stage - `{round: n}`, `{op:
+All five implementations support every stage. `clamp` is withdrawn (CR-2026-159, PS-115):
+write a `floor` stage and a `ceiling` stage. Any other stage - `{round: n}`, `{op:
 floor}`, `{sub: n}` - is rejected, never skipped (PS-390). A zero divisor, like the log of
 x <= 0, leaves the field absent rather than reporting NaN (PS-100, PS-282).
 
@@ -730,6 +722,12 @@ independently sourced vector is capped at Silver (PS-264).
     - name: value
       type: u16
 ```
+
+`min` and `max` bound a repeat's element count: at most `max` elements are read (default
+1000), and fewer than `min` fails the decode. On any other field they are withdrawn
+(CR-2026-159, PS-395): "`max` on field 'v' is withdrawn: it bounds a repeat's element count
+only; declare a value range with `valid_range` (CR-2026-159, PS-395)". A `valid_range` is a
+quality flag on decode; an encoder does not reject a value for being outside it.
 
 Each element is decoded like a field list of its own: it may hold computed fields,
 internal (`_`) fields and constructs. Its names exist only inside the element (PS-368):
@@ -1204,6 +1202,10 @@ ports:
       - name: battery
         type: u8
 ```
+
+A port declares `fields`, `direction` and a `description`. `confirmed` is withdrawn
+(CR-2026-159, PS-448): whether a downlink is confirmed is chosen per transmission, not by the
+schema, and a port declaring it is rejected at load.
 
 ## Downlink Encoding
 
@@ -1785,7 +1787,7 @@ MODIFIERS:    mult div add (canonical order) | lookup | polynomial | compute | g
 
 CONDITIONALS: match (value dispatch) | flagged (bitmask) | tlv (tag dispatch)
 
-TRANSFORMS:   mult div add | sqrt abs pow log10 log | floor ceiling clamp
+TRANSFORMS:   mult div add | sqrt abs pow log10 log | floor ceiling
               | {op: round, decimals: n, ties: even|away} - nothing else (PS-390)
               div 0 or log of x <= 0: the field is absent (PS-100, PS-117)
 

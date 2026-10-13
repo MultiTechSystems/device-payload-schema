@@ -124,8 +124,8 @@ VOCABULARY: Dict[str, Dict[str, Tuple[Tuple[str, ...], str]]] = {
         "count": (_DECODERS, "repeat count"),
         "byte_length": (_DECODERS, "repeat span (PS-088)"),
         "until": (_DECODERS, "repeat terminator"),
-        "max": (_DECODERS, "repeat ceiling (CR-2026-021)"),
-        "min": (("py", "go"), "repeat floor (CR-2026-021)"),
+        "max": (_DECODERS, "repeat ceiling (CR-2026-021); on any other field withdrawn (CR-2026-159)"),
+        "min": (("py", "go"), "repeat floor (CR-2026-021); on any other field withdrawn (CR-2026-159)"),
         "reserve": (_DECODERS, "bytes at the end a repeat must not read (PS-350)"),
         "trailer": (_DECODERS, "fields decoded from a repeat's reserved bytes (PS-383)"),
         "index": (_DECODERS, "a repeat element's position, from index_base (PS-366)"),
@@ -161,8 +161,6 @@ VOCABULARY: Dict[str, Dict[str, Tuple[Tuple[str, ...], str]]] = {
         "parts": (_DECODERS, "bitfield_string components"),
         "delimiter": (_DECODERS, "bitfield_string separator"),
         "prefix": (_DECODERS, "bitfield_string prefix"),
-        "formula": (("py",), "legacy formula expression (Python only)"),
-        "encode_formula": (("py",), "inverse of `formula` for encoding"),
         "encoding": (_DECODERS, "sign_magnitude | bcd | gray on a uN (PS-422)"),
         "numeral": (_DECODERS, "decimal | hex: an ascii field reported as the integer its digits give (PS-560)"),
         "on": (("py",), "legacy `type: match` discriminator (`on: $var`)"),
@@ -225,7 +223,6 @@ VOCABULARY: Dict[str, Dict[str, Tuple[Tuple[str, ...], str]]] = {
         "log10": (_DECODERS, "stage (absent where the input is <= 0, PS-117)"),
         "floor": (_DECODERS, "stage: lower clamp (PS-115)"),
         "ceiling": (_DECODERS, "stage: upper clamp (PS-115)"),
-        "clamp": (_DECODERS, "stage: [lo, hi] clamp (PS-115)"),
         "op": (_DECODERS, "named stage: {op: round} is the only one (PS-390)"),
         "decimals": (_DECODERS, "round's precision"),
         "ties": (_DECODERS, "round's tie rule: even (default) or away (PS-390)"),
@@ -354,6 +351,14 @@ VOCABULARY["field"]["separator"] = (_DECODERS, "between the bytes of a hex rende
 
 #: Known mistakes, with what to write instead. Checked before the difflib suggestion.
 HINTS: Dict[Tuple[str, str], str] = {
+    # CR-2026-159: withdrawn. The text is the spec prototype's WITHDRAWN table.
+    ("field", "formula"): ("withdrawn; use `compute`, `polynomial`, `transform` or `guard` "
+                           "(CR-2026-159, PS-448)"),
+    ("field", "encode_formula"): "withdrawn with `formula` (CR-2026-159, PS-448)",
+    ("transform", "clamp"): ("withdrawn; use a `floor` stage and a `ceiling` stage "
+                             "(CR-2026-159, PS-115)"),
+    ("port", "confirmed"): ("withdrawn: confirmed or unconfirmed is chosen per transmission, "
+                            "not by the schema (CR-2026-159, PS-448)"),
     ("transform", "sub"): "there is no `sub` stage; write `add:` with a negative value",
     ("transform", "subtract"): "write `add:` with a negative value",
     ("transform", "multiply"): "the stage is `mult:`",

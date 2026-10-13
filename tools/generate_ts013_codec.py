@@ -7,7 +7,7 @@ Generates a self-contained JS file implementing:
   - encodeDownlink(input)  → { bytes, fPort, warnings, errors }
   - decodeDownlink(input)  → { data, warnings, errors }
 
-Supports all Phase 2 features: flagged, ports, tlv, bitfield_string, formula,
+Supports all Phase 2 features: flagged, ports, tlv, bitfield_string,
 match, byte_group, modifiers, enum, repeat.
 
 Usage:
@@ -119,7 +119,7 @@ function encReverseStages(v, stages) {                // reverse_transform_stage
     }
     else if ("div" in st) v = v * Number(st.div);
     else if ("round" in st || "op" in st) continue;
-    else if ("floor" in st || "ceiling" in st || "clamp" in st) continue;
+    else if ("floor" in st || "ceiling" in st) continue;
     else encFail("cannot undo transform stage: " + (Object.keys(st).sort().join(", ") || "empty stage"));
   }
   return v;
@@ -167,7 +167,6 @@ function encReverseModifiers(v, f) {                  // _reverse_modifiers
             "it cannot be recovered");
   }
   if (!encIsNumber(v)) return v;
-  if (f.encode_formula) encFail("encode_formula is not supported by the generated codec");
   v = encReverseStages(v, f.transform);
   v = encReverseCanonical(v, f);
   if (ENC_FLOAT_TYPES.indexOf(String(f.type || "u8")) >= 0) return v;
@@ -1359,7 +1358,6 @@ function encForward(v, f) {
     else if ("pow" in st) v = Math.pow(v, Number(st.pow));
     else if ("floor" in st) v = Math.max(v, Number(st.floor));
     else if ("ceiling" in st) v = Math.min(v, Number(st.ceiling));
-    else if ("clamp" in st) v = Math.max(Number(st.clamp[0]), Math.min(Number(st.clamp[1]), v));
     else if (st.log10) v = v > 0 ? Math.log(v) / Math.LN10 : NaN;
     else if (st.log) v = v > 0 ? Math.log(v) : NaN;
     else if ("mult" in st || "div" in st || "add" in st) {
@@ -2316,29 +2314,6 @@ def field_endian_override(t: str, field: Optional[Dict[str, Any]] = None) -> Opt
     return None
 
 
-def formula_to_js(formula: str) -> str:
-    """Convert formula syntax to JavaScript (DEPRECATED)."""
-    js = formula
-    js = re.sub(r'\bpow\b', 'Math.pow', js)
-    js = re.sub(r'\babs\b', 'Math.abs', js)
-    js = re.sub(r'\bsqrt\b', 'Math.sqrt', js)
-    js = re.sub(r'\bmin\b', 'Math.min', js)
-    js = re.sub(r'\bmax\b', 'Math.max', js)
-    js = re.sub(r'\bround\b', 'roundHalfEven', js)  # half-to-even, as the interpreters use
-    js = re.sub(r'\bfloor\b', 'Math.floor', js)
-    js = re.sub(r'\bceil\b', 'Math.ceil', js)
-    js = re.sub(r'\blog\b', 'Math.log', js)
-    js = re.sub(r'\bexp\b', 'Math.exp', js)
-    js = re.sub(r'\bPI\b', 'Math.PI', js)
-    js = re.sub(r'\band\b', '&&', js)
-    js = re.sub(r'\bor\b', '||', js)
-    js = re.sub(r'\bnot\b', '!', js)
-    # $field_name → d.field_name
-    js = re.sub(r'\$([a-zA-Z_][a-zA-Z0-9_]*)', r'vars.\1', js)  # see ref_to_js
-    # C-style ternary: cond ? a : b (already JS)
-    return js
-
-
 def polynomial_to_js(coeffs: List[float], input_expr: str) -> str:
     """Generate JS for polynomial evaluation using Horner's method."""
     if not coeffs:
@@ -2508,10 +2483,6 @@ def transform_to_js(transform_ops: List[Dict[str, Any]], input_expr: str) -> str
             result = f'Math.max({result}, {op["floor"]})'
         elif 'ceiling' in op:  # Clamp upper bound
             result = f'Math.min({result}, {op["ceiling"]})'
-        elif 'clamp' in op:
-            bounds = op['clamp']
-            if isinstance(bounds, list) and len(bounds) >= 2:
-                result = f'Math.max({bounds[0]}, Math.min({bounds[1]}, {result}))'
         elif 'log10' in op and op['log10']:
             # A non-positive input has no logarithm: the field is absent (PS-117).
             # Math.log10 gives -Infinity or NaN there, which the output pass drops.
@@ -3966,13 +3937,6 @@ function writeS(buf, pos, size, value, endian) {
             def integral(expr):
                 return f'asInteger({expr}, {json.dumps(field["name"])})' if as_int else expr
             
-            # Deprecated: formula field
-            if 'formula' in field:
-                js_formula = formula_to_js(field['formula'])
-                lines.append(f'{i}  d.{name} = {js_formula};')
-                lines.append(f'{i}  vars.{name} = {js_formula};')
-                return lines
-            
             # ref or compute (PS-443): the source - the `ref` value with its `polynomial`,
             # or the `compute` result - then the modifiers, the stages and the lookup, as
             # for a field read from the payload. `compute` used to drop the modifiers,
@@ -4407,12 +4371,6 @@ function writeS(buf, pos, size, value, endian) {
         lines.append(f'{i}  else {{ ' + ' '.join(body) + ' }')
 
     def _apply_modifiers_expr(self, raw_var: str, field: Dict) -> str:
-        # Deprecated formula takes precedence
-        if 'formula' in field:
-            js = formula_to_js(field['formula'])
-            js = re.sub(r'\bx\b', raw_var, js)
-            return js
-        
         expr = canonical_modifiers_to_js(field, raw_var)
         
         # Apply transform array if present (new declarative approach)
