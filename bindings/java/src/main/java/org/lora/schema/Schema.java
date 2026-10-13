@@ -912,7 +912,6 @@ public class Schema {
         // (mult, div, add) applies however the source was written (PS-101).
 
         f.setVar((String) fm.get("var"));
-        f.setOn((String) fm.get("on"));
         f.setValue(fm.get("value"));
 
         // Enumeration type: base integer plus an integer-to-name mapping (PS-067),
@@ -1057,30 +1056,7 @@ public class Schema {
         }
         if (fm.get("index_base") instanceof Number base) f.setIndexBase(base.longValue());  // PS-530
 
-        // Cases (for match/switch)
         Object casesRaw = fm.get("cases");
-        if (casesRaw instanceof List) {
-            List<Field.Case> cases = new ArrayList<>();
-            for (Object cr : (List<?>) casesRaw) {
-                if (cr instanceof Map) {
-                    Map<String, Object> cm = (Map<String, Object>) cr;
-                    Field.Case c = new Field.Case();
-                    c.setCaseValue(cm.get("case") != null ? cm.get("case") : cm.get("match"));
-                    c.setDefault(Boolean.TRUE.equals(cm.get("default")));
-                    Object caseFieldsRaw = cm.get("fields");
-                    if (caseFieldsRaw instanceof List) {
-                        c.setFields(parseFields((List<Map<String, Object>>) caseFieldsRaw));
-                    }
-                    cases.add(c);
-                }
-            }
-            f.setCases(cases);
-        } else if (casesRaw instanceof Map && (f.getType() == FieldType.MATCH
-                || f.getType() == FieldType.SWITCH)) {
-            // Map-shaped cases on a declared match field, the same form the inline
-            // block uses. Only the list form was read here.
-            f.setCases(parseCaseMap(casesRaw));
-        }
 
         // TLV cases (map format). Parsed whenever `cases` appears alongside anything
         // that marks the block as TLV, not only when the type is already TLV: an

@@ -199,9 +199,7 @@ class TestBinarySchemaEncoder:
             'fields': [
                 {'name': 'value', 'type': 'u8'},
                 {'name': 'nested', 'type': 'object'},
-                {'name': 'conditional', 'type': 'match',
-                 'on': '$value',
-                 'cases': [{'case': 1, 'fields': []}]},
+                {'match': {'field': '$value', 'cases': {1: []}}},
             ]
         }
         binary = encoder.encode(schema)
@@ -790,30 +788,37 @@ class TestBinarySchemaV2Simple:
 class TestBinarySchemaV2Match:
     """Tests for v2 binary schema with match constructs."""
 
-    def test_encode_legacy_match(self):
-        """Test encoding legacy match syntax (type: match)."""
+    def test_legacy_type_match_is_refused(self):
+        """`type: match` with `on:` is withdrawn; the encoder says what replaces it."""
         schema = {
             'name': 'multi_msg',
             'endian': 'big',
             'fields': [
-                {'name': 'event', 'type': 'u8', 'var': 'evt',
-                 'lookup': {0: 'reset', 1: 'data'}},
-                {'name': 'payload', 'type': 'match', 'on': '$evt',
-                 'cases': [
-                     {'case': 0, 'fields': [
-                         {'name': 'device_id', 'type': 'u16'}
-                     ]},
-                     {'case': 1, 'fields': [
-                         {'name': 'temp', 'type': 's16'}
-                     ]},
-                 ]}
+                {'name': 'event', 'type': 'u8', 'var': 'evt'},
+                {'name': 'payload', 'type': 'match', 'on': '$evt', 'cases': []},
             ]
         }
-        binary = encode_schema_v2(schema)
-        decoded = decode_schema_v2(binary)
+        with pytest.raises(ValueError, match='withdrawn'):
+            encode_schema_v2(schema)
 
+    def test_a_match_round_trips_as_the_match_construct(self):
+        """A match record decodes to `match:`, not the withdrawn `type: match`."""
+        schema = {
+            'name': 'multi_msg',
+            'endian': 'big',
+            'fields': [
+                {'name': 'event', 'type': 'u8', 'var': 'evt'},
+                {'match': {'field': '$evt',
+                           'cases': {0: [{'name': 'device_id', 'type': 'u16'}],
+                                     1: [{'name': 'temp', 'type': 's16'}]}}},
+            ]
+        }
+        decoded = decode_schema_v2(encode_schema_v2(schema))
         assert len(decoded['fields']) == 2
-        assert decoded['fields'][1]['type'] == 'match'
+        match = decoded['fields'][1]['match']
+        assert match['field'] == '$evt'
+        assert [f['name'] for f in match['cases'][0]] == ['device_id']
+        assert [f['name'] for f in match['cases'][1]] == ['temp']
 
     def test_encode_option_b_match_variable(self):
         """Test encoding Option B match with variable reference."""

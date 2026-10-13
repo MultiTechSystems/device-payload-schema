@@ -84,31 +84,6 @@ function decodeFields(buf, fields, result, schema) {{
       continue;
     }}
     
-    // Handle match/conditional
-    if (field.type === 'match') {{
-      var matchVal = variables[field.on.replace('$', '')];
-      var cases = field.cases || [];
-      var matched = false;
-      
-      for (var c = 0; c < cases.length; c++) {{
-        var caseItem = cases[c];
-        if (matchCase(matchVal, caseItem['case'])) {{
-          if (caseItem.fields) {{
-            decodeFields(buf, caseItem.fields, result, schema);
-          }}
-          matched = true;
-          break;
-        }}
-      }}
-      
-      if (!matched && field['default'] === 'skip') {{
-        // Skip unknown
-      }} else if (!matched && field['default'] === 'error') {{
-        throw new Error('No matching case for value: ' + matchVal);
-      }}
-      continue;
-    }}
-    
     // Regular field
     var rawValue = decodeFieldRaw(buf, field, variables, schema);
     var value = applyModifiers(rawValue, field);
@@ -123,19 +98,6 @@ function decodeFields(buf, fields, result, schema) {{
       result[field.name] = value;
     }}
   }}
-}}
-
-function matchCase(value, pattern) {{
-  if (pattern === undefined || pattern === null) return false;
-  if (typeof pattern === 'number') return value === pattern;
-  if (Array.isArray(pattern)) return pattern.indexOf(value) >= 0;
-  if (typeof pattern === 'string' && pattern.indexOf('..') >= 0) {{
-    var parts = pattern.split('..');
-    var lo = parseInt(parts[0]);
-    var hi = parseInt(parts[1]);
-    return value >= lo && value <= hi;
-  }}
-  return value === pattern;
 }}
 
 function decodeFieldRaw(buf, field, variables, schema) {{

@@ -46,7 +46,7 @@ var canonicalTypes = map[string]bool{
 	"hex": true, "base64": true,
 	"skip": true, "enum": true, "bitfield_string": true,
 	"number": true, "integer": true,
-	"object": true, "match": true, "repeat": true,
+	"object": true, "repeat": true,
 }
 
 // TypeInteger is a computed field whose result is reported as an integer (PS-283).
@@ -86,33 +86,18 @@ var fieldConstructKeys = []string{"$ref", "flagged", "tlv", "byte_group", "match
 // it (PS-334).
 func checkTypeVocabulary(raw map[string]any) error {
 	var check func(fields any, path string) error
-	// strict: the cases of a `match` or `tlv` construct, whose bodies are field lists
+	// The cases of a `match` or `tlv` construct, whose bodies are field lists
 	// (PS-347, PS-441). A bare string such as `5: skip` was parsed as an empty case, so
 	// a match decoded nothing for it and a tlv dropped the case and skipped the tag.
-	checkCases := func(cases any, path string, strict bool) error {
+	checkCases := func(cases any, path string) error {
 		caseMap := asStringMap(cases)
 		for _, key := range sortedKeys(caseMap) {
 			body := caseMap[key]
-			if _, ok := body.([]any); !ok && strict {
+			if _, ok := body.([]any); !ok {
 				return fmt.Errorf("%s.cases[%s]: a case body is a field list; write [] for a case that reads nothing (PS-441)", path, key)
 			}
-			if list, ok := body.([]any); ok {
-				if err := check(list, fmt.Sprintf("%s[%s]", path, key)); err != nil {
-					return err
-				}
-			} else if m := asStringMap(body); m != nil {
-				if err := check(m["fields"], fmt.Sprintf("%s[%s]", path, key)); err != nil {
-					return err
-				}
-			}
-		}
-		if list, ok := cases.([]any); ok {
-			for i, entry := range list {
-				if m := asStringMap(entry); m != nil {
-					if err := check(m["fields"], fmt.Sprintf("%s[%d]", path, i)); err != nil {
-						return err
-					}
-				}
+			if err := check(body, fmt.Sprintf("%s[%s]", path, key)); err != nil {
+				return err
 			}
 		}
 		return nil
@@ -142,6 +127,10 @@ func checkTypeVocabulary(raw map[string]any) error {
 			// later as a typeless one.
 			if objectName, ok := field["object"]; ok && !hasType {
 				return fmt.Errorf("%s: the `object:` key is withdrawn; write `type: object` with `name: %v` and `fields` (PS-466)", at, objectName)
+			}
+			// The legacy `type: match` is withdrawn, not unknown: say what replaces it.
+			if isString && spelling == "match" {
+				return errors.New(withdrawnTypeMatch)
 			}
 			switch {
 			case hasType && (!isString || strings.TrimSpace(spelling) == ""):
@@ -208,16 +197,13 @@ func checkTypeVocabulary(raw map[string]any) error {
 			}
 			for _, key := range []string{"match", "tlv"} {
 				if construct := asStringMap(field[key]); construct != nil {
-					if err := checkCases(construct["cases"], at+"."+key, true); err != nil {
+					if err := checkCases(construct["cases"], at+"."+key); err != nil {
 						return err
 					}
 					if err := check(construct["default"], at+"."+key+".default"); err != nil {
 						return err
 					}
 				}
-			}
-			if err := checkCases(field["cases"], at+".cases", false); err != nil {
-				return err
 			}
 			if flagged := asStringMap(field["flagged"]); flagged != nil {
 				if groups, ok := flagged["groups"].([]any); ok {

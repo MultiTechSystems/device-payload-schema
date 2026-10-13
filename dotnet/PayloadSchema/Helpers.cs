@@ -377,7 +377,6 @@ public static class Helpers
             "number" => FieldType.Number,
             "integer" => FieldType.Integer,
             "object" => FieldType.Object,
-            "match" => FieldType.Match,
             "repeat" => FieldType.Repeat,
             "enum" => FieldType.Enum,
             "bitfield_string" => FieldType.BitfieldString,

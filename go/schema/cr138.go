@@ -157,27 +157,6 @@ func fieldNameError(items any, where string) error {
 			continue // the withdrawn `object:` key, which PS-466 names
 		}
 		name, _ := item["name"].(string)
-		if typ == "match" && name == "" {
-			// The older `type: match` + `on:` spelling of the match construct; its cases
-			// are a list of `{case, fields}` or a mapping.
-			var bodies []any
-			switch cases := item["cases"].(type) {
-			case []any:
-				for _, c := range cases {
-					if cm := asStringMap(c); cm != nil {
-						bodies = append(bodies, cm["fields"])
-					}
-				}
-			default:
-				bodies = caseBodies(cases)
-			}
-			for _, body := range append(bodies, item["default"]) {
-				if err := fieldNameError(body, where); err != nil {
-					return err
-				}
-			}
-			continue
-		}
 		if name == "" {
 			kind := "field"
 			if hasType {

@@ -278,8 +278,6 @@ public static partial class SchemaParser
                         foreach (var body in cases.Children.Values) Walk(body, inElement);
                     Walk(Get(match, "default"), inElement);
                 }
-                if (Get(item, "cases") is YamlMappingNode legacy)
-                    foreach (var body in legacy.Children.Values) Walk(body, false);
                 Walk(Get(item, "fields"), false);
                 if (Get(item, "tlv") is YamlMappingNode tlv && Get(tlv, "cases") is YamlMappingNode tlvCases)
                     foreach (var body in tlvCases.Children.Values) Walk(body, false);

@@ -194,7 +194,7 @@ public class SchemaField
     /// The <c>default</c> of an Option B match: the string <c>"error"</c> or
     /// <c>"skip"</c>, or a <c>List&lt;SchemaField&gt;</c> decoded when no case matches
     /// (CR-2026-020). Distinct from <see cref="MatchCase.IsDefault"/>, which marks a case
-    /// in the legacy list spelling.
+    /// keyed <c>default</c>.
     /// </summary>
     public object? MatchDefault { get; set; }
 

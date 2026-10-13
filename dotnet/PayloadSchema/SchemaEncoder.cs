@@ -319,8 +319,6 @@ public static class SchemaEncoder
                 return EncodeMatch(field.MatchInline, data, frame?.Pending, field, siblings);
             if (field.Flagged != null)
                 return EncodeFlagged(field.Flagged, data);
-            if (field.Type == FieldType.Match && string.IsNullOrEmpty(field.Name))
-                return EncodeMatch(field, data, frame?.Pending);
 
             switch (field.Type)
             {
@@ -482,8 +480,7 @@ public static class SchemaEncoder
         /// <c>default</c>, which is in the field's reported form and is encoded exactly as
         /// that value given as input, so one that cannot be encoded is rejected as such input
         /// is (PS-168). A declared default is a defined absence (PS-551 as amended). An enum's
-        /// <c>default</c> is its unmapped label (PS-068) and a legacy <c>type: match</c>'s its
-        /// fallback case, so neither is written. Read from the declaration as written.
+        /// <c>default</c> is its unmapped label (PS-068), so it is not written. Read from the declaration as written.
         /// </summary>
         static bool HasFieldDefault(SchemaField field)
         {
@@ -497,7 +494,7 @@ public static class SchemaEncoder
                 if (k.Value == "type") type = kv.Value;
             }
             var typeText = (type as YamlDotNet.RepresentationModel.YamlScalarNode)?.Value;
-            return found && typeText != "enum" && typeText != "match";
+            return found && typeText != "enum";
         }
 
         static object? FieldDefault(SchemaField field)

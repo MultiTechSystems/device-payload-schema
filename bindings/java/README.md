@@ -112,7 +112,7 @@ org.lora.benchmark/
 | `string` | ASCII/UTF-8 string | `type: string, length: 10` |
 | `bytes` | Raw byte array | `type: bytes, length: 4` |
 | `tlv` | Tag-Length-Value | `type: tlv, tags: {...}` |
-| `match` | Conditional parsing | `type: match, field: type` |
+| `match` | Conditional parsing | `match: {field: $type, cases: {...}}` |
 | `repeat` | Array/loop | `type: repeat, count: 3` |
 | `object` | Nested structure | `type: object, fields: [...]` |
 

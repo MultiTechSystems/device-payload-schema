@@ -133,6 +133,55 @@ cases:
           - {name: x, type: u8, max: 9}
   error: "`max` on field 'x' is withdrawn: it bounds a repeat's element count only; declare a value range with `valid_range` (CR-2026-159, PS-395)"
 
+# The legacy `type: match` spelling (`on:` for the discriminator, a `default` case for the
+# fallback) is withdrawn the same way; Clause 4's `match:` replaces it. `on` is quoted here
+# because an unquoted `on` is refused first, as a YAML 1.1 boolean (PS-575).
+
+- name: type_match_with_on
+  schema: |
+    name: t
+    fields:
+      - {name: kind, type: u8}
+      - name: body
+        type: match
+        "on": $kind
+        cases:
+          - case: 1
+            fields:
+              - {name: a, type: u8}
+  error: "`type: match` with `on:` is withdrawn; write `match: {field: $name, cases: ...}` (Clause 4)"
+
+- name: type_match_with_a_default_case
+  schema: |
+    name: t
+    fields:
+      - {name: kind, type: u8}
+      - type: match
+        "on": $kind
+        cases:
+          - case: 1
+            fields:
+              - {name: a, type: u8}
+          - default: skip
+  error: "`type: match` with `on:` is withdrawn; write `match: {field: $name, cases: ...}` (Clause 4)"
+
+- name: type_match_in_a_tlv_case
+  schema: |
+    name: t
+    fields:
+      - tlv:
+          tag_size: 1
+          cases:
+            1:
+              - {name: kind, type: u8}
+              - type: match
+                "on": $kind
+                cases:
+                  - case: 1
+                    fields:
+                      - {name: a, type: u8}
+  error: "`type: match` with `on:` is withdrawn; write `match: {field: $name, cases: ...}` (Clause 4)"
+
 # --- Still valid ----------------------------------------------------------------------
 
 - name: ties_even_written_out

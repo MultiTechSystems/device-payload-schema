@@ -325,35 +325,6 @@ fields:
 public class ConditionalTests
 {
     [Fact]
-    public void MatchSwitch()
-    {
-        var schema = SchemaParser.Parse(@"
-name: test
-endian: big
-fields:
-  - name: msg_type
-    type: u8
-    var: msg_type
-  - type: match
-    'on': $msg_type
-    cases:
-      - case: 1
-        fields:
-          - name: temperature
-            type: s16
-      - case: 2
-        fields:
-          - name: humidity
-            type: u8
-");
-        // msg_type=1, temp=-10 (0xFFF6)
-        var result = SchemaDecoder.Decode(schema, new byte[] { 0x01, 0xFF, 0xF6 });
-        Assert.Equal(1.0, Decoded.Num(result["msg_type"]));
-        Assert.Equal(-10.0, Decoded.Num(result["temperature"]));
-        Assert.False(result.ContainsKey("humidity"));
-    }
-
-    [Fact]
     public void FlaggedConstruct()
     {
         var schema = SchemaParser.Parse(@"

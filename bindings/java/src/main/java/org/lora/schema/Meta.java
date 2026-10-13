@@ -112,11 +112,6 @@ final class Meta {
                     }
                 }
             }
-            if ("match".equals(f.get("type")) && f.get("cases") instanceof Map<?, ?> cases) {
-                for (Object body : cases.values()) {
-                    if (body instanceof List) visitDeclarations(body, found);
-                }
-            }
             if (f.get("tlv") instanceof Map<?, ?> tlv) {
                 if (Boolean.FALSE.equals(mergeOf(tlv))) {
                     // Its entries are reported as a list under the fixed key `channels`
@@ -430,11 +425,6 @@ final class Meta {
                     }
                 }
                 if (match.get("default") instanceof List) visitAgreement(match.get("default"), where, seen, errors);
-            }
-            if ("match".equals(f.get("type")) && f.get("cases") instanceof Map<?, ?> cases) {
-                for (Object body : cases.values()) {
-                    if (body instanceof List) visitAgreement(body, where, seen, errors);
-                }
             }
             if (f.get("tlv") instanceof Map<?, ?> tlv) {
                 List<Object> bodies = new ArrayList<>();

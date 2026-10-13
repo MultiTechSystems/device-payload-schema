@@ -531,6 +531,8 @@ public static partial class SchemaParser
             if (hasType)
             {
                 var spelling = Scalar(typeNode!);
+                // The legacy `type: match` is withdrawn, not unknown: say what replaces it.
+                if (spelling == "match") throw new InvalidOperationException(Cr159.TypeMatch);
                 // A bit range is uN[start:end]; its base carries no prefix (PS-053a).
                 var isBitRange = System.Text.RegularExpressions.Regex.IsMatch(spelling, @"^[us]\d+\[\d+:\d+\]$");
                 if (!isBitRange && Helpers.ParseFieldType(spelling) == FieldType.Unknown)
@@ -715,8 +717,6 @@ public static partial class SchemaParser
 
         if (fm.TryGetValue("var", out var varNode))
             f.Var = Scalar(varNode);
-        if (fm.TryGetValue("on", out var onNode))
-            f.On = Scalar(onNode);
         if (fm.TryGetValue("value", out var valueNode))
             f.Value = f.Type == FieldType.Boolean && IsCoreBoolean(valueNode)
                 // A boolean literal (PS-520): `TRUE` too, which ParseScalarValue keeps as text.
@@ -759,7 +759,7 @@ public static partial class SchemaParser
         if (fm.TryGetValue("fields", out var fieldsNode) && fieldsNode is YamlSequenceNode fieldsSeq)
             f.Fields = ParseFields(fieldsSeq);
 
-        // Match cases (array format)
+        // TLV cases (map format)
         if (fm.TryGetValue("cases", out var casesNode))
         {
             if (f.Type == FieldType.TLV)
@@ -785,40 +785,6 @@ public static partial class SchemaParser
                     var (modes, lastMembers, _) = TlvRepeatModes(fm);
                     f.TLVRepeatModes = modes;
                     f.TLVLastMembers = lastMembers;
-                }
-            }
-            else if (casesNode is YamlSequenceNode casesSeq)
-            {
-                foreach (var cItem in casesSeq.Children)
-                {
-                    if (cItem is YamlMappingNode cMap)
-                    {
-                        var c = new MatchCase();
-                        if (cMap.TryGetValue("case", out var cv))
-                            c.CaseValue = ParseScalarValue(cv);
-                        else if (cMap.TryGetValue("match", out var mv))
-                            c.CaseValue = ParseScalarValue(mv);
-                        if (cMap.TryGetValue("default", out var dv))
-                            c.IsDefault = Scalar(dv) == "true" || Scalar(dv) == "True";
-                        if (cMap.TryGetValue("fields", out var cf) && cf is YamlSequenceNode cfSeq)
-                            c.Fields = ParseFields(cfSeq);
-                        f.Cases.Add(c);
-                    }
-                }
-            }
-            else if (casesNode is YamlMappingNode casesMap)
-            {
-                // Option B: map-style cases for match. The key goes through
-                // ParseScalarValue because int.TryParse does not read `0x00`, so a
-                // schema writing its cases in hex kept them as strings and no case
-                // ever matched the integer being switched on.
-                foreach (var kv in casesMap.Children)
-                {
-                    var c = new MatchCase();
-                    c.CaseValue = ParseScalarValue(kv.Key);
-                    if (kv.Value is YamlSequenceNode cfSeq)
-                        c.Fields = ParseFields(cfSeq);
-                    f.Cases.Add(c);
                 }
             }
         }

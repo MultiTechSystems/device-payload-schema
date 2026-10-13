@@ -163,8 +163,6 @@ VOCABULARY: Dict[str, Dict[str, Tuple[Tuple[str, ...], str]]] = {
         "prefix": (_DECODERS, "bitfield_string prefix"),
         "encoding": (_DECODERS, "sign_magnitude | bcd | gray on a uN (PS-422)"),
         "numeral": (_DECODERS, "decimal | hex: an ascii field reported as the integer its digits give (PS-560)"),
-        "on": (("py",), "legacy `type: match` discriminator (`on: $var`)"),
-        "cases": (("py",), "legacy `type: match` case list"),
         "valid_range": (("py", "go", "cs", "outschema"), "quality flag (_quality)"),
         "resolution": (("py", "go", "cs"), "measurement resolution annotation"),
         "unece": (("py", "go", "cs"), "UN/ECE unit code annotation"),
@@ -352,6 +350,11 @@ VOCABULARY["field"]["separator"] = (_DECODERS, "between the bytes of a hex rende
 #: Known mistakes, with what to write instead. Checked before the difflib suggestion.
 HINTS: Dict[Tuple[str, str], str] = {
     # CR-2026-159: withdrawn. The text is the spec prototype's WITHDRAWN table.
+    # The legacy `type: match`: `on` was its discriminator and `cases` its case list.
+    ("field", "on"): ("`type: match` with `on:` is withdrawn; write `match: {field: $name, "
+                      "cases: ...}` (Clause 4)"),
+    ("field", "cases"): ("`type: match` with `on:` is withdrawn; write `match: {field: $name, "
+                         "cases: ...}` (Clause 4)"),
     ("field", "formula"): ("withdrawn; use `compute`, `polynomial`, `transform` or `guard` "
                            "(CR-2026-159, PS-448)"),
     ("field", "encode_formula"): "withdrawn with `formula` (CR-2026-159, PS-448)",
@@ -437,13 +440,6 @@ def iter_keys(schema: Any) -> Iterator[Tuple[str, str, str]]:
                     yield from field_list(body, cpath)
                 elif isinstance(body, dict):
                     yield from field(body, cpath)
-        elif isinstance(cases, list):
-            # The legacy `type: match` spelling: a list of {case, fields} entries.
-            for i, body in enumerate(cases):
-                if isinstance(body, dict):
-                    cpath = "%s[%d]" % (path, i)
-                    yield from rec("legacy_case", body, cpath)
-                    yield from field_list(body.get("fields"), _p(cpath, "fields"))
 
     def generic(ctx: str, node: Any, path: str) -> Iterator[Tuple[str, str, str]]:
         if isinstance(node, dict):
@@ -557,8 +553,6 @@ def allowed_keys(ctx: str) -> List[str]:
     keys = set(VOCABULARY.get(ctx, {}))
     if ctx == "definition":
         keys |= set(VOCABULARY["field"])
-    if ctx == "legacy_case":
-        keys |= {"case", "fields", "default"}
     return sorted(keys)
 
 
@@ -609,8 +603,6 @@ def is_known(ctx: str, key: str, inert: bool = False) -> bool:
         return True
     if inert and (ctx, key) in UNREAD_KEYS:
         return True
-    if ctx == "legacy_case":
-        return key in allowed_keys(ctx)
     if ctx not in VOCABULARY and ctx != "definition":
         # A mapping the grammar does not describe (`field.items`, `schema.foo`): no
         # key in it is read by anything.

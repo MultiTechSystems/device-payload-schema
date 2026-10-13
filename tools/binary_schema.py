@@ -328,7 +328,7 @@ class BinarySchemaEncoder:
         """Check if schema contains structural constructs."""
         for field_def in schema.get('fields', []):
             field_type = field_def.get('type', '')
-            if field_type in ('match', 'object'):
+            if field_type == 'object':
                 return True
             if 'match' in field_def and not field_def.get('type'):
                 return True
@@ -467,29 +467,10 @@ class BinarySchemaEncoder:
                 record_count += 1
                 continue
             
-            # Legacy: type: match
             field_type = field_def.get('type', 'u8')
             if field_type == 'match':
-                # Convert legacy to match_def format
-                match_def = {
-                    'cases': {},
-                    'default': field_def.get('default'),
-                }
-                on = field_def.get('on', '')
-                if on.startswith('$'):
-                    match_def['field'] = on
-                else:
-                    match_def['length'] = 1
-                # Convert legacy case list to dict
-                for case in field_def.get('cases', []):
-                    if 'default' in case:
-                        match_def['default'] = case['default']
-                    elif 'case' in case:
-                        match_def['cases'][case['case']] = case.get(
-                            'fields', [])
-                out.extend(self._encode_match_record(match_def))
-                record_count += 1
-                continue
+                raise ValueError("`type: match` with `on:` is withdrawn; write "
+                                 "`match: {field: $name, cases: ...}` (Clause 4)")
             
             # Skip unsupported complex types
             if field_type in ('object',):
@@ -541,7 +522,10 @@ class BinarySchemaEncoder:
                 continue
             
             field_type = field_def.get('type', 'u8')
-            if field_type in ('match', 'object'):
+            if field_type == 'match':
+                raise ValueError("`type: match` with `on:` is withdrawn; write "
+                                 "`match: {field: $name, cases: ...}` (Clause 4)")
+            if field_type == 'object':
                 continue
             
             binary_field = self.encode_field(field_def)

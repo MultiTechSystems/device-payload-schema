@@ -184,7 +184,7 @@ _CONSTRUCT_KEYS = ("match", "tlv", "flagged", "byte_group", "object", "$ref")
 
 def is_construct(field: Dict[str, Any]) -> bool:
     """Whether a field dict carries a construct instead of a type of its own."""
-    if field.get("type") in ("object", "repeat", "match", "skip"):
+    if field.get("type") in ("object", "repeat", "skip"):
         return True
     return any(key in field for key in _CONSTRUCT_KEYS) and not field.get("type")
 
@@ -267,28 +267,6 @@ def _walk(fields, path, label, in_byte_group, endian, sites):
         )
         if isinstance(field.get("fields"), list):
             _walk(field["fields"], fpath + ("fields",), flabel, False, endian, sites)
-        cases = field.get("cases")
-        if field.get("type") == "match" and isinstance(cases, list):
-            for ci, case in enumerate(cases):
-                if isinstance(case, dict) and isinstance(case.get("fields"), list):
-                    _walk(
-                        case["fields"],
-                        fpath + ("cases", ci, "fields"),
-                        "%s[case %s]" % (flabel, case.get("case")),
-                        False,
-                        endian,
-                        sites,
-                    )
-            default = field.get("default")
-            if isinstance(default, dict) and isinstance(default.get("fields"), list):
-                _walk(
-                    default["fields"],
-                    fpath + ("default", "fields"),
-                    flabel + "[default]",
-                    False,
-                    endian,
-                    sites,
-                )
         for kind in ("match", "tlv"):
             block = field.get(kind)
             if not isinstance(block, dict):
@@ -664,49 +642,6 @@ def construct_mutants(site: Site, field: Dict[str, Any], equivalent: Dict[str, i
                     "%s delete case %s" % (kind, _key_text(k)),
                     [cpath + (k,)],
                     delete,
-                )
-            )
-
-    # Legacy `type: match` with `cases: [{case: v, fields: [...]}]`.
-    cases = field.get("cases")
-    if field.get("type") == "match" and isinstance(cases, list):
-        cpath = path + ("cases",)
-        for i in range(len(cases) - 1):
-            a, b = cases[i], cases[i + 1]
-            if not (isinstance(a, dict) and isinstance(b, dict)):
-                continue
-            if a.get("fields") == b.get("fields"):
-                equivalent["CASE"] = equivalent.get("CASE", 0) + 1
-                continue
-
-            def swap_legacy(root, _i=i):
-                c = resolve(root, cpath)
-                c[_i]["case"], c[_i + 1]["case"] = c[_i + 1].get("case"), c[_i].get(
-                    "case"
-                )
-
-            out.append(
-                Mutant(
-                    "CASE",
-                    site.label,
-                    "swap cases %s <-> %s" % (a.get("case"), b.get("case")),
-                    [cpath + (i,), cpath + (i + 1,)],
-                    swap_legacy,
-                )
-            )
-        for i, case in enumerate(cases):
-
-            def delete_legacy(root, _i=i):
-                del resolve(root, cpath)[_i]
-
-            out.append(
-                Mutant(
-                    "CASE",
-                    site.label,
-                    "delete case %s"
-                    % (case.get("case") if isinstance(case, dict) else i),
-                    [cpath + (i,)],
-                    delete_legacy,
                 )
             )
 

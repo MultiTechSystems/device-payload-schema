@@ -309,108 +309,6 @@ fields:
 	}
 }
 
-func TestSchemaWithMatch(t *testing.T) {
-	schemaYAML := `
-name: conditional
-fields:
-  - name: msg
-    type: match
-    length: 1
-    cases:
-      - case: 1
-        fields:
-          - name: temp
-            type: s16
-      - case: 2
-        fields:
-          - name: count
-            type: u32
-`
-
-	schema, err := ParseSchema(schemaYAML)
-	if err != nil {
-		t.Fatalf("ParseSchema() error = %v", err)
-	}
-
-	// Case 1: temp=25
-	data1 := []byte{0x01, 0x00, 0x19}
-	result1, err := schema.Decode(data1)
-	if err != nil {
-		t.Fatalf("Decode() error = %v", err)
-	}
-
-	msg1, ok := result1["msg"].(map[string]any)
-	if !ok {
-		t.Fatalf("msg is not a map")
-	}
-	if mustNum(msg1["temp"]) != float64(25) {
-		t.Errorf("msg.temp = %v, want 25", msg1["temp"])
-	}
-
-	// Case 2: count=1000
-	data2 := []byte{0x02, 0x00, 0x00, 0x03, 0xE8}
-	result2, err := schema.Decode(data2)
-	if err != nil {
-		t.Fatalf("Decode() error = %v", err)
-	}
-
-	msg2, ok := result2["msg"].(map[string]any)
-	if !ok {
-		t.Fatalf("msg is not a map")
-	}
-	if mustNum(msg2["count"]) != float64(1000) {
-		t.Errorf("msg.count = %v, want 1000", msg2["count"])
-	}
-}
-
-func TestSchemaWithVariable(t *testing.T) {
-	schemaYAML := `
-name: variable_match
-fields:
-  - name: type
-    type: u8
-    var: msg_type
-  - name: len
-    type: u8
-  - name: data
-    type: match
-    "on": $msg_type
-    cases:
-      - case: 1
-        fields:
-          - name: temp
-            type: s16
-      - case: 2
-        fields:
-          - name: count
-            type: u32
-`
-
-	schema, err := ParseSchema(schemaYAML)
-	if err != nil {
-		t.Fatalf("ParseSchema() error = %v", err)
-	}
-
-	// type=1, len=2, temp=25
-	data := []byte{0x01, 0x02, 0x00, 0x19}
-	result, err := schema.Decode(data)
-	if err != nil {
-		t.Fatalf("Decode() error = %v", err)
-	}
-
-	if mustNum(result["type"]) != float64(1) {
-		t.Errorf("type = %v, want 1", result["type"])
-	}
-
-	dataField, ok := result["data"].(map[string]any)
-	if !ok {
-		t.Fatalf("data is not a map")
-	}
-	if mustNum(dataField["temp"]) != float64(25) {
-		t.Errorf("data.temp = %v, want 25", dataField["temp"])
-	}
-}
-
 func TestFloat16(t *testing.T) {
 	// 1.0 in float16 = 0x3C00
 	data := []byte{0x3C, 0x00}
@@ -2924,43 +2822,6 @@ fields:
 	}
 }
 
-func TestMatchWithDefault(t *testing.T) {
-	schemaYAML := `
-name: match_default_test
-fields:
-  - name: msg_type
-    type: u8
-    var: type
-  - name: data
-    type: match
-    "on": $type
-    cases:
-      - case: 1
-        fields:
-          - name: temp
-            type: s16
-      - default: true
-        fields:
-          - name: raw
-            type: u16
-`
-	schema, err := ParseSchema(schemaYAML)
-	if err != nil {
-		t.Fatalf("ParseSchema() error = %v", err)
-	}
-
-	// Test default case (type=99)
-	decoded, err := schema.Decode([]byte{0x63, 0x00, 0x64})
-	if err != nil {
-		t.Fatalf("Decode() error = %v", err)
-	}
-
-	data := decoded["data"].(map[string]any)
-	if mustNum(data["raw"]) != float64(100) {
-		t.Errorf("raw = %v, want 100", data["raw"])
-	}
-}
-
 func TestF32Decoding(t *testing.T) {
 	schemaYAML := `
 name: f32_test
@@ -3685,30 +3546,6 @@ fields:
 	}
 }
 
-func TestMatchVariableNotFound(t *testing.T) {
-	schemaYAML := `
-name: match_var_not_found_test
-fields:
-  - name: data
-    type: match
-    "on": $nonexistent
-    cases:
-      - case: 1
-        fields:
-          - name: value
-            type: u8
-`
-	schema, err := ParseSchema(schemaYAML)
-	if err != nil {
-		t.Fatalf("ParseSchema() error = %v", err)
-	}
-
-	_, err = schema.Decode([]byte{0x01})
-	if err == nil {
-		t.Error("expected variable not found error")
-	}
-}
-
 // =============================================================================
 // ADDITIONAL DECODE COVERAGE TESTS
 // =============================================================================
@@ -3911,92 +3748,6 @@ fields:
 				t.Errorf("result = %v, want %v", decoded["result"], tt.want)
 			}
 		})
-	}
-}
-
-func TestMatchRangeCase(t *testing.T) {
-	schemaYAML := `
-name: match_range_test
-fields:
-  - name: value
-    type: u8
-    var: v
-  - name: category
-    type: match
-    "on": $v
-    cases:
-      - case:
-          min: 0
-          max: 50
-        fields:
-          - name: label
-            type: u8
-      - case:
-          min: 51
-          max: 100
-        fields:
-          - name: label
-            type: u8
-`
-	schema, err := ParseSchema(schemaYAML)
-	if err != nil {
-		t.Fatalf("ParseSchema() error = %v", err)
-	}
-
-	// 25 is in range 0-50, reads label from next byte
-	decoded, err := schema.Decode([]byte{25, 0x01})
-	if err != nil {
-		t.Fatalf("Decode() error = %v", err)
-	}
-	cat := decoded["category"].(map[string]any)
-	if mustNum(cat["label"]) != float64(1) {
-		t.Errorf("label = %v, want 1", cat["label"])
-	}
-
-	// 75 is in range 51-100
-	decoded2, err := schema.Decode([]byte{75, 0x02})
-	if err != nil {
-		t.Fatalf("Decode() error = %v", err)
-	}
-	cat2 := decoded2["category"].(map[string]any)
-	if mustNum(cat2["label"]) != float64(2) {
-		t.Errorf("label = %v, want 2", cat2["label"])
-	}
-}
-
-func TestMatchArrayCase(t *testing.T) {
-	schemaYAML := `
-name: match_array_test
-fields:
-  - name: code
-    type: u8
-    var: c
-  - name: result
-    type: match
-    "on": $c
-    cases:
-      - case: [1, 2, 3]
-        fields:
-          - name: group
-            type: u8
-      - case: [4, 5, 6]
-        fields:
-          - name: group
-            type: u8
-`
-	schema, err := ParseSchema(schemaYAML)
-	if err != nil {
-		t.Fatalf("ParseSchema() error = %v", err)
-	}
-
-	// code=2 matches [1,2,3], reads group from next byte
-	decoded, err := schema.Decode([]byte{2, 0x0A})
-	if err != nil {
-		t.Fatalf("Decode() error = %v", err)
-	}
-	result := decoded["result"].(map[string]any)
-	if mustNum(result["group"]) != float64(10) {
-		t.Errorf("group = %v, want 10", result["group"])
 	}
 }
 
@@ -5149,53 +4900,6 @@ fields:
 	}
 }
 
-func TestDecodeNestedMatch(t *testing.T) {
-	schemaYAML := `
-name: nested_match_test
-fields:
-  - name: type1
-    type: u8
-    var: t1
-  - name: outer
-    type: match
-    "on": $t1
-    cases:
-      - case: 1
-        fields:
-          - name: type2
-            type: u8
-            var: t2
-          - name: inner
-            type: match
-            "on": $t2
-            cases:
-              - case: 1
-                fields:
-                  - name: a
-                    type: u8
-              - case: 2
-                fields:
-                  - name: b
-                    type: u16
-`
-	schema, err := ParseSchema(schemaYAML)
-	if err != nil {
-		t.Fatalf("ParseSchema() error = %v", err)
-	}
-
-	// t1=1, t2=2, b=0x1234
-	decoded, err := schema.Decode([]byte{0x01, 0x02, 0x12, 0x34})
-	if err != nil {
-		t.Fatalf("Decode() error = %v", err)
-	}
-
-	outer := decoded["outer"].(map[string]any)
-	inner := outer["inner"].(map[string]any)
-	if mustNum(inner["b"]) != float64(0x1234) {
-		t.Errorf("inner.b = %v, want 0x1234", inner["b"])
-	}
-}
-
 func TestDecodeWithLookupMissing(t *testing.T) {
 	schemaYAML := `
 name: lookup_missing_test
@@ -5884,43 +5588,6 @@ fields:
 	}
 }
 
-func TestDecodeMatchKnownCase(t *testing.T) {
-	schemaYAML := `
-name: match_known_test
-fields:
-  - name: type
-    type: u8
-    var: t
-  - name: data
-    type: match
-    "on": $t
-    cases:
-      - case: 1
-        fields:
-          - name: a
-            type: u8
-      - case: 2
-        fields:
-          - name: b
-            type: u8
-`
-	schema, err := ParseSchema(schemaYAML)
-	if err != nil {
-		t.Fatalf("ParseSchema() error = %v", err)
-	}
-
-	// type=1, should match case 1
-	decoded, err := schema.Decode([]byte{1, 0x42})
-	if err != nil {
-		t.Fatalf("Decode() error = %v", err)
-	}
-
-	data := decoded["data"].(map[string]any)
-	if mustNum(data["a"]) != float64(0x42) {
-		t.Errorf("a = %v, want 0x42", data["a"])
-	}
-}
-
 func TestDecodeComputeUnknownOp(t *testing.T) {
 	schemaYAML := `
 name: compute_unknown_op_test
@@ -6323,60 +5990,6 @@ fields:
 	}
 }
 
-func TestMatchWithMultipleCases(t *testing.T) {
-	schemaYAML := `
-name: match_multi_test
-fields:
-  - name: type
-    type: u8
-    var: t
-  - name: data
-    type: match
-    "on": $t
-    cases:
-      - case: 1
-        fields:
-          - name: temp
-            type: s16
-            mult: 0.1
-      - case: 2
-        fields:
-          - name: humidity
-            type: u8
-    default:
-      fields:
-        - name: raw
-          type: u8
-`
-	schema, err := ParseSchema(schemaYAML)
-	if err != nil {
-		t.Fatalf("ParseSchema() error = %v", err)
-	}
-
-	// Type 1 (temperature)
-	decoded1, err := schema.Decode([]byte{0x01, 0x00, 0xE7})
-	if err != nil {
-		t.Fatalf("Decode() error = %v", err)
-	}
-	if decoded1["data"] == nil {
-		t.Fatal("expected data to be present")
-	}
-	data1 := decoded1["data"].(map[string]any)
-	if math.Abs(mustNum(data1["temp"])-23.1) > 0.01 {
-		t.Errorf("temp = %v, want 23.1", data1["temp"])
-	}
-
-	// Type 2 (humidity)
-	decoded2, err := schema.Decode([]byte{0x02, 0x32})
-	if err != nil {
-		t.Fatalf("Decode() error = %v", err)
-	}
-	data2 := decoded2["data"].(map[string]any)
-	if mustNum(data2["humidity"]) != float64(50) {
-		t.Errorf("humidity = %v, want 50", data2["humidity"])
-	}
-}
-
 func TestTLVWith16BitTypeAndLength(t *testing.T) {
 	schemaYAML := `
 name: tlv_16bit_test
@@ -6410,45 +6023,6 @@ fields:
 	}
 }
 
-// =============================================================================
-// ADDITIONAL EDGE CASES
-// =============================================================================
-
-func TestDecodeWithPeek(t *testing.T) {
-	schemaYAML := `
-name: peek_test
-fields:
-  - name: header
-    type: u8
-    var: h
-  - name: payload_type
-    type: match
-    "on": $h
-    cases:
-      - case: 1
-        fields:
-          - name: short_data
-            type: u8
-      - case: 2
-        fields:
-          - name: long_data
-            type: u32
-`
-	schema, err := ParseSchema(schemaYAML)
-	if err != nil {
-		t.Fatalf("ParseSchema() error = %v", err)
-	}
-
-	// Header=1, short data
-	decoded, err := schema.Decode([]byte{0x01, 0x42})
-	if err != nil {
-		t.Fatalf("Decode() error = %v", err)
-	}
-	pt := decoded["payload_type"].(map[string]any)
-	if mustNum(pt["short_data"]) != float64(0x42) {
-		t.Errorf("short_data = %v, want 0x42", pt["short_data"])
-	}
-}
 
 func TestEncodeWithTransform(t *testing.T) {
 	schemaYAML := `
@@ -6742,44 +6316,6 @@ fields:
 	if err == nil || !strings.Contains(err.Error(), "max of 1000") ||
 		!strings.Contains(err.Error(), "9000 byte(s) at offset 1000") {
 		t.Errorf("Decode() error = %v, want the PS-396 limit error", err)
-	}
-}
-
-func TestEdgeCaseMatchNoMatchingCase(t *testing.T) {
-	schemaYAML := `
-name: test
-fields:
-  - name: type
-    type: u8
-    var: t
-  - name: data
-    type: match
-    "on": $t
-    cases:
-      - case: 1
-        fields:
-          - name: a
-            type: u8
-      - case: 2
-        fields:
-          - name: b
-            type: u8
-`
-	schema, err := ParseSchema(schemaYAML)
-	if err != nil {
-		t.Fatalf("ParseSchema() error = %v", err)
-	}
-
-	// type=99, no matching case - should not panic
-	result, err := schema.Decode([]byte{99, 42})
-	if err != nil {
-		// Error is acceptable
-		return
-	}
-
-	// Or partial result is acceptable
-	if result["type"] != uint8(99) && result["type"] != int(99) {
-		t.Errorf("type = %v, want 99", result["type"])
 	}
 }
 
