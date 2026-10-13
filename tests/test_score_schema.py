@@ -105,18 +105,29 @@ class TestSensorDetection:
         assert detected is not None
         assert detected[1] == expected_object
 
-    def test_field_can_declare_its_type(self):
-        detected = detect_sensor({"name": "probe_a", "type": "u16", "sensor": "humidity"})
-        assert detected == ("humidity", 3304)
+    def test_a_labelled_field_is_not_a_reading(self):
+        """A `lookup` reports a label, so a quantity word in the name places nothing."""
+        field = {"name": "temperature_sensor_status", "type": "u8",
+                 "lookup": ["read error", "out of range"]}
+        assert detect_sensor(field) is None
+        assert classify_il204(field).step == "labelled"
 
-    def test_field_can_opt_out(self):
-        assert detect_sensor({"name": "temperature", "type": "u16", "sensor": "none"}) is None
+    def test_a_numeric_lookup_is_still_a_reading(self):
+        """Numeric labels feed arithmetic (Elvaco's exponent table): still a reading."""
+        field = {"name": "temperature", "type": "u8", "lookup": {0: 0.001, 1: 0.01}}
+        assert classify_il204(field).step != "labelled"
+        assert detect_sensor(field) == ("temperature", 3303)
 
-    def test_a_declared_non_quantity_defers_to_the_name(self):
-        """`sensor:` other than a quantity or `none` does not override IL-204."""
-        assert detect_sensor({"name": "battery", "sensor": "percentage"}) is None
-        detected = detect_sensor({"name": "moisture_at_level_3", "sensor": "percentage"})
-        assert detected == ("moisture", 3320)
+    def test_a_value_template_default_is_a_label(self):
+        """A lookup listing no label but a `${value}` default reports a string."""
+        field = {"name": "temperature_mode", "type": "u8",
+                 "lookup": {"default": "mode ${value}"}}
+        assert classify_il204(field).step == "labelled"
+
+    def test_the_sensor_key_is_not_read(self):
+        """`sensor:` is outside the key vocabulary (PS-448) and changes nothing."""
+        assert detect_sensor({"name": "probe_a", "type": "u16", "sensor": "humidity"}) is None
+        assert detect_sensor({"name": "temperature", "sensor": "none"}) == ("temperature", 3303)
 
 
 class TestIl204Classification:
@@ -356,7 +367,7 @@ class TestAnnotationCorrectness:
 
     def test_annotations_on_undetectable_fields_earn_no_credit(self):
         """Otherwise semantic marks could be farmed from unrelated fields."""
-        schema = temperature_schema(sensor="none")
+        schema = temperature_schema(lookup=["a", "b"])
         schema["fields"].append(
             {"name": "opaque_counter", "type": "u8", "ipso": {"object": 3303},
              "senml": {"unit": "Cel"}, "semantic": "nonsense"}

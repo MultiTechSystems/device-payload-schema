@@ -60,14 +60,12 @@ fields:
         "[255, 254]":
           - name: reset_event
             type: u8
-            sensor: none
             lookup: {1: "reset", default: "reset"}
             # raw: readResetEvent(1)
         # DEVICE STATUS
         "[255, 11]":
           - name: device_status
             type: u8
-            sensor: none
             lookup: {1: "on", default: "on"}
             # raw: readDeviceStatus(1)
         # VOLTAGE
@@ -96,7 +94,6 @@ fields:
         "[8, 112]":
           - name: socket_status
             type: u8
-            sensor: none
             lookup: ["off", "on"]
             # raw: readSocketStatus(data & 0x01)
 

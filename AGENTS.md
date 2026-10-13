@@ -2935,6 +2935,51 @@ improved. The Go, Java and C# corpus runners write per-vector reports only when
     No corpus vector encodes a nibble decimal or a fractional written discriminator, so no
     floor moves.
 
+- **CR-2026-159 (la-payload-schema `cr/0.5.6-apply-158-162`, for 0.5.6): four constructs and a
+  misuse of `min`/`max` are withdrawn and rejected at load.** Each message is the spec
+  prototype's (`key_vocabulary.WITHDRAWN`, `check_field`), word for word, with no prefix, so
+  Python, Go, Java and C# give one string:
+  - **`formula`** -> "`formula` is withdrawn; use `compute`, `polynomial`, `transform` or
+    `guard` (CR-2026-159, PS-448)"; **`encode_formula`** -> "`encode_formula` is withdrawn with
+    `formula` (CR-2026-159, PS-448)"; a **transform `clamp`** stage -> "`clamp` is withdrawn;
+    use a `floor` stage and a `ceiling` stage (CR-2026-159, PS-115)"; a port's **`confirmed`**
+    -> "`confirmed` is withdrawn: confirmed or unconfirmed is chosen per transmission, not by
+    the schema (CR-2026-159, PS-448)".
+  - **`min`/`max` on a field that is no repeat** -> "`min` on field 'v' is withdrawn: it bounds
+    a repeat's element count only; declare a value range with `valid_range` (CR-2026-159,
+    PS-395)" (`max` likewise; `<unnamed>` where the field has no name). On a `type: repeat`
+    they stay valid, and `ties: even` stays valid.
+  - **Where:** Python `withdrawn_errors` (from `schema_iterator_errors`, so the interpreter,
+    the validator and the TS013 generator refuse it) and `transform_stage_errors` for
+    `clamp`, with `WITHDRAWN_KEYS`; Go `go/schema/cr159.go` from `checkFieldRules`,
+    `checkTransformStages` and `checkTypeVocabulary`; Java `Cr159`, from `parseFields`,
+    `checkStage` and `parseRaw`; C# `Cr159.cs`, from `ParseFields`, `CheckStage` and `Parse`.
+    C has none of the keys: `tools/schema_binary.py` (`schema_errors`) refuses them with the
+    same text before a blob exists. A definition no `$ref` reaches is not walked by Python
+    (every other walk skips it too); Go, Java and C# check one where they parse it.
+  - **The encoder's min/max value check was already gone in this repository.** The prototype
+    dropped the `min`/`max` range check from `encode_field`; none of the Python reference, the
+    TS013 runtime, Go, Java, C# or C ever had one (measured: `u8` with `min: 10` encodes 5 and
+    `max: 100` encodes 150). Nothing to remove; `valid_range` does not reject on encode, and a
+    case pins it in all four.
+  - **Dead code removed:** the formula evaluators (Python `_evaluate_formula` and
+    `_evaluate_encode_formula`, Go `evaluateFormula` and its expression parser, Java
+    `FormulaEvaluator`, the generator's `formula_to_js`), every `clamp` stage reader, the
+    `Formula`/`Clamp` model fields, the validator's formula and clamp checks, and the
+    vocabulary and `payload-schema.json` entries (the hint table names the replacements).
+    `tools/generate_firmware_codec.py`, `generate_js_decoder.py` and `convert_decentlab.py`
+    are not conformance paths and keep their old spellings.
+  - **Measured before changing anything:** 0 `formula`, `encode_formula`, `confirmed` or non-repeat
+    `min`/`max` in `schemas/devices`, `schemas/library` and `examples`, and none in the
+    4065 files of the private registry; two `clamp` stages, both in the generated-and-orphaned
+    `examples/env_sensor_resolved.yaml` and `multi_sensor_resolved.yaml`, now `floor: 0` and
+    `ceiling: 100` (the same meaning). No device vector, so **no floor moves**.
+  - **Tests:** the Python, Go, Java and C# formula and `clamp` tests are deleted with the
+    construct (the prototype did the same); a few that used `formula` incidentally now use
+    `div`/`add` or `ref` + `mult`. `tests/cr-2026-159-cases.yaml` is one case list read by
+    `test_cr_2026_159_withdrawals.py` (interpreter, validator, generator, binary converter),
+    Go `cr159_test.go`, Java `CR2026159Test`, C# `CR2026_159Tests`.
+
 - **CR-2026-160 (PS-059; la-payload-schema branch `cr/0.5.6-apply-158-162`, for 0.5.6): a bit
   range's base is any multiple of 8 from 8 to 64, and the wide widths are bases only.** `u40`,
   `u48`, `u56` and `s40`, `s48`, `s56` are valid as `uN[a:b]`/`sN[a:b]`, a non-consuming one
@@ -3409,9 +3454,10 @@ Known weaknesses, so you neither trip over them nor assume they are intentional:
   in the device repository documents each normalized measurement and its unit, and
   the vendor's raw values are already in those units. Note that TTN's normalized
   `battery` is a *voltage* while the milesight raw field is a percentage 0-100.
-  Those fields still declare `sensor: percentage`, which once stopped the scorer
-  detecting them as IPSO 3316 voltage. The scorer now follows IL-204 (below), so the
-  word `battery` asks for no object at all, and the key is inert. Quantities whose SenML unit is a different scale (pressure in
+  Those fields once declared `sensor: percentage` to stop the scorer detecting
+  them as IPSO 3316 voltage. The scorer now follows IL-204 (below), so the word
+  `battery` asks for no object at all; the `sensor:` key is gone from every schema
+  and strict validation rejects it (PS-448). Quantities whose SenML unit is a different scale (pressure in
   hPa against SenML's Pa, distance in mm against m) carry a `unit:` but no
   annotation, because a mismatched annotation misdeclares the value.
 - **Flags packed into a byte need `consume: 1` on the last field.** An explicit bit
@@ -3431,6 +3477,11 @@ Known weaknesses, so you neither trip over them nor assume they are intentional:
   `raw`, ...) and no medium that lacks a TTN path (`internal`, `leaf`, `board`, ...).
   The old name-to-object table, under which `battery`, `voltage`, `current` or
   `latitude` each demanded an object, is gone. A unit never selects an object (IL-203).
+  A field whose `lookup` reports text (string labels, or only a `${value}` default) is a
+  label, not a reading, so a quantity word in its name asks for nothing
+  (`temperature_sensor_status`, `temperature_unit`); a lookup with numeric labels feeds
+  arithmetic and its field stays a reading (`lookup_reports_text`). This replaced the
+  `sensor: none` opt-out; the IL agreed the scorer may refine IL-204 this way.
   A generic object (3300, 3320, 3325, 3332) is never a mismatch (IL-199). A
   name-silent field's annotation is neither expected nor flagged. See
   `docs/IPSO-REFERENCE.md`. **A schema with no field IL-204 places gets half the

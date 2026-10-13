@@ -60,21 +60,18 @@ fields:
         "[255, 254]":
           - name: reset_event
             type: u8
-            sensor: none
             lookup: {1: "reset", default: "reset"}
             # raw: readResetEvent(1)
         # DEVICE STATUS
         "[255, 11]":
           - name: device_status
             type: u8
-            sensor: none
             lookup: {1: "on", default: "on"}
             # raw: readDeviceStatus(1)
         # BATTERY
         "[1, 117]":
           - name: battery
             unit: "%"
-            sensor: percentage
             ipso: {object: 3320, instance: 0, resource: 5700}
             senml: {name: "battery", unit: "/100"}
             semantic: "battery"
@@ -84,7 +81,6 @@ fields:
         "[3, 103]":
           - name: temperature
             unit: "°C"
-            sensor: temperature
             ipso: {object: 3303, instance: 0, resource: 5700}
             senml: {name: "temperature", unit: "Cel"}
             semantic: "temperature"
@@ -94,7 +90,6 @@ fields:
         "[4, 104]":
           - name: humidity
             unit: "%"
-            sensor: humidity
             ipso: {object: 3304, instance: 0, resource: 5700}
             senml: {name: "humidity", unit: "%RH"}
             semantic: "humidity"
@@ -109,14 +104,12 @@ fields:
                 type: u32
               - name: temperature
                 unit: "°C"
-                sensor: temperature
                 senml: {unit: "Cel"}
                 semantic: "temperature"
                 type: s16
                 div: 10
               - name: humidity
                 unit: "%"
-                sensor: humidity
                 senml: {unit: "%RH"}
                 semantic: "humidity"
                 type: u8

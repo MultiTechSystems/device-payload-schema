@@ -16,7 +16,6 @@ fields:
         "[1, 117]":
           - name: battery
             unit: "%"
-            sensor: percentage
             ipso: {object: 3320, instance: 0, resource: 5700}
             senml: {name: "battery", unit: "/100"}
             semantic: "battery"

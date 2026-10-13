@@ -113,8 +113,11 @@ where the table expects it.
 
 An ipso annotation is reported wrong only where the name places the field and
 the annotation names another quantity, as with `water_temperature` annotated
-3304. A field may opt out with `sensor: none`, or state its quantity with
-`sensor: temperature` where the name does not.
+3304. A field whose `lookup` reports text - every label a string, or no label but a
+`${value}` default - reports a label, not a measured value, so it is not a reading
+whatever its name says (`temperature_sensor_status`). A lookup with numeric labels feeds
+arithmetic (Elvaco's exponent table) and its field stays a reading. The
+`sensor:` key is not part of the language and is rejected by strict validation.
 
 A schema with fields but none that IL-204 places has nothing these checks can
 verify. It earns half of the 20 semantic points.

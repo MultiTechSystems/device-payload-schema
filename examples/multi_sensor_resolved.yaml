@@ -56,9 +56,8 @@ fields:
   transform:
   - add: -2000
   - div: 12
-  - clamp:
-    - 0
-    - 100
+  - floor: 0
+  - ceiling: 100
   unit: '%'
   ipso:
     object: 3316

@@ -865,63 +865,6 @@ class TestByteGroup:
         assert result.data['next_byte'] == 0xFF
 
 
-class TestFormulaField:
-    """Tests for formula field modifier.
-    
-    Note: formula is deprecated, use compute/polynomial/transform instead.
-    Related to M102-M106 (compute operations).
-    """
-    
-    def test_formula_simple(self):
-        """Test simple formula."""
-        schema = {
-            'fields': [{
-                'name': 'temperature',
-                'type': 'u8',
-                'formula': 'x * 0.5 - 40'
-            }]
-        }
-        interpreter = SchemaInterpreter(schema)
-        
-        # x=160 -> 160 * 0.5 - 40 = 40
-        result = interpreter.decode(bytes([160]))
-        assert result.success
-        assert abs(result.data['temperature'] - 40.0) < 0.01
-    
-    def test_formula_with_math(self):
-        """Test formula with math operations."""
-        schema = {
-            'fields': [{
-                'name': 'value',
-                'type': 'u16',
-                'formula': '(x / 100) ** 2'
-            }]
-        }
-        interpreter = SchemaInterpreter(schema)
-        
-        # x=1000 -> (1000/100)^2 = 100
-        result = interpreter.decode(bytes([0x03, 0xE8]))  # 1000 big-endian
-        assert result.success
-        assert abs(result.data['value'] - 100.0) < 0.01
-    
-    def test_formula_overrides_mult_add(self):
-        """Test that formula takes precedence over mult/add."""
-        schema = {
-            'fields': [{
-                'name': 'value',
-                'type': 'u8',
-                'mult': 999,  # Should be ignored
-                'add': 999,   # Should be ignored
-                'formula': 'x * 2'
-            }]
-        }
-        interpreter = SchemaInterpreter(schema)
-        
-        result = interpreter.decode(bytes([10]))
-        assert result.success
-        assert result.data['value'] == 20  # formula: 10 * 2 = 20
-
-
 class TestNewTypes:
     """Tests for type extensions.
     
@@ -1524,7 +1467,7 @@ class TestFlaggedBitmask:
                     'groups': [
                         {'bit': 0, 'fields': [
                             {'name': 'dielectric', 'type': 'u16', 'div': 50},
-                            {'name': 'soil_temp', 'type': 'u16', 'formula': '(x - 400) / 10'}
+                            {'name': 'soil_temp', 'type': 'u16', 'div': 10, 'add': -40}
                         ]},
                         {'bit': 1, 'fields': [
                             {'name': 'battery', 'type': 'u16', 'div': 1000}
@@ -1572,62 +1515,6 @@ class TestFlaggedBitmask:
         assert result.success
         assert 'dielectric' not in result.data
         assert abs(result.data['battery'] - 3.166) < 0.001
-
-
-class TestCrossFieldFormula:
-    """Tests for cross-field computed values."""
-    
-    def test_polynomial(self):
-        import math
-        schema = {
-            'endian': 'big',
-            'fields': [
-                {'name': 'dielectric', 'type': 'u16', 'div': 50},
-                {'name': 'vwc', 'type': 'number',
-                 'formula': '0.0000043 * pow($dielectric, 3) - 0.00055 * pow($dielectric, 2) + 0.0292 * $dielectric - 0.053'}
-            ]
-        }
-        interpreter = SchemaInterpreter(schema)
-        
-        result = interpreter.decode(bytes([0x01, 0x55]))
-        assert result.success
-        assert abs(result.data['dielectric'] - 6.82) < 0.01
-        expected_vwc = 0.0000043 * math.pow(6.82, 3) - 0.00055 * math.pow(6.82, 2) + 0.0292 * 6.82 - 0.053
-        assert abs(result.data['vwc'] - expected_vwc) < 0.001
-    
-    def test_albedo_ratio(self):
-        schema = {
-            'endian': 'big',
-            'fields': [
-                {'name': 'incoming', 'type': 'u16', 'div': 10},
-                {'name': 'reflected', 'type': 'u16', 'div': 10},
-                {'name': 'albedo', 'type': 'number',
-                 'formula': '$incoming > 0 and $reflected > 0 ? $reflected / $incoming : 0'}
-            ]
-        }
-        interpreter = SchemaInterpreter(schema)
-        
-        # incoming=100, reflected=50 => albedo=0.5
-        result = interpreter.decode(bytes([0x03, 0xE8, 0x01, 0xF4]))
-        assert result.success
-        assert abs(result.data['albedo'] - 0.5) < 0.01
-    
-    def test_albedo_zero_guard(self):
-        schema = {
-            'endian': 'big',
-            'fields': [
-                {'name': 'incoming', 'type': 'u16', 'div': 10},
-                {'name': 'reflected', 'type': 'u16', 'div': 10},
-                {'name': 'albedo', 'type': 'number',
-                 'formula': '$incoming > 0 and $reflected > 0 ? $reflected / $incoming : 0'}
-            ]
-        }
-        interpreter = SchemaInterpreter(schema)
-        
-        # incoming=0 => albedo=0
-        result = interpreter.decode(bytes([0x00, 0x00, 0x01, 0xF4]))
-        assert result.success
-        assert result.data['albedo'] == 0
 
 
 class TestDeclarativeComputedFields:
@@ -1980,28 +1867,6 @@ class TestDeclarativeComputedFields:
         result = interpreter.decode(bytes([100]))
         assert abs(result.data['value'] - math.log(100)) < 0.001
     
-    def test_transform_clamp(self):
-        """Test transform with clamp [min, max]."""
-        schema = {
-            'fields': [
-                {'name': 'value', 'type': 'u8',
-                 'transform': [{'clamp': [10, 50]}]}
-            ]
-        }
-        interpreter = SchemaInterpreter(schema)
-        
-        # Within range
-        result = interpreter.decode(bytes([30]))
-        assert result.data['value'] == 30.0
-        
-        # Below min
-        result2 = interpreter.decode(bytes([5]))
-        assert result2.data['value'] == 10.0
-        
-        # Above max
-        result3 = interpreter.decode(bytes([100]))
-        assert result3.data['value'] == 50.0
-    
     def test_transform_chained(self):
         """Test multiple transform operations in sequence."""
         schema = {
@@ -2332,67 +2197,6 @@ class TestPhase3TimestampFormatting:
 
 # version_string was removed by CR-2026-058 (PS-401); its rejection is held by
 # tests/test_cr_2026_058_described_constructs.py.
-
-
-class TestPhase3EncodeFormula:
-    """Tests for encode_formula feature.
-    
-    Note: encode_formula is a prototype extension for custom reverse transformations.
-    Related to M211 (reverse arithmetic transformations).
-    """
-    
-    def test_encode_formula_simple(self):
-        """Test simple encode_formula."""
-        schema = {
-            'fields': [{
-                'name': 'temperature',
-                'type': 'u8',
-                'formula': 'x * 0.5 - 40',
-                'encode_formula': '(x + 40) / 0.5'
-            }]
-        }
-        interpreter = SchemaInterpreter(schema)
-        # 40 deg -> encode: (40 + 40) / 0.5 = 160
-        result = interpreter.encode({'temperature': 40.0})
-        assert result.success
-        assert result.payload == bytes([160])
-    
-    def test_encode_formula_overrides_mult(self):
-        """Test that encode_formula overrides mult/add reversal."""
-        schema = {
-            'fields': [{
-                'name': 'value',
-                'type': 'u16',
-                'mult': 999,
-                'add': 999,
-                'encode_formula': 'x * 100'
-            }]
-        }
-        interpreter = SchemaInterpreter(schema)
-        result = interpreter.encode({'value': 25.0})
-        assert result.success
-        assert result.payload == bytes([0x09, 0xC4])  # 2500 BE
-    
-    def test_encode_formula_roundtrip(self):
-        """Test encode_formula / formula roundtrip."""
-        schema = {
-            'endian': 'big',
-            'fields': [{
-                'name': 'pressure',
-                'type': 'u16',
-                'formula': '(x / 10) + 300',
-                'encode_formula': '(x - 300) * 10'
-            }]
-        }
-        interpreter = SchemaInterpreter(schema)
-        
-        # Decode: raw=10000 -> 10000/10 + 300 = 1300
-        decoded = interpreter.decode(bytes([0x27, 0x10]))
-        assert abs(decoded.data['pressure'] - 1300.0) < 0.1
-        
-        # Encode: 1300 -> (1300 - 300) * 10 = 10000
-        encoded = interpreter.encode({'pressure': 1300.0})
-        assert encoded.payload == bytes([0x27, 0x10])
 
 
 # =============================================================================
@@ -3080,33 +2884,6 @@ class TestRefEdgeCases:
         assert not result.success
 
 
-class TestFormulaEdgeCases:
-    """Edge cases for formula field."""
-
-    def test_formula_division_by_zero(self):
-        """Formula with division by zero should not crash."""
-        schema = {
-            'fields': [{
-                'name': 'v', 'type': 'u8',
-                'formula': 'x / 0'
-            }]
-        }
-        result = SchemaInterpreter(schema).decode(bytes([10]))
-        # Should either error or produce inf
-        assert not result.success or result.data.get('v') is not None
-
-    def test_formula_invalid_expression(self):
-        """Formula with syntax error should not crash."""
-        schema = {
-            'fields': [{
-                'name': 'v', 'type': 'u8',
-                'formula': 'x *** 2'
-            }]
-        }
-        result = SchemaInterpreter(schema).decode(bytes([10]))
-        assert not result.success
-
-
 class TestTlvEdgeCases:
     """Edge cases for TLV parsing."""
 
@@ -3185,22 +2962,6 @@ class TestVersionStringEdgeCases:
         }
         result = SchemaInterpreter(schema).decode(bytes([0x01, 0x02]))
         assert not result.success
-
-
-class TestEncodeFormulaEdgeCases:
-    """Edge cases for encode_formula."""
-
-    def test_encode_formula_invalid(self):
-        """encode_formula with syntax error should not crash."""
-        schema = {
-            'fields': [{
-                'name': 'v', 'type': 'u8',
-                'formula': 'x * 0.5 - 40',
-                'encode_formula': 'x @@@ invalid('
-            }]
-        }
-        result = SchemaInterpreter(schema).encode({'v': 40.0})
-        assert not result.success or len(result.errors) > 0
 
 
 class TestTimestampEdgeCases:
@@ -3606,22 +3367,6 @@ class TestTransformOperations:
         assert result.success
         assert abs(result.data['temp'] - 2.31) < 0.01
 
-    def test_transform_clamp(self):
-        """Transform with clamp operation."""
-        schema = {
-            'fields': [{
-                'name': 'pct',
-                'type': 'u8',
-                'transform': [{'clamp': [0, 100]}]
-            }]
-        }
-        interp = SchemaInterpreter(schema)
-        
-        result = interp.decode(bytes([0xFF]))  # 255
-        assert result.success
-        assert result.data['pct'] == 100  # Clamped
-
-
 class TestBitfieldString:
     """
     Tests for bitfield_string type (version strings from packed bits).
@@ -3918,12 +3663,12 @@ class TestVariablesComprehensive:
     REQ-Variables-070: var for storing field values
     """
 
-    def test_var_in_formula(self):
-        """Variable used in formula."""
+    def test_var_in_ref(self):
+        """Variable used by a ref with a modifier."""
         schema = {
             'fields': [
                 {'name': 'raw', 'type': 'u8', 'var': 'r'},
-                {'name': 'doubled', 'type': 'number', 'formula': '$r * 2'}
+                {'name': 'doubled', 'type': 'number', 'ref': '$r', 'mult': 2}
             ]
         }
         result = SchemaInterpreter(schema).decode(bytes([25]))
@@ -4304,44 +4049,6 @@ class TestEdgeCasesAndSecurity:
 
     # --- Formula Injection Prevention ---
     
-    def test_formula_injection_import_blocked(self):
-        """Formula cannot use __import__ to execute arbitrary code."""
-        schema = {'fields': [
-            {'name': 'x', 'type': 'u8', 'formula': '__import__("os").system("echo pwned")'}
-        ]}
-        interp = SchemaInterpreter(schema)
-        result = interp.decode(bytes([42]))
-        # Should fail or return safe default, not execute code
-        assert 'x' not in result.data or result.data.get('x') == 0.0
-
-    def test_formula_injection_globals_blocked(self):
-        """Formula cannot access globals()."""
-        schema = {'fields': [
-            {'name': 'x', 'type': 'u8', 'formula': 'globals()'}
-        ]}
-        interp = SchemaInterpreter(schema)
-        result = interp.decode(bytes([42]))
-        assert 'x' not in result.data or result.data.get('x') == 0.0
-
-    def test_formula_injection_eval_blocked(self):
-        """Formula cannot use nested eval."""
-        schema = {'fields': [
-            {'name': 'x', 'type': 'u8', 'formula': 'eval("1+1")'}
-        ]}
-        interp = SchemaInterpreter(schema)
-        result = interp.decode(bytes([42]))
-        assert 'x' not in result.data or result.data.get('x') == 0.0
-
-    def test_formula_injection_class_access_blocked(self):
-        """Formula cannot access __class__ for sandbox escape."""
-        schema = {'fields': [
-            {'name': 'x', 'type': 'u8', 'formula': '().__class__.__bases__[0].__subclasses__()'}
-        ]}
-        interp = SchemaInterpreter(schema)
-        result = interp.decode(bytes([42]))
-        # Should not crash or leak class info
-        assert result.data.get('x', 0.0) == 0.0
-
     # --- Recursion and Iteration Limits ---
 
     def test_deep_nested_match_handled(self):
@@ -4396,29 +4103,6 @@ class TestEdgeCasesAndSecurity:
 
     # --- Variable Reference Edge Cases ---
 
-    def test_self_referencing_formula_uses_default(self):
-        """Formula referencing its own var before assignment uses 0."""
-        schema = {'fields': [
-            {'name': 'x', 'type': 'u8', 'var': 'x', 'formula': '$x + 1'}
-        ]}
-        interp = SchemaInterpreter(schema)
-        result = interp.decode(bytes([42]))
-        # $x is 0 before assignment, so result is 0 + 1 = 1
-        assert result.data['x'] == 1.0
-
-    def test_circular_formula_references(self):
-        """Circular variable references don't cause infinite loop."""
-        schema = {'fields': [
-            {'name': 'a', 'type': 'u8', 'var': 'a', 'formula': '$b + 1'},
-            {'name': 'b', 'type': 'u8', 'var': 'b', 'formula': '$a + 1'}
-        ]}
-        interp = SchemaInterpreter(schema)
-        result = interp.decode(bytes([1, 2]))
-        # Should complete without hanging
-        assert result is not None
-        assert 'a' in result.data
-        assert 'b' in result.data
-
     # --- Buffer Boundary Conditions ---
 
     def test_tlv_length_exceeds_buffer(self):
@@ -4466,16 +4150,6 @@ class TestEdgeCasesAndSecurity:
         interp = SchemaInterpreter(schema)
         result = interp.decode(bytes([42]))
         # Should not crash - may return original, inf, or error
-        assert result is not None
-
-    def test_division_by_zero_formula(self):
-        """Division by zero in formula doesn't crash."""
-        schema = {'fields': [
-            {'name': 'x', 'type': 'u8', 'formula': 'x / 0'}
-        ]}
-        interp = SchemaInterpreter(schema)
-        result = interp.decode(bytes([42]))
-        # Should not crash
         assert result is not None
 
     def test_sqrt_negative_clamped(self):

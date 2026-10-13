@@ -199,7 +199,6 @@ C_UNSUPPORTED_KEYS = {
     "polynomial": "the C interpreter has no transform pipeline (polynomial)",
     "compute": "the C interpreter has no computed fields",
     "ref": "the C interpreter has no computed fields (ref)",
-    "formula": "the C interpreter has no formula",
     "guard": "the C interpreter has no guard",
     "encoding": "the C interpreter has no sign_magnitude/bcd/gray encodings",
     "numeral": "the C interpreter holds ascii text, not the integer it spells (PS-560)",
@@ -418,6 +417,23 @@ def field_errors(field: Dict, schema_endian: str = 'big') -> List[str]:
     return errors
 
 
+def _clamp_stages(node, _top=True):
+    """Every `{clamp: ...}` stage in a `transform` list of the schema's field lists."""
+    if isinstance(node, dict):
+        for key, value in node.items():
+            if _top and key == 'test_vectors':
+                continue
+            if key == 'transform' and isinstance(value, list):
+                for stage in value:
+                    if isinstance(stage, dict) and 'clamp' in stage:
+                        yield stage
+            else:
+                yield from _clamp_stages(value, False)
+    elif isinstance(node, list):
+        for item in node:
+            yield from _clamp_stages(item, False)
+
+
 def schema_errors(schema: Dict) -> List[str]:
     """Every field_errors() finding in a schema, plus what the C loader would cut."""
     errors = []
@@ -431,6 +447,11 @@ def schema_errors(schema: Dict) -> List[str]:
     # length of 0 to a skip alone; the YAML is checked here, before conversion.
     from schema_interpreter import field_name_errors
     errors.extend(field_name_errors(schema))
+    # CR-2026-159: `formula`, `encode_formula`, a transform's `clamp`, a port's `confirmed`
+    # and `min`/`max` on a field that is no repeat are withdrawn, whatever the target.
+    from schema_interpreter import WITHDRAWN_KEYS, withdrawn_errors
+    errors.extend(withdrawn_errors(schema))
+    errors.extend(WITHDRAWN_KEYS['clamp'] for _ in _clamp_stages(schema))
     if schema.get('ports'):
         errors.append("`ports` - the C interpreter has no port selection; refused "
                       "rather than dropped (PS-446)")
