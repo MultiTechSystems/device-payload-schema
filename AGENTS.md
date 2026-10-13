@@ -3206,6 +3206,77 @@ improved. The Go, Java and C# corpus runners write per-vector reports only when
     validator, generator, converter and the CLIs), Go `cr164_test.go`, Java `CR2026164Test`
     and C# `CR2026_164Tests`.
 
+- **CR-2026-167 (PS-297 amended, PS-576, PS-577; merged on la-payload-schema main for
+  0.5.7): a test vector may expect an error.**
+  - **The key.** `expected_error: {requirement: PS-nnn | [PS-nnn, ...], at: <name or PS-572
+    JSON Pointer>}` stands in place of `expected` / `expected_payload`, never beside them, on a
+    decode vector (`payload`) or an encode vector (`input`). `expected_warnings` on such a vector
+    lists the warnings reported before the failure. Load checks, in the prototype's text
+    (`key_vocabulary.check_expected_error`): `expected_error needs a requirement (PS-576)`, the PS
+    number format (`PS-\d+[a-z]?`), `at` a string, and `carries both expected_error and ...
+    (PS-297, PS-576)`. They live in `validate_schema.expected_error_problems`, run by the
+    validator; no interpreter reads vectors, so nothing else loads them. The vocabulary gate
+    knows the key (`tools/schema_vocabulary.py`).
+  - **The rule, one helper per runner.** A vector fails when the execution succeeds; when the
+    message cites PS numbers and they do not include every listed `requirement` (checked **only
+    where the message cites any**, so an error such as `Missing required field: x` is held to
+    `at` alone); or when `at` is given and the message neither contains it quoted (`'humidity'`)
+    nor, for a pointer, contains the pointer. Wording is never compared. Python
+    `validate_schema.expected_error_mismatch` (also `expects_error`); Go `corpusErrorMismatch`,
+    Java `errorMismatch`, C# `ErrorMismatch` in their corpus runners; the scorer's node runner
+    has its own copy (`errorMismatch`). The prototype's `at` rule is the quoted name, so an error
+    that names the field unquoted (the prototype's own `Missing required field: humidity`) cannot
+    satisfy `at`: the fixture's PS-551 vector leaves `at` out for that reason.
+  - **What each runner does.** Python's validator (`run_test_vector`), `tests/test_corpus_
+    conformance.py`, `tools/corpus-report.py`, `tools/score_schema.py` (Python half and the node
+    half; an error vector is a usable vector, it earns the vector points, and it is never a
+    branch- or edge-case witness) and `tools/schema-mutation.py` run it (a mutant that lets the
+    decode succeed, or moves the error to another rule or field, is killed). `tools/vector-verdicts.py`
+    runs it on both paths, the generated codec's `errors[]` (decodeUplink, encodeDownlink) being
+    the error messages. Go, Java and C# run it on decode vectors only, as they run only decode
+    vectors; an encode vector is skipped by them as every encode vector is. `tools/c-corpus-
+    harness.py` does not run them: it counts them (`expected_error_vectors_not_run`) and says why,
+    since the fixture's rejections need ports, tlv or an encoder keyed by name, none of which the
+    struct API builds. The round-trip suites (Python, Go, Java, C#, `encode-round-trip.py`),
+    `test_corpus_invariants` and `test_ts013_encode_parity` skip them; a decode that fails is no
+    round-trip candidate. `provenance-gate` reads `expected_error` as an outcome key, so changing
+    one on an unchanged payload is flagged like a changed `expected`.
+  - **Floors.** The decode floors are the corpus's decode vectors **that run**, and a decode
+    vector expecting an error counts, passing when the decode fails as required (Go, Java, C#
+    2744 -> 2751: the fixture's three rejections and four successful decodes; its two encode
+    vectors are not decode vectors, so no decode floor moves for them). Python's decode floor is
+    every vector, as before.
+    The four successful decodes round-trip, so re-encode floors rise by 4, all `tlv` (Python and
+    Java 2145 -> 2149, C# 2146 -> 2150, Go 2163 -> 2167, plain 2135 -> 2139); the rejections are
+    no round-trip candidate.
+  - **Fixture** `_language-conformance/expected-error.yaml` (ports 1-3): the CR's own
+    `too_short` (PS-535 at `temperature`), a tlv entry cut short (PS-486), a match with no case
+    and `default: error` (PS-565) and the CR's two encode examples (PS-168 at `humidity`; a
+    missing input, PS-551). **Who cites what, measured:** the PS-535 underflow and the PS-486 tlv
+    entry are cited by Python, Go, Java, C# and the generated codec (the C interpreter cannot run
+    either, with no ports or tlv); PS-168 by Python and the codec (the encode vectors run only
+    there); **PS-565 and PS-551 are cited by none**: `No matching case for value 9` and
+    `Missing required field: humidity` carry no PS number in any implementation, so those two
+    vectors are held to execution failure (and `at`, where given) alone, as PS-576 allows. Four
+    successful decodes sit beside them so the schema is held as tightly as its rejections (a
+    rejection says nothing of byte order or scale): mutation score 100%.
+  - **PS-577 is the direction for the shared case files.** A certification suite includes a
+    rejection vector for each requirement enforced by rejecting a payload or an input; a rejection
+    that lives only in `tests/*-cases.yaml` is a rejection no other implementation's suite sees.
+    **Not migrated in this change.** Follow-up inventory, counted from the case files
+    (`error` cases, by kind): 109 encode and 7 decode rejections run at run time - a schema that
+    loads - and could become vectors; 56 are load-time (a schema that is refused cannot carry
+    a vector, so they stay):
+    - encode, movable: `cr-2026-134` 34, `-135` 20, `-141` 8, `-146` 11, `-147` 11, `-148` 2,
+      `-149` 3, `-150` 4, `-151` 5, `-153` 4, `silent-empty` 7;
+    - decode, movable: `cr-2026-150` 7 (the `numeral` text that is not a numeral);
+    - load-time, staying: `-138` 11, `-150` 4, `-156` 10, `-159` 15, `-160` 6, `-161` 3, `-164` 7.
+    Two things a migration must settle first: Go, Java and C# run decode vectors only, so a moved
+    encode rejection loses its coverage in those three until their corpus runners run encode
+    vectors (the corpus has encode vectors that only Python and the codec run today); and each case
+    carries its own schema, so 91 distinct run-time schemas would join `_language-conformance/`
+    (or share one per CR with a port each, as the fixture does).
+
 ## Converting a vendor codec
 
 The converters in `tools/` (`convert_decentlab.py`, `convert_milesight.py`) do the

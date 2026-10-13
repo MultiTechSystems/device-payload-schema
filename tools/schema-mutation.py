@@ -109,6 +109,8 @@ import yaml  # noqa: E402
 from schema_interpreter import SchemaInterpreter  # noqa: E402
 from score_schema import CONFORMANCE_TOLERANCE  # noqa: E402
 from validate_schema import (  # noqa: E402
+    expected_error_mismatch,
+    expects_error,
     is_encode_vector,
     expected_fields_match,
     warnings_match,
@@ -809,6 +811,10 @@ def run_vector(interp: SchemaInterpreter, vector: Dict[str, Any]) -> Outcome:
     try:
         result = interp.decode(_payload(vector), fPort=_port(vector))
     except Exception as exc:  # a mutant may break the interpreter outright
+        if expects_error(vector):
+            # PS-576: a vector expecting an error is satisfied by a raise that meets it.
+            ok = expected_error_mismatch(str(exc), vector["expected_error"]) is None
+            return Outcome(ok, None, ("raised", type(exc).__name__, str(exc)))
         return Outcome(False, None, ("raised", type(exc).__name__, str(exc)))
     signature = (
         result.success,
@@ -816,6 +822,13 @@ def run_vector(interp: SchemaInterpreter, vector: Dict[str, Any]) -> Outcome:
         tuple(result.errors),
         tuple(result.warnings),
     )
+    if expects_error(vector):
+        # PS-576: the decode must fail, and its error must name the requirement and the
+        # field the vector lists. A mutant that lets it succeed, or moves the error to
+        # another rule or field, is caught.
+        passed = not result.success and expected_error_mismatch(
+            "; ".join(result.errors), vector["expected_error"]) is None
+        return Outcome(passed, result.data, signature)
     passed = result.success
     if passed:
         # PS-043/PS-044, with a null expectation asserting absence (CR-2026-075).

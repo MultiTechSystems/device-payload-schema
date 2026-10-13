@@ -68,6 +68,7 @@ def corpus_schemas():
             v
             for v in schema.get("test_vectors") or []
             if isinstance(v, dict) and "payload" in v and not is_encode_vector(v)
+            and "expected_error" not in v
         ]
         if vectors:
             yield path.relative_to(CORPUS).as_posix(), schema, vectors

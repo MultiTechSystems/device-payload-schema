@@ -459,6 +459,67 @@ def is_encode_vector(vector) -> bool:
     return "input" in vector or "expected_payload" in vector
 
 
+#: PS-576 (CR-2026-167): the keys of a vector's `expected_error`.
+EXPECTED_ERROR_KEYS = ('requirement', 'at')
+
+
+def expected_error_problems(vector: Dict[str, Any]) -> List[str]:
+    """Load-time problems with a vector's `expected_error` (PS-297, PS-576), in the spec
+    prototype's words (`key_vocabulary.check_expected_error`): its shape, the format of its
+    PS numbers, and that it replaces `expected` / `expected_payload` instead of sitting
+    beside them."""
+    if not isinstance(vector, dict) or 'expected_error' not in vector:
+        return []
+    name = vector.get('name', '<unnamed>')
+    spec = vector['expected_error']
+    if not isinstance(spec, dict):
+        return [f"Vector '{name}': expected_error needs a requirement (PS-576)"]
+    problems = [f"the expected_error of vector '{name}' has the key '{key}', which the "
+                f"specification does not define" for key in spec
+                if key not in EXPECTED_ERROR_KEYS]
+    if 'requirement' not in spec:
+        return problems + [f"Vector '{name}': expected_error needs a requirement (PS-576)"]
+    ids = spec['requirement'] if isinstance(spec['requirement'], list) else [spec['requirement']]
+    if not ids or not all(isinstance(i, str) and re.fullmatch(r'PS-\d+[a-z]?', i) for i in ids):
+        problems.append(f"Vector '{name}': expected_error's requirement must be a PS "
+                        f"number or a list of them, not {spec['requirement']!r} (PS-576)")
+    if 'at' in spec and not isinstance(spec['at'], str):
+        problems.append(f"Vector '{name}': expected_error's at must be a field name or a "
+                        f"JSON Pointer (PS-576)")
+    for other in ('expected', 'expected_payload'):
+        if other in vector:
+            problems.append(f"Vector '{name}' carries both expected_error and {other}; "
+                            f"expected_error replaces it (PS-297, PS-576)")
+    return problems
+
+
+def expected_error_mismatch(message: Any, expected: Dict[str, Any]) -> Optional[str]:
+    """Why an error does not satisfy a vector's `expected_error`, or None if it does (PS-576).
+
+    Two things are compared; the wording is not one of them:
+    - the PS numbers the message cites must include every `requirement` listed - checked
+      only where the message cites any, because an implementation need not say which
+      requirement it enforced (an error such as `Missing required field: x` cites none);
+    - `at` must be named in the message, quoted, or be a JSON Pointer the message contains.
+    """
+    message = str(message)
+    wanted = expected['requirement']
+    wanted = wanted if isinstance(wanted, list) else [wanted]
+    cited = set(re.findall(r'PS-\d+[a-z]?', message))
+    if cited and not set(wanted) <= cited:
+        return f"the error cites {sorted(cited)}, not {wanted}: {message[:160]}"
+    at = expected.get('at')
+    if at is not None and f"'{at}'" not in message and (
+            not at.startswith('/') or at not in message):
+        return f"the error does not name {at!r}: {message[:160]}"
+    return None
+
+
+def expects_error(vector: Any) -> bool:
+    """Whether a vector states that its decode or encode fails (PS-576)."""
+    return isinstance(vector, dict) and 'expected_error' in vector
+
+
 #: PS-514: a vendor-codec vector whose expected values correct the codec, and say where.
 CORRECTED_SOURCE = 'vendor-codec-corrected'
 
@@ -1650,6 +1711,8 @@ def validate_schema_structure(schema: Dict[str, Any]) -> List[str]:
                 # only evidence there is for the downlink clauses - could not be written
                 # in a schema that validates.
                 encode_vector = 'input' in tv or 'expected_payload' in tv
+                for problem in expected_error_problems(tv):
+                    errors.append(f"Test vector {i} ({tv.get('name', '?')}): {problem}")
                 if encode_vector and ('payload' in tv or 'expected' in tv):
                     # PS-297: the two kinds are exclusive. A vector carrying both is
                     # ambiguous about how it should be run.
@@ -1662,7 +1725,7 @@ def validate_schema_structure(schema: Dict[str, Any]) -> List[str]:
                         errors.append(
                             f"Test vector {i} ({tv.get('name', '?')}): encode vector "
                             "missing 'input'")
-                    if 'expected_payload' not in tv:
+                    if 'expected_payload' not in tv and 'expected_error' not in tv:
                         errors.append(
                             f"Test vector {i} ({tv.get('name', '?')}): encode vector "
                             "missing 'expected_payload'")
@@ -1670,7 +1733,7 @@ def validate_schema_structure(schema: Dict[str, Any]) -> List[str]:
                     if 'payload' not in tv:
                         errors.append(f"Test vector {i} ({tv.get('name', '?')}): missing 'payload'")
 
-                    if 'expected' not in tv:
+                    if 'expected' not in tv and 'expected_error' not in tv:
                         errors.append(f"Test vector {i} ({tv.get('name', '?')}): missing 'expected'")
                 
                 if 'expected_warnings' in tv:
@@ -1719,7 +1782,25 @@ def run_test_vector(interpreter: SchemaInterpreter, tv: Dict[str, Any]) -> TestR
         try:
             encoded = interpreter.encode(tv.get('input') or {}, fPort=tv.get('fport') or tv.get('fPort'))
         except Exception as exc:
+            if expects_error(tv):
+                why = expected_error_mismatch(str(exc), tv['expected_error'])
+                if why:
+                    result.errors.append(why)
+                    return result
+                result.passed = True
+                return result
             result.errors.append(f"Encode failed: {exc}")
+            return result
+        if expects_error(tv):
+            # PS-576: an encode that fails reports it through `errors`; one that succeeded
+            # is the failure.
+            if encoded.success:
+                result.errors.append(f"succeeded where {tv['expected_error']} was expected")
+            else:
+                why = expected_error_mismatch("; ".join(encoded.errors), tv['expected_error'])
+                if why:
+                    result.errors.append(why)
+            result.passed = not result.errors
             return result
         if not encoded.success:
             result.errors.extend(encoded.errors)
@@ -1748,11 +1829,29 @@ def run_test_vector(interpreter: SchemaInterpreter, tv: Dict[str, Any]) -> TestR
     fPort = tv.get('fport') or tv.get('fPort')
     try:
         decode_result = interpreter.decode(payload, fPort=fPort)
+        if expects_error(tv):
+            # PS-576: the decode must fail, and the error must satisfy `expected_error`.
+            if decode_result.success:
+                result.errors.append(f"succeeded where {tv['expected_error']} was expected")
+            else:
+                why = expected_error_mismatch("; ".join(decode_result.errors),
+                                              tv['expected_error'])
+                if why:
+                    result.errors.append(why)
+            result.passed = not result.errors
+            return result
         if not decode_result.success:
             result.errors.extend(decode_result.errors)
             return result
         result.actual = decode_result.data
     except Exception as e:
+        if expects_error(tv):
+            why = expected_error_mismatch(str(e), tv['expected_error'])
+            if why:
+                result.errors.append(why)
+                return result
+            result.passed = True
+            return result
         result.errors.append(f"Decode failed: {e}")
         return result
     

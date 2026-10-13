@@ -28,7 +28,9 @@ sys.path.insert(0, str(REPO_ROOT / "tools"))
 from schema_interpreter import SchemaInterpreter  # noqa: E402
 from score_schema import CONFORMANCE_TOLERANCE  # noqa: E402
 from validate_schema import (  # noqa: E402
+    expected_error_mismatch,
     expected_fields_match,
+    expects_error,
     meta_matches,
     is_encode_vector,
     warnings_match,
@@ -72,6 +74,14 @@ def test_corpus_vector(path, schema, vector):
     fport = vector.get("fPort") or vector.get("fport")
 
     result = SchemaInterpreter(schema).decode(bytes.fromhex(payload), fPort=fport)
+    if expects_error(vector):
+        # PS-576 (CR-2026-167): the decode must fail, citing the requirement and naming
+        # the field where the vector says so. Wording is never compared.
+        assert not result.success, "%s: succeeded where %s was expected" % (
+            path.name, vector["expected_error"])
+        why = expected_error_mismatch("; ".join(result.errors), vector["expected_error"])
+        assert why is None, "%s: %s" % (path.name, why)
+        return
     assert result.success, "%s: %s" % (path.name, result.errors[:2])
 
     # PS-043/PS-044: a null expectation asserts the key is absent (CR-2026-075).

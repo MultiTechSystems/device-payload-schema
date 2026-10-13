@@ -185,7 +185,7 @@ class TestTheSchemasThatNeededIt:
         schema = yaml.safe_load(path.read_text(encoding="utf-8"))
         seen = set()
         for vector in schema["test_vectors"]:
-            if is_encode_vector(vector):
+            if is_encode_vector(vector) or "expected_error" in vector:
                 continue
             payload = str(vector["payload"])
             js = run_codec(schema, payload)
