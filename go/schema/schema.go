@@ -454,6 +454,24 @@ type EncodeContext struct {
 	ps564Depth int
 	// trace is the decode record the encoder follows (PS-573); nil where none is given.
 	trace *decodeTrace
+	// enclosing is the stack of field lists enclosing the entry being encoded, within the
+	// current reported object, each with its current entry (CR-2026-165: the names declared
+	// outside a recorded match). Reset for an object and for each repeat element.
+	enclosing []*enclosingList
+}
+
+// enclosingList is one field list on the stack, and the index of the entry being encoded.
+type enclosingList struct {
+	fields []Field
+	cur    int
+}
+
+// newReportedObject starts a new reported object: the lists enclosing it do not report
+// beside it. It returns what to restore.
+func (ctx *EncodeContext) newReportedObject() []*enclosingList {
+	saved := ctx.enclosing
+	ctx.enclosing = nil
+	return saved
 }
 
 // NewEncodeContext creates a new encode context.
@@ -494,6 +512,7 @@ func (ctx *EncodeContext) branch() *EncodeContext {
 	child.order = ctx.order
 	child.scope = ctx.scope
 	child.trace = ctx.trace
+	child.enclosing = ctx.enclosing[:len(ctx.enclosing):len(ctx.enclosing)]
 	return child
 }
 
@@ -4964,7 +4983,7 @@ func encodeMatch(field Field, siblings []Field, data map[string]any, ctx *Encode
 	}
 
 	if record != nil && !given {
-		if err := checkRecordedCase(field, chosenKey, data); err != nil {
+		if err := checkRecordedCase(field, chosenKey, data, ctx); err != nil {
 			return err // PS-573
 		}
 	}
@@ -5284,7 +5303,9 @@ func encodeRepeatRecords(field Field, records []any, ctx *EncodeContext, count i
 			record = bound
 		}
 		pushed := ctx.trace.pushNode(field.decl, "", "repeat", position) // PS-572
+		saved := ctx.newReportedObject() // CR-2026-165: each element is its own object
 		err := encodeFieldsSealed(field.Fields, record, ctx)
+		ctx.enclosing = saved
 		ctx.trace.pop(pushed)
 		if err != nil {
 			return err
@@ -5476,6 +5497,9 @@ func encodeFieldList(fields []Field, data map[string]any, ctx *EncodeContext) er
 	if err != nil {
 		return err
 	}
+	entry := &enclosingList{fields: fields, cur: -1}
+	ctx.enclosing = append(ctx.enclosing, entry)
+	defer func() { ctx.enclosing = ctx.enclosing[:len(ctx.enclosing)-1] }()
 	// deriveInputs also makes the masks the groups fix visible to the constructs before
 	// the block, as the decoder's variables are: dnt binds its mask with an inline match
 	// (CR-2026-136).
@@ -5487,6 +5511,7 @@ func encodeFieldList(fields []Field, data map[string]any, ctx *EncodeContext) er
 			return ctx.overlayErr // PS-551: the field before ORed over a peek (CR-2026-141)
 		}
 		field := fields[i]
+		entry.cur = i
 
 		// PS-405, before any construct: an optional object or repeat the input omits
 		// writes nothing, as a plain field does.
@@ -6165,7 +6190,10 @@ func encodeField(field Field, value any, ctx *EncodeContext) error {
 
 	case TypeObject, TypeObjectLower:
 		if mapVal, ok := value.(map[string]any); ok {
-			if err := encodeFields(field.Fields, mapVal, ctx); err != nil {
+			saved := ctx.newReportedObject() // CR-2026-165
+			err := encodeFields(field.Fields, mapVal, ctx)
+			ctx.enclosing = saved
+			if err != nil {
 				return err
 			}
 		}

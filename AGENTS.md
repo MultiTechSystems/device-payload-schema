@@ -1236,6 +1236,31 @@ chose, so an encoder need not infer it.
   a sibling match) and a tlv entry's scope (thermokon) are not refinements PS-573 has. The
   earlier `_declared_beside` is removed from Python, Go, Java, C# and the TS013 runtime, so
   the clash reads alike in all five.
+- **CR-2026-165 (PS-573 amended; la-payload-schema `cr/0.5.6-apply-165`, for 0.5.6): a name
+  declared outside the match, in the same reported object, is not another case's.** Jason
+  adopted the refinement CR-2026-164 had left out, at a narrower scope than the removed
+  `_declared_beside`. A field is a contradiction when another case of the recorded match
+  declares it (the `default` list counts), the recorded case does not, and nothing outside
+  the match declares it within the same reported object.
+  - **Scope, as the prototype's `EncodeContext.enclosing`:** a stack of the field lists
+    enclosing the entry being encoded, each with its current entry. The names of the other
+    entries are walked through the merging constructs (`record_declared_fields`: match cases
+    and default, tlv cases, flagged groups, byte_group, records) and subtracted. It is reset
+    at an `object` and at each repeat element, so top-level names do not count for a match
+    inside either; the removed `_declared_beside` also counted the message's whole top-level
+    list. Where it differs, only a match inside an object or element.
+  - **Where:** Python `_enclosing` (`_encode_field_list`, `_encode_object_members`,
+    `_check_recorded_case`), the runtime's `ctx.encl` (`encList`, `encObject`), Go
+    `EncodeContext.enclosing`, Java `Encoder.enclosing`, C# `SchemaEncoder._enclosing`.
+  - **Cases:** `tests/cr-2026-162-cases.yaml`: the prototype's three
+    `TestCR2026165OutsideNames` tests (the lht65 sibling shape, a real contradiction, an
+    object boundary), and CR-2026-164's "name declared outside the match" case, which flips to
+    accepted for a name in the same object.
+  - **Measured** (read-only registry, Python): 13038 round trips with the record (12980
+    under CR-2026-164), 5475 without it, unchanged; the proto corpus with the record 2402,
+    unchanged. The set equals the earlier wider implementation's exactly: all 58 vectors it
+    regained (dnt etrv 34, dragino lt22222-l 12, lht65/lht65n-pir/lsn50-v2 12) are recovered,
+    since their matches sit at top level, and none is lost.
 - **A number in a PS-573 message is JavaScript's String(n)** (CR-2026-164): `is given 2`,
   not `2.0`. `message_value` (Python, over `format_lookup_value`), `messageValue` (Go, over
   `givenText`), `messageValue` (Java, over `jsNumber`), `MessageValue` (C#, over `JsNumber`);

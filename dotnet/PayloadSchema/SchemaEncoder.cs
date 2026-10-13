@@ -337,7 +337,7 @@ public static class SchemaEncoder
                         // PS-551: a whole object the input omits. Its members were looked
                         // up in the enclosing data and written as zeros.
                         throw new InvalidOperationException(MissingFieldMessage(objectKey));
-                    return EncodeFieldList(field.Fields, members);
+                    return EncodeObjectMembers(field.Fields, members);
                 }
                 case FieldType.Number:
                     // Derived from other fields: no bytes of its own.
@@ -552,6 +552,40 @@ public static class SchemaEncoder
         byte[] EncodeWithBitfieldRuns(List<SchemaField> fields,
                                       Dictionary<string, object?> data, bool topLevel)
         {
+            var entry = new EnclosingList(fields);                              // CR-2026-165
+            _enclosing.Add(entry);
+            try { return EncodeWithBitfieldRunsIn(fields, data, topLevel, entry); }
+            finally { _enclosing.RemoveAt(_enclosing.Count - 1); }
+        }
+
+        /// <summary>
+        /// The field lists enclosing the entry being encoded, within the current reported
+        /// object, each with its current entry (CR-2026-165: the names declared outside a
+        /// recorded match). Reset for an object and for each repeat element.
+        /// </summary>
+        List<EnclosingList> _enclosing = new();
+
+        sealed class EnclosingList
+        {
+            public readonly List<SchemaField> Fields;
+            public SchemaField? Current;
+            public EnclosingList(List<SchemaField> fields) { Fields = fields; }
+        }
+
+        /// <summary>An object's members or a repeat element's fields: a new reported
+        /// object, so the lists enclosing it do not report beside it.</summary>
+        byte[] EncodeObjectMembers(List<SchemaField> fields, Dictionary<string, object?> data)
+        {
+            var saved = _enclosing;
+            _enclosing = new List<EnclosingList>();
+            try { return EncodeFieldList(fields, data); }
+            finally { _enclosing = saved; }
+        }
+
+        byte[] EncodeWithBitfieldRunsIn(List<SchemaField> fields,
+                                        Dictionary<string, object?> data, bool topLevel,
+                                        EnclosingList entry)
+        {
             // CR-2026-136: laid out as the decoder reads it. A bit range or bool that does
             // not consume leaves its bytes pending, and the next field's bytes are ORed
             // into them rather than written after them.
@@ -595,6 +629,7 @@ public static class SchemaEncoder
 
             foreach (var field in fields)
             {
+                entry.Current = field;
                 CloseItem();
                 levelSize = output.Size;
                 levelMark = _t564.Count;
@@ -834,10 +869,11 @@ public static class SchemaEncoder
         /// <summary>
         /// PS-573: under a case taken from the decode record, the input may not give a field
         /// only another case of the match declares (<paramref name="chosen"/> null for the
-        /// default). "Only" is read within the match alone (CR-2026-164); the match's default
-        /// list is one of its cases (_check_recorded_case).
+        /// default). A name something outside the match declares within the same reported
+        /// object - the other entries of the lists enclosing it - is not one (CR-2026-165);
+        /// the match's default list is one of its cases (_check_recorded_case).
         /// </summary>
-        static void CheckRecordedCase(SchemaField match, MatchCase? chosen,
+        void CheckRecordedCase(SchemaField match, MatchCase? chosen,
             Dictionary<string, object?> data)
         {
             var defaultBody = DefaultBody(match);
@@ -851,7 +887,11 @@ public static class SchemaEncoder
             }
             if (chosen != null && defaultBody != null)
                 others.UnionWith(DecodeTrace.DeclaredFields(Nodes(defaultBody)));
-            var clash = others.Where(n => !mine.Contains(n) && data.ContainsKey(n))
+            var outside = new HashSet<string>();
+            foreach (var e in _enclosing)
+                outside.UnionWith(DecodeTrace.DeclaredFields(
+                    Nodes(e.Fields.Where(f => !ReferenceEquals(f, e.Current)).ToList())));
+            var clash = others.Where(n => !mine.Contains(n) && !outside.Contains(n) && data.ContainsKey(n))
                 .OrderBy(n => n, StringComparer.Ordinal).ToList();
             if (clash.Count > 0)
                 throw new InvalidOperationException($"Field {MatchLabel(match)}: the input gives "
@@ -1501,7 +1541,7 @@ public static class SchemaEncoder
                 // PS-572: the element's position, as its decode recorded it.
                 var pushed = _trace?.Push(field.Node, "repeat", position) ?? false;
                 byte[] element;
-                try { element = EncodeFieldList(field.Fields, asMap); }
+                try { element = EncodeObjectMembers(field.Fields, asMap); }
                 finally { _trace?.Pop(pushed); }
                 FrameMeta.Check(element, MetaOf(element));   // PS-551: an element closes with it
                 output.AddRange(element);

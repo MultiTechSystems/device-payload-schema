@@ -314,7 +314,7 @@ final class Encoder {
                 // zeros - looked up in the enclosing data, where they are not.
                 throw new MissingFieldException(key);
             }
-            return encodeFieldList(field.getFields(), stringKeyed(m));
+            return encodeObjectMembers(field.getFields(), stringKeyed(m));
         }
         if (isComputed(field)) {
             // Derived from other fields: no bytes of its own.
@@ -540,6 +540,35 @@ final class Encoder {
      */
     private byte[] encodeWithBitfieldRuns(List<Field> list, Map<String, Object> data,
                                           boolean topLevel) {
+        Object[] entry = {list, null};                                           // CR-2026-165
+        enclosing.add(entry);
+        try {
+            return encodeWithBitfieldRunsIn(list, data, topLevel, entry);
+        } finally {
+            enclosing.remove(enclosing.size() - 1);
+        }
+    }
+
+    /**
+     * The field lists enclosing the entry being encoded, within the current reported
+     * object, each with its current entry (CR-2026-165: the names declared outside a
+     * recorded match). Reset for an object and for each repeat element.
+     */
+    private List<Object[]> enclosing = new ArrayList<>();
+
+    /** An object's members or a repeat element's fields: a new reported object. */
+    private byte[] encodeObjectMembers(List<Field> list, Map<String, Object> data) {
+        List<Object[]> saved = enclosing;
+        enclosing = new ArrayList<>();
+        try {
+            return encodeFieldList(list, data);
+        } finally {
+            enclosing = saved;
+        }
+    }
+
+    private byte[] encodeWithBitfieldRunsIn(List<Field> list, Map<String, Object> data,
+                                            boolean topLevel, Object[] entry) {
         // CR-2026-136: laid out as the decoder reads it. A range or bool that does not
         // consume leaves its bytes pending, and the next field's bytes are ORed into them
         // rather than written after them.
@@ -549,6 +578,7 @@ final class Encoder {
         String omittedOptional = null;      // the first optional field the input left out
         for (Field field : list) {
             if (!isBareBitfield(field)) {
+                entry[1] = field;
                 tails.start();
                 flushRun(out, run, data, topLevel);
                 tails.start();
@@ -1119,7 +1149,7 @@ final class Encoder {
             boolean pushed = rec != null && rec.push(field.getRaw(), "repeat", position);
             byte[] encoded;
             try {
-                encoded = encodeFieldList(field.getFields(), element);
+                encoded = encodeObjectMembers(field.getFields(), element);
             } finally {
                 if (rec != null) rec.pop(pushed);
             }
@@ -1513,10 +1543,11 @@ final class Encoder {
     /**
      * PS-573: under a case taken from the decode record, the input may not give a field
      * only another case of the match declares ({@code chosen} null for the default).
-     * "Only" is read within the match alone (CR-2026-164); its {@code default} list is one
-     * of its cases.
+     * A name something outside the match declares within the same reported object - the
+     * other entries of the lists enclosing it - is not one (CR-2026-165). Its
+     * {@code default} list is one of its cases (CR-2026-164).
      */
-    private static void checkRecordedCase(Field match, String chosen, Map<String, Object> data) {
+    private void checkRecordedCase(Field match, String chosen, Map<String, Object> data) {
         Map<?, ?> raw = match.getRaw();
         Map<?, ?> cases = raw != null && raw.get("cases") instanceof Map<?, ?> m ? m : Map.of();
         Object dflt = raw != null && raw.get("default") instanceof List<?> l ? l
@@ -1530,8 +1561,17 @@ final class Encoder {
             others.addAll(recordDeclaredFields(e.getValue(), null));
         }
         if (chosen != null && dflt != null) others.addAll(recordDeclaredFields(dflt, null));
+        Set<String> outside = new java.util.HashSet<>();
+        for (Object[] e : enclosing) {
+            List<Object> raws = new ArrayList<>();
+            for (Object f : (List<?>) e[0]) {
+                Field other = (Field) f;
+                if (other != e[1] && other.getRaw() != null) raws.add(other.getRaw());
+            }
+            outside.addAll(recordDeclaredFields(raws, null));
+        }
         for (String n : others) {
-            if (!mine.contains(n) && data.containsKey(n)) {
+            if (!mine.contains(n) && !outside.contains(n) && data.containsKey(n)) {
                 throw new SchemaException.EncodeException("Field " + matchLabel(match)
                         + ": the input gives '" + n + "', which only another case declares, "
                         + "against the recorded case (PS-573)");

@@ -6867,6 +6867,7 @@ class SchemaInterpreter:
         # The fields this message is encoded from: a reference is looked for among them
         # before the rest of the schema, since each port may declare its own `code`.
         self._encode_scope = fields
+        self._enclosing = [[fields, None]]      # CR-2026-165: the lists enclosing the entry
         
         # PS-551: a value the input omits but the rest of it fixes - a repeat's count or
         # byte_length field, a match's discriminator, a flagged mask - is derived before
@@ -6894,6 +6895,7 @@ class SchemaInterpreter:
                     result.errors.append(error_text(f"Error encoding bit range(s) {names}: ", e))
                 continue
             field_def = _item
+            self._enclosing[-1][1] = field_def
             # PS-405, before any construct: an optional object or repeat the input omits
             # writes nothing, as a plain field does. The object branch ran first and wrote
             # its members as zeros.
@@ -6966,7 +6968,7 @@ class SchemaInterpreter:
                         key if key is not None else field_def.get('name')))
                     continue
                 try:
-                    output.extend(self._encode_field_list(
+                    output.extend(self._encode_object_members(
                         field_def.get('fields') or [], nested))
                 except Exception as e:
                     result.errors.append(
@@ -7981,9 +7983,9 @@ class SchemaInterpreter:
         """PS-573: under a case taken from the decode record, the input may not give a
         field only another case of the match declares (`chosen` None for the default).
 
-        "Only" is read within the match alone (CR-2026-164): a name that something outside
-        it also declares is still one only another case of this match declares. The
-        match's `default` list is one of its cases."""
+        A name that something outside the match declares within the same reported object
+        (CR-2026-165) is not one only another case declares. The match's `default` list is
+        one of its cases (CR-2026-164)."""
         cases = match_def.get('cases') or {}
         default = self._default_body(match_def)
         if chosen is not None and chosen in cases:
@@ -7997,7 +7999,13 @@ class SchemaInterpreter:
             others |= set(record_declared_fields(body))
         if chosen is not None and default is not None:
             others |= set(record_declared_fields(default))
-        clash = sorted(n for n in others - mine if n in data)
+        # CR-2026-165: a name something outside this match declares, within the same
+        # reported object - the other entries of the lists enclosing it, through the
+        # constructs that merge into them - is accounted for there, not by another case.
+        outside = set()
+        for fields, current in getattr(self, '_enclosing', []):
+            outside |= set(record_declared_fields(fields, skip=current))
+        clash = sorted(n for n in others - mine - outside if n in data)
         if clash:
             raise ValueError(f"Field {match_label(match_def)}: the input gives '{clash[0]}', "
                              f"which only another case declares, against the recorded "
@@ -8122,8 +8130,29 @@ class SchemaInterpreter:
         value = int(str(case_key), 0) if not isinstance(case_key, int) else case_key
         return int(value).to_bytes(tag_size, byteorder)
 
+    def _encode_object_members(self, fields: List[Dict[str, Any]],
+                               data: Dict[str, Any]) -> bytes:
+        """An object's members or a repeat element's fields: a new reported object, so the
+        lists enclosing it are not the ones that report beside it (CR-2026-165)."""
+        saved, self._enclosing = getattr(self, '_enclosing', []), []
+        try:
+            return self._encode_field_list(fields, data)
+        finally:
+            self._enclosing = saved
+
     def _encode_field_list(self, fields: List[Dict[str, Any]], data: Dict[str, Any]) -> bytes:
         """Encode a list of fields - a TLV case, match branch, repeat element or object."""
+        if not hasattr(self, '_enclosing'):
+            self._enclosing = []
+        entry = [fields, None]
+        self._enclosing.append(entry)
+        try:
+            return self._encode_field_list_in(fields, data, entry)
+        finally:
+            self._enclosing.pop()
+
+    def _encode_field_list_in(self, fields: List[Dict[str, Any]], data: Dict[str, Any],
+                              entry: list) -> bytes:
         data = self._derive_inputs(fields, data)                           # PS-551
         out = FrameBuffer()             # CR-2026-136: laid out as the decoder reads it
         omitted_optional = None     # the first optional field the input left out (PS-405)
@@ -8138,6 +8167,7 @@ class SchemaInterpreter:
             f = item
             if not isinstance(f, dict):
                 continue
+            entry[1] = f
             name = f.get('name', '')
             # PS-405, before any construct: an optional object or repeat the input omits
             # writes nothing, as a plain field does.
@@ -8178,7 +8208,7 @@ class SchemaInterpreter:
                 if not isinstance(nested, dict):
                     # PS-551: its members were written as zeros.
                     raise ValueError(missing_field_message(key))
-                out.extend(self._encode_field_list(f.get('fields') or [], nested))
+                out.extend(self._encode_object_members(f.get('fields') or [], nested))
                 continue
             if ftype in COMPUTED_TYPES:
                 # Derived: computed from other fields, no bytes of its own.
@@ -8287,7 +8317,7 @@ class SchemaInterpreter:
             pushed = (self._trace.push(field_def, 'repeat', position)
                       if self._trace is not None else False)
             try:
-                element = self._encode_field_list(record_fields, record)
+                element = self._encode_object_members(record_fields, record)
             finally:
                 if self._trace is not None:
                     self._trace.pop(pushed)

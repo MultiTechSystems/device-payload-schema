@@ -1083,7 +1083,7 @@ function encMatch(out, f, data, ctx, peeked, siblings) {   // _encode_match
       if (encCasePattern(disc, k)) { key = k; body = cases[k]; break; }
     }
   }
-  if (record !== undefined && !given) encCheckRecordedCase(m, key, data);   // PS-573
+  if (record !== undefined && !given) encCheckRecordedCase(m, key, data, ctx);   // PS-573
   if (body === null && (disc === null || disc === undefined)) {
     // PS-563: by score only where no discriminator is given; a given one matching no
     // case takes the default or is rejected (PS-565).
@@ -1272,7 +1272,7 @@ function encRepeatElementsBody(out, f, data, records, count, ctx) {
     if (f.index) { var copy = {}; for (var k in rec) copy[k] = rec[k]; copy[f.index] = i + (f.index_base || 0); rec = copy; }
     var element = [];
     var pushed = encPush(ctx, f.__ptr, "repeat", i);  // PS-572: the element's position
-    try { encList(element, rf, rec, ctx); } finally { encPop(ctx, pushed); }
+    try { encObject(element, rf, rec, ctx); } finally { encPop(ctx, pushed); }
     encCheckPeeks(element);           // PS-551: an element's bytes close with it
     for (var eb = 0; eb < element.length; eb++) out.push(element[eb]);
   }
@@ -1981,7 +1981,7 @@ function encMatchLabel(m) {                           // match_label
   return n ? "'" + n + "'" : "an unnamed match";
 }
 
-function encCheckRecordedCase(m, chosen, data) {   // _check_recorded_case (PS-573; "only" within the match, CR-2026-164)
+function encCheckRecordedCase(m, chosen, data, ctx) {   // _check_recorded_case (PS-573; CR-2026-164, CR-2026-165)
   var cases = m.cases || {}, dflt = encDefaultBody(m);
   var mine = encRecordDeclared(chosen !== null && Array.isArray(cases[chosen]) ? cases[chosen] : dflt);
   var others = {};
@@ -1990,8 +1990,14 @@ function encCheckRecordedCase(m, chosen, data) {   // _check_recorded_case (PS-5
     encRecordDeclared(cases[k]).forEach(function (n) { others[n] = true; });
   });
   if (chosen !== null && dflt) encRecordDeclared(dflt).forEach(function (n) { others[n] = true; });
+  // CR-2026-165: a name something outside the match declares within the same reported
+  // object - the other entries of the lists enclosing it - is not another case's.
+  var outside = {};
+  (ctx.encl || []).forEach(function (e) {
+    encRecordDeclared(e.fields, e.cur).forEach(function (n) { outside[n] = true; });
+  });
   var clash = Object.keys(others).filter(function (n) {
-    return mine.indexOf(n) < 0 && Object.prototype.hasOwnProperty.call(data, n);
+    return mine.indexOf(n) < 0 && !outside[n] && Object.prototype.hasOwnProperty.call(data, n);
   }).sort();
   if (clash.length) encFail("Field " + encMatchLabel(m) + ": the input gives '" + clash[0] + "', which only another case declares, against the recorded case (PS-573)");
 }
@@ -2063,6 +2069,22 @@ function encDerive(fields, data, ctx) {                 // _derive_inputs
 /* `top` selects the reference's top-level loop (encode) over _encode_field_list: the
  * name_from error is its alone. */
 function encList(out, fields, data, ctx, top) {
+  // CR-2026-165: the lists enclosing the entry being encoded, each with its current entry.
+  if (!ctx.encl) ctx.encl = [];
+  var entry = { fields: fields, cur: null };
+  ctx.encl.push(entry);
+  try { return encListIn(out, fields, data, ctx, top, entry); } finally { ctx.encl.pop(); }
+}
+
+/* An object's members, or a repeat element's fields: a new reported object, so the lists
+ * enclosing it do not report beside it (CR-2026-165). */
+function encObject(out, fields, data, ctx) {
+  var saved = ctx.encl;
+  ctx.encl = [];
+  try { return encList(out, fields, data, ctx); } finally { ctx.encl = saved; }
+}
+
+function encListIn(out, fields, data, ctx, top, entry) {
   var omitted = null;
   data = encDerive(fields, data, ctx);
   // CR-2026-136: a frame laid out as a decoder reads it (FrameBuffer). A bit range or
@@ -2102,6 +2124,7 @@ function encList(out, fields, data, ctx, top) {
 
   function encOne(item, out) {
     var f = item.field, name = f.name || "", type = f.type === undefined ? "u8" : f.type;
+    entry.cur = f;
     if (f.optional === true && f.name) {
       var okey = encResolveName(f, f.name, data);
       if (!encHas(data, okey === null ? f.name : okey)) { omitted = omitted || f.name; return; }
@@ -2118,7 +2141,7 @@ function encList(out, fields, data, ctx, top) {
       if (objKey === null) objKey = name;
       var nested = data[objKey];
       if (nested === null || typeof nested !== "object" || Array.isArray(nested)) encFail(encMissing(objKey));   // PS-551
-      return encList(out, f.fields || [], nested, ctx);
+      return encObject(out, f.fields || [], nested, ctx);
     }
     if (ENC_COMPUTED.indexOf(type) >= 0) return;
     if (type === "skip") {

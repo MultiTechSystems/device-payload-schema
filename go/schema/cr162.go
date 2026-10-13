@@ -514,10 +514,11 @@ func sameMap(a, b map[string]any) bool {
 }
 
 // checkRecordedCase is _check_recorded_case: under a case taken from the record, the input
-// may not give a field only another case of the match declares. "Only" is read within the
-// match alone (CR-2026-164): a name something outside it also declares still counts. The
-// match's `default` list is one of its cases.
-func checkRecordedCase(field Field, chosenKey string, data map[string]any) error {
+// may not give a field only another case of the match declares. A name something outside
+// the match declares within the same reported object - the other entries of the lists
+// enclosing it - is not one (CR-2026-165). The match's `default` list is one of its
+// cases (CR-2026-164).
+func checkRecordedCase(field Field, chosenKey string, data map[string]any, ctx *EncodeContext) error {
 	decl := field.matchDecl
 	cases := asStringMap(decl["cases"])
 	var defaultBody any
@@ -561,9 +562,19 @@ func checkRecordedCase(field Field, chosenKey string, data map[string]any) error
 	if isCase && defaultBody != nil {
 		recordDeclared(defaultBody, nil, others)
 	}
+	outside := map[string]bool{}
+	for _, e := range ctx.enclosing {
+		rest := make([]Field, 0, len(e.fields))
+		for i, f := range e.fields {
+			if i != e.cur {
+				rest = append(rest, f)
+			}
+		}
+		recordDeclared(fieldDecls(rest), nil, outside)
+	}
 	var clash []string
 	for name := range others {
-		if mine[name] {
+		if mine[name] || outside[name] {
 			continue
 		}
 		if _, given := data[name]; given {

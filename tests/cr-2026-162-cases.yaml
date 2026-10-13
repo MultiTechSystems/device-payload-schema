@@ -155,17 +155,61 @@ cases:
       record: decoded
       payload: "0205"
 
-- name: a_name_declared_outside_the_match_is_still_only_another_cases
-  # CR-2026-164: "only another case declares" is read within the match. `b` is also a field
-  # of the message outside it, and the input giving it against case 1 is still rejected.
+- name: a_name_declared_outside_the_match_in_the_same_object_is_accepted
+  # CR-2026-165 (PS-573): a name something outside the match declares, within the same
+  # reported object, is accounted for there and is not another case's. `b` is also a field
+  # of the message beside the match, so the input giving it against case 1 is accepted
+  # (CR-2026-164 had rejected it).
   schema: "name: t\nversion: 1\nfields:\n  - {name: _k, type: u8}\n  - match:\n      field: $_k\n      cases:\n        1: [{name: a, type: u8}]\n        2: [{name: b, type: u8}]\n  - {name: b, type: u8}\n"
   decode:
     payload: "010507"
     record: '{"matches": {"/fields/1/match": {"case": 1, "value": 1}}, "internal": {"/fields/0": 1}, "flagged": {}}'
+    round_trip: true
   encode:
     - input: '{"a": 5, "b": 7}'
       record: decoded
-      error: "Field an unnamed match: the input gives 'b', which only another case declares, against the recorded case (PS-573)"
+      payload: "010507"
+
+- name: a_sibling_matchs_name_is_not_another_case
+  # CR-2026-165, the spec prototype's TestCR2026165OutsideNames, the lht65 shape: the first
+  # match took case 2 (h); `t` comes from the second match, a sibling in the same object.
+  schema: "name: t\nversion: 1\nfields:\n  - match:\n      length: 1\n      var: a\n      cases:\n        1: [{name: t, type: u8}]\n        2: [{name: h, type: u8}]\n  - match:\n      length: 1\n      var: b\n      cases:\n        3: [{name: t, type: u8}]\n"
+  decode:
+    payload: "02050307"
+    matches: '["/fields/0/match", "/fields/1/match"]'
+    round_trip: true
+  encode:
+    - input: '{"h": 5, "t": 7}'
+      record: decoded
+      payload: "02050307"
+
+- name: a_name_only_another_case_declares_is_still_a_contradiction
+  # CR-2026-165: with the second match reporting `z`, nothing outside the first match
+  # declares `t`, so the input giving it against the recorded case 2 is rejected.
+  schema: "name: t\nversion: 1\nfields:\n  - match:\n      length: 1\n      var: a\n      cases:\n        1: [{name: t, type: u8}]\n        2: [{name: h, type: u8}]\n  - match:\n      length: 1\n      var: b\n      cases:\n        3: [{name: z, type: u8}]\n"
+  decode:
+    payload: "02050307"
+    matches: '["/fields/0/match", "/fields/1/match"]'
+  encode:
+    - input: '{"h": 5, "t": 1, "z": 7}'
+      record: decoded
+      error: "the input gives 't', which only another case declares, against the recorded case (PS-573)"
+
+- name: a_name_outside_the_reported_object_does_not_count
+  # CR-2026-165: a top-level `t` belongs to a different reported object than the match
+  # inside `o`, so it does not excuse `t` there.
+  schema: "name: t\nversion: 1\nfields:\n  - {name: t, type: u8}\n  - name: o\n    type: object\n    fields:\n      - match:\n          length: 1\n          var: a\n          cases:\n            1: [{name: t, type: u8}]\n            2: [{name: h, type: u8}]\n"
+  decode:
+    payload: "090205"
+    matches: '["/fields/1/fields/0/match"]'
+    round_trip: true
+  encode:
+    - input: '{"t": 9, "o": {"h": 5}}'
+      record: decoded
+      payload: "090205"
+    - input: '{"t": 9, "o": {"h": 5, "t": 1}}'
+      record: decoded
+      error: "the input gives 't', which only another case declares, against the recorded case (PS-573)"
 
 # --- flagged and byte_group ---------------------------------------------------------------
 
