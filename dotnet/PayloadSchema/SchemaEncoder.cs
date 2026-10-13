@@ -827,24 +827,7 @@ public static class SchemaEncoder
                 if (PayloadSchema.Meta.KeyText(c.KeyNode).Trim() == wanted) return c;
             }
             throw new InvalidOperationException($"Field {MatchLabel(match)}: the recorded case "
-                + $"{PayloadSchema.Meta.PyRepr(key)} is not a case of the match (PS-573)");
-        }
-
-        /// <summary>
-        /// The names the field list a match sits in, and the message's whole field list,
-        /// declare outside that match: a name one of them reports is the input's to give
-        /// whichever case the match takes (_declared_beside).
-        /// </summary>
-        HashSet<string> DeclaredBeside(SchemaField? owner, List<SchemaField>? siblings)
-        {
-            var names = new HashSet<string>();
-            foreach (var scope in new[] { siblings, _fields })
-                if (scope != null)
-                    foreach (var n in DecodeTrace.DeclaredFields(
-                                 scope.Select(f => (YamlDotNet.RepresentationModel.YamlNode?)f.Node)
-                                     .Where(n => n != null)!, owner?.Node))
-                        names.Add(n);
-            return names;
+                + $"{MessageValue(key)} is not a case of the match (PS-573)");
         }
 
         static IEnumerable<YamlDotNet.RepresentationModel.YamlNode> Nodes(List<SchemaField>? fields)
@@ -854,11 +837,11 @@ public static class SchemaEncoder
         /// <summary>
         /// PS-573: under a case taken from the decode record, the input may not give a field
         /// only another case of the match declares (<paramref name="chosen"/> null for the
-        /// default). A name declared outside the match as well is not one only another case
-        /// declares (_check_recorded_case).
+        /// default). "Only" is read within the match alone (CR-2026-164); the match's default
+        /// list is one of its cases (_check_recorded_case).
         /// </summary>
         static void CheckRecordedCase(SchemaField match, MatchCase? chosen,
-            Dictionary<string, object?> data, HashSet<string> beside)
+            Dictionary<string, object?> data)
         {
             var defaultBody = DefaultBody(match);
             var mine = new HashSet<string>(DecodeTrace.DeclaredFields(
@@ -871,7 +854,7 @@ public static class SchemaEncoder
             }
             if (chosen != null && defaultBody != null)
                 others.UnionWith(DecodeTrace.DeclaredFields(Nodes(defaultBody)));
-            var clash = others.Where(n => !mine.Contains(n) && !beside.Contains(n) && data.ContainsKey(n))
+            var clash = others.Where(n => !mine.Contains(n) && data.ContainsKey(n))
                 .OrderBy(n => n, StringComparer.Ordinal).ToList();
             if (clash.Count > 0)
                 throw new InvalidOperationException($"Field {MatchLabel(match)}: the input gives "
@@ -1201,8 +1184,8 @@ public static class SchemaEncoder
                 if (data.TryGetValue(name, out var given) && !trace.Supplied.Contains(name))
                 {
                     if (!SameValue(given, recorded))
-                        throw new InvalidOperationException($"Field '{name}' is given {PayloadSchema.Meta.PyRepr(given)}, "
-                            + $"but the decode record holds {PayloadSchema.Meta.PyRepr(recorded)} (PS-573)");
+                        throw new InvalidOperationException($"Field '{name}' is given {MessageValue(given)}, "
+                            + $"but the decode record holds {MessageValue(recorded)} (PS-573)");
                     return;
                 }
                 derived[name] = recorded;
@@ -1648,7 +1631,7 @@ public static class SchemaEncoder
             }
             if (record != null && !given)
                 CheckRecordedCase(match, matched != null && !IsDefaultCase(matched) ? matched : null,
-                    data, DeclaredBeside(owner, siblings));                      // PS-573
+                    data);                                                       // PS-573
             // A known discriminator that matched no case takes the default, and takes it
             // ahead of the claimable-name heuristic: the schema said what an unmatched
             // value means, so guessing a case from the names present would contradict it.
@@ -2717,6 +2700,15 @@ public static class SchemaEncoder
             IEnumerable<int> codes) =>
             new($"Field '{name}': the label {LabelText(label)} is shared by codes "
                 + $"[{string.Join(", ", codes.OrderBy(c => c))}], so it cannot be encoded (PS-169)");
+
+        /// <summary>A value quoted in a PS-573 message (CR-2026-164): a number as JavaScript's
+        /// String(number), anything else as Python's repr.</summary>
+        static string MessageValue(object? value) => value switch
+        {
+            sbyte or byte or short or ushort or int or uint or long or ulong or float or double
+                or decimal => JsNumber(value),
+            _ => PayloadSchema.Meta.PyRepr(value),
+        };
 
         /// <summary>
         /// A label as the PS-169 and PS-067 messages write it: text in single quotes, a

@@ -1226,20 +1226,27 @@ chose, so an encoder need not infer it.
   `{volt: 3, temp: 26}` for r718n3. Here PS-551's nested-match rule, PS-563's score and
   PS-564's 0-byte case stay, as the optional fallback, so that input still writes
   `011e0a28`. Decoding `011e0a28` with the record and encoding it gives `011e0a28` back.
-- **Where this differs from the prototype.** Two places, both raised with the spec session:
-  - *The clash check reads a match's `default` list* (`record_declared_fields`). The
-    prototype's `declared_fields` does not, so a name a nested match's default reports
-    (dingtek df702's `angle`) read as declared only by another case.
-  - *A name declared outside the match is not "only another case's"* (`_declared_beside`:
-    the enclosing field list and the message's whole field list, the match itself
-    skipped). Otherwise dragino lht65's `TempC_DS`, reported by a sibling match, was
-    rejected.
-- **Measured.** Python, read-only registry at 02b1e8b; the no-record numbers are unchanged
+- **Where this differs from the prototype, and what CR-2026-164 settled.** The clash check
+  reads a match's `default` list (`record_declared_fields`): the prototype's
+  `declared_fields` did not, so a name a nested match's default reports (dingtek df702's
+  `angle`) read as declared only by another case. Jason ruled on 2026-10-13 (CR-2026-164,
+  la-payload-schema `cr/0.5.6-ps573-yaml`, submitted) that the `default` list is one of the
+  match's cases, and that "only another case declares" is read **within the match alone**:
+  a name something outside the match also declares (dragino lht65's `TempC_DS`, reported by
+  a sibling match) and a tlv entry's scope (thermokon) are not refinements PS-573 has. The
+  earlier `_declared_beside` is removed from Python, Go, Java, C# and the TS013 runtime, so
+  the clash reads alike in all five.
+- **A number in a PS-573 message is JavaScript's String(n)** (CR-2026-164): `is given 2`,
+  not `2.0`. `message_value` (Python, over `format_lookup_value`), `messageValue` (Go, over
+  `givenText`), `messageValue` (Java, over `jsNumber`), `MessageValue` (C#, over `JsNumber`);
+  the runtime's `encPyRepr` already wrote `String(n)`. Anything that is not a number keeps
+  Python's repr. A float input is in `tests/cr-2026-162-cases.yaml`.
+- **Measured.** Python, read-only registry (32,408 decoded vectors); the no-record numbers are unchanged
   in both trees.
 
   | | No record | With the record | Change |
   |---|---|---|---|
-  | Registry | 5475 | 13038 | +7563, none lost |
+  | Registry | 5475 | 12980 | +7505, none lost |
   | Proto corpus | 2145 | 2402 | +257 (261 gained, 4 lost) |
 
   - The registry gains are almost all PS-434 internal fields (7485). The CR predicted +628
@@ -1250,8 +1257,11 @@ chose, so an encoder need not infer it.
     flags (0) nothing is written, and the 0xFD entry, which reports nothing, has no value
     to be written from.
   - `tools/encode-round-trip.py --decode-record` measures the corpus.
-  - Left: 3 registry vectors (thermokon) where a tlv entry's match sees every entry's names
-    and the clash check fires.
+  - Without the removed refinement, the registry loses 58 round trips against the earlier
+    13038, each rejected by the strict clash check (dnt etrv 34, dragino lt22222-l 12,
+    lht65/lht65n-pir/lsn50-v2 12). Of the 59 vectors a strict check rejects that round-trip
+    unchecked, 3 still do with the `default` list counted and 56 are rejected; 199 vectors
+    are rejected in all, against 220 with a fully strict check. Proto is unchanged at 2402.
 - **Guards.**
   - `make gate-verdicts` rule 4: each runner's `CORPUS_META_REPORT` entry carries `decode`,
     and every corpus vector's record must equal Python's. 2744 of 2744 identical in Go, Java

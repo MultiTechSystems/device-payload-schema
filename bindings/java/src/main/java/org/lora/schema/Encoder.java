@@ -1455,8 +1455,8 @@ final class Encoder {
         if (data.containsKey(name) && !recordSupplied.contains(name)) {
             if (!sameValue(data.get(name), recorded)) {
                 throw new SchemaException.EncodeException("Field '" + name + "' is given "
-                        + Meta.pyRepr(data.get(name)) + ", but the decode record holds "
-                        + Meta.pyRepr(recorded) + " (PS-573)");
+                        + messageValue(data.get(name)) + ", but the decode record holds "
+                        + messageValue(recorded) + " (PS-573)");
             }
             return;
         }
@@ -1493,7 +1493,14 @@ final class Encoder {
                     .equals(String.valueOf(key).trim())) return c;
         }
         throw new SchemaException.EncodeException("Field " + matchLabel(match) + ": the recorded case "
-                + Meta.pyRepr(key) + " is not a case of the match (PS-573)");
+                + messageValue(key) + " is not a case of the match (PS-573)");
+    }
+
+    /** A value quoted in a PS-573 message (CR-2026-164): a number as JavaScript's
+     * String(number), anything else as Python's repr. */
+    static String messageValue(Object value) {
+        if (value instanceof Number) return jsNumber(value);
+        return Meta.pyRepr(value);
     }
 
     /** How a message names a match: its name, else its var, quoted; else 'an unnamed match'. */
@@ -1503,25 +1510,13 @@ final class Encoder {
         return n != null ? "'" + n + "'" : "an unnamed match";
     }
 
-    /** The names declared beside a match, in its field list and in the whole message's. */
-    private Set<String> declaredBeside(Object holder, List<Field> siblings) {
-        Set<String> names = new java.util.HashSet<>();
-        for (List<Field> scope : java.util.Arrays.asList(siblings, fields)) {
-            if (scope == null) continue;
-            List<Object> raws = new ArrayList<>();
-            for (Field f : scope) if (f.getRaw() != null) raws.add(f.getRaw());
-            names.addAll(recordDeclaredFields(raws, holder));
-        }
-        return names;
-    }
-
     /**
      * PS-573: under a case taken from the decode record, the input may not give a field
-     * only another case of the match declares ({@code chosen} null for the default). A
-     * name declared beside the match is not one only another case declares.
+     * only another case of the match declares ({@code chosen} null for the default).
+     * "Only" is read within the match alone (CR-2026-164); its {@code default} list is one
+     * of its cases.
      */
-    private static void checkRecordedCase(Field match, String chosen, Map<String, Object> data,
-                                          Set<String> beside) {
+    private static void checkRecordedCase(Field match, String chosen, Map<String, Object> data) {
         Map<?, ?> raw = match.getRaw();
         Map<?, ?> cases = raw != null && raw.get("cases") instanceof Map<?, ?> m ? m : Map.of();
         Object dflt = raw != null && raw.get("default") instanceof List<?> l ? l
@@ -1536,7 +1531,7 @@ final class Encoder {
         }
         if (chosen != null && dflt != null) others.addAll(recordDeclaredFields(dflt, null));
         for (String n : others) {
-            if (!mine.contains(n) && !beside.contains(n) && data.containsKey(n)) {
+            if (!mine.contains(n) && data.containsKey(n)) {
                 throw new SchemaException.EncodeException("Field " + matchLabel(match)
                         + ": the input gives '" + n + "', which only another case declares, "
                         + "against the recorded case (PS-573)");
@@ -1702,8 +1697,7 @@ final class Encoder {
         }
         if (record != null && !given) {                                     // PS-573
             checkRecordedCase(match, matched != null && !matched.isDefault()
-                    ? String.valueOf(matched.getCaseValue()) : null, data,
-                    declaredBeside(holder, siblings));
+                    ? String.valueOf(matched.getCaseValue()) : null, data);
         }
         if (matched == null && fallbackFields == null && discriminator == null) {
             // An inline match with no name reports nothing of itself, and a `remaining`

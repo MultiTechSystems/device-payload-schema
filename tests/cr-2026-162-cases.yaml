@@ -130,6 +130,10 @@ cases:
     - input: '{"_k": 2, "b": 5}'
       record: decoded
       error: "Field '_k' is given 2, but the decode record holds 1 (PS-573)"
+    - input: '{"_k": 2.0, "b": 5}'
+      record: decoded
+      # A number in a message is written as JavaScript's String(n): `2`, not `2.0` (CR-2026-164).
+      error: "Field '_k' is given 2, but the decode record holds 1 (PS-573)"
     - input: '{"b": 5}'
       record: decoded
       error: "Field an unnamed match: the input gives 'b', which only another case declares, against the recorded case (PS-573)"
@@ -150,6 +154,18 @@ cases:
     - input: '{"a": 5}'
       record: decoded
       payload: "0205"
+
+- name: a_name_declared_outside_the_match_is_still_only_another_cases
+  # CR-2026-164: "only another case declares" is read within the match. `b` is also a field
+  # of the message outside it, and the input giving it against case 1 is still rejected.
+  schema: "name: t\nversion: 1\nfields:\n  - {name: _k, type: u8}\n  - match:\n      field: $_k\n      cases:\n        1: [{name: a, type: u8}]\n        2: [{name: b, type: u8}]\n  - {name: b, type: u8}\n"
+  decode:
+    payload: "010507"
+    record: '{"matches": {"/fields/1/match": {"case": 1, "value": 1}}, "internal": {"/fields/0": 1}, "flagged": {}}'
+  encode:
+    - input: '{"a": 5, "b": 7}'
+      record: decoded
+      error: "Field an unnamed match: the input gives 'b', which only another case declares, against the recorded case (PS-573)"
 
 # --- flagged and byte_group ---------------------------------------------------------------
 

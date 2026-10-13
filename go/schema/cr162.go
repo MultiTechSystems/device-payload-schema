@@ -16,7 +16,7 @@ package schema
 // this encoder derives it (PS-551, PS-563, PS-564), as PS-574 permits.
 //
 // A port of DecodeTrace, pointer_map, _recorded_inputs, _recorded_flags,
-// _recorded_case, _check_recorded_case and _declared_beside in
+// _recorded_case, _check_recorded_case in
 // tools/schema_interpreter.py. Every mapping of the expanded document is a fresh
 // map[string]any (expandRawRefs copies each splice), and each Field keeps its own as
 // decl, so a mapping's identity locates it.
@@ -328,11 +328,12 @@ func sameRecorded(a, b any) bool {
 	return reflect.DeepEqual(a, b)
 }
 
-// reprRecorded is Python's repr of a JSON value, an integral float written as an integer
-// as the reference's JSON-loaded input has it.
-func reprRecorded(v any) string {
-	if f, ok := v.(float64); ok && f == math.Trunc(f) && math.Abs(f) < 1e16 {
-		return fmt.Sprint(int64(f))
+// messageValue writes a value quoted in a PS-573 message (CR-2026-164): a number as
+// JavaScript's String(number) writes it (`2`, not `2.0`), anything else as Python's repr.
+func messageValue(v any) string {
+	switch v.(type) {
+	case int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64, float32, float64:
+		return givenText(v)
 	}
 	return pyRepr(v)
 }
@@ -356,7 +357,7 @@ func recordedInputs(fields []Field, data, derived map[string]any, t *decodeTrace
 		if given, present := data[f.Name]; present && !t.supplied[f.Name] {
 			if !sameRecorded(given, rec) {
 				return fmt.Errorf("Field '%s' is given %s, but the decode record holds %s (PS-573)",
-					f.Name, reprRecorded(given), reprRecorded(rec))
+					f.Name, messageValue(given), messageValue(rec))
 			}
 			return nil
 		}
@@ -437,7 +438,7 @@ func recordedCase(field Field, declared []Case, key any) (Case, bool, error) {
 		}
 	}
 	return Case{}, false, fmt.Errorf("Field %s: the recorded case %s is not a case of the match (PS-573)",
-		recordMatchLabel(field), reprRecorded(key))
+		recordMatchLabel(field), messageValue(key))
 }
 
 func normaliseRecordedKey(key any) any {
@@ -512,11 +513,11 @@ func sameMap(a, b map[string]any) bool {
 	return okA && okB && x == y
 }
 
-// checkRecordedCase is _check_recorded_case with _declared_beside: under a case taken from
-// the record, the input may not give a field only another case of the match declares. A
-// name the match's own field list, or the message's whole field list, declares outside
-// the match is the input's to give whichever case is taken.
-func checkRecordedCase(field Field, chosenKey string, data map[string]any, siblings, scope []Field) error {
+// checkRecordedCase is _check_recorded_case: under a case taken from the record, the input
+// may not give a field only another case of the match declares. "Only" is read within the
+// match alone (CR-2026-164): a name something outside it also declares still counts. The
+// match's `default` list is one of its cases.
+func checkRecordedCase(field Field, chosenKey string, data map[string]any) error {
 	decl := field.matchDecl
 	cases := asStringMap(decl["cases"])
 	var defaultBody any
@@ -560,12 +561,9 @@ func checkRecordedCase(field Field, chosenKey string, data map[string]any, sibli
 	if isCase && defaultBody != nil {
 		recordDeclared(defaultBody, nil, others)
 	}
-	beside := map[string]bool{}
-	recordDeclared(fieldDecls(siblings), decl, beside)
-	recordDeclared(fieldDecls(scope), decl, beside)
 	var clash []string
 	for name := range others {
-		if mine[name] || beside[name] {
+		if mine[name] {
 			continue
 		}
 		if _, given := data[name]; given {

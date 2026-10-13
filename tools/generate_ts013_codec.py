@@ -1084,7 +1084,7 @@ function encMatch(out, f, data, ctx, peeked, siblings) {   // _encode_match
       if (encCasePattern(disc, k)) { key = k; body = cases[k]; break; }
     }
   }
-  if (record !== undefined && !given) encCheckRecordedCase(m, key, data, encDeclaredBeside(f, siblings));   // PS-573
+  if (record !== undefined && !given) encCheckRecordedCase(m, key, data);   // PS-573
   if (body === null && (disc === null || disc === undefined)) {
     // PS-563: by score only where no discriminator is given; a given one matching no
     // case takes the default or is rejected (PS-565).
@@ -1894,7 +1894,7 @@ function encPush(ctx, ptr, kind, index) {             // DecodeTrace.push
 
 function encPop(ctx, pushed) { if (pushed) ctx.rec.frames.pop(); }
 
-function encPyRepr(v) {                               // Python's repr, for PS-573's text
+function encPyRepr(v) {                               // Python's repr, for PS-573's text; a number as String(n)
   if (typeof v === "string") return "'" + v + "'";
   if (v === true) return "True";
   if (v === false) return "False";
@@ -1983,15 +1983,7 @@ function encMatchLabel(m) {                           // match_label
   return n ? "'" + n + "'" : "an unnamed match";
 }
 
-function encDeclaredBeside(f, siblings) {             // _declared_beside
-  var names = {};
-  [siblings, ENC_SCOPE].forEach(function (scope) {
-    if (Array.isArray(scope)) encRecordDeclared(scope, f).forEach(function (n) { names[n] = true; });
-  });
-  return names;
-}
-
-function encCheckRecordedCase(m, chosen, data, beside) {   // _check_recorded_case (PS-573)
+function encCheckRecordedCase(m, chosen, data) {   // _check_recorded_case (PS-573; "only" within the match, CR-2026-164)
   var cases = m.cases || {}, dflt = encDefaultBody(m);
   var mine = encRecordDeclared(chosen !== null && Array.isArray(cases[chosen]) ? cases[chosen] : dflt);
   var others = {};
@@ -2001,7 +1993,7 @@ function encCheckRecordedCase(m, chosen, data, beside) {   // _check_recorded_ca
   });
   if (chosen !== null && dflt) encRecordDeclared(dflt).forEach(function (n) { others[n] = true; });
   var clash = Object.keys(others).filter(function (n) {
-    return mine.indexOf(n) < 0 && !(beside && beside[n]) && Object.prototype.hasOwnProperty.call(data, n);
+    return mine.indexOf(n) < 0 && Object.prototype.hasOwnProperty.call(data, n);
   }).sort();
   if (clash.length) encFail("Field " + encMatchLabel(m) + ": the input gives '" + clash[0] + "', which only another case declares, against the recorded case (PS-573)");
 }

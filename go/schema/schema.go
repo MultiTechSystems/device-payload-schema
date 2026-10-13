@@ -5025,7 +5025,7 @@ func encodeMatch(field Field, siblings []Field, data map[string]any, ctx *Encode
 	}
 
 	if record != nil && !given {
-		if err := checkRecordedCase(field, chosenKey, data, siblings, ctx.scope); err != nil {
+		if err := checkRecordedCase(field, chosenKey, data); err != nil {
 			return err // PS-573
 		}
 	}

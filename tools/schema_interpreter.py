@@ -3225,6 +3225,14 @@ def same_label(label, value):
     return isinstance(label, bool) == isinstance(value, bool) and label == value
 
 
+def message_value(value) -> str:
+    """A value quoted in an error message (PS-573, CR-2026-164): a number as JavaScript's
+    String(number) writes it (`2`, not `2.0`), anything else as Python's repr."""
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return format_lookup_value(value)
+    return repr(value)
+
+
 def label_text(label) -> str:
     """A label as a PS-169 or PS-067 message writes it: text in single quotes, a boolean
     as JSON writes it, a number as JavaScript's String(number) does (format_lookup_value),
@@ -7313,8 +7321,9 @@ class SchemaInterpreter:
                 return
             if name in data and name not in self._record_supplied:
                 if data[name] != recorded:
-                    raise ValueError(f"Field '{name}' is given {data[name]!r}, but the "
-                                     f"decode record holds {recorded!r} (PS-573)")
+                    raise ValueError(f"Field '{name}' is given {message_value(data[name])}, but "
+                                     f"the decode record holds {message_value(recorded)} "
+                                     f"(PS-573)")
                 return
             derived[name] = recorded
             self._record_supplied.add(name)
@@ -7890,8 +7899,7 @@ class SchemaInterpreter:
                     break
 
         if record is not None and not given:
-            self._check_recorded_case(match_def, matched_key, data,
-                                      self._declared_beside(field_def, siblings))  # PS-573
+            self._check_recorded_case(match_def, matched_key, data)  # PS-573
 
         if matched_fields is None and discriminator is None:
             # Where the discriminator is not in the output - an inline match with no
@@ -7989,29 +7997,18 @@ class SchemaInterpreter:
             if case_key != 'default' and (case_key == key
                                           or str(case_key).strip() == str(key).strip()):
                 return case_key
-        raise ValueError(f"Field {match_label(match_def)}: the recorded case {key!r} is not "
+        raise ValueError(f"Field {match_label(match_def)}: the recorded case "
+                         f"{message_value(key)} is not "
                          f"a case of the match (PS-573)")
 
-    def _declared_beside(self, field_def: Dict[str, Any],
-                         siblings: Optional[List[Any]]) -> set:
-        """The names the field list a match sits in - and the message's whole field list -
-        declare outside that match: a name one of them reports is the input's to give
-        whichever case the match takes."""
-        names = set()
-        for scope in (siblings, getattr(self, '_encode_scope', None)):
-            if isinstance(scope, list):
-                names |= set(record_declared_fields(scope, skip=field_def))
-        return names
-
     def _check_recorded_case(self, match_def: Dict[str, Any], chosen: Any,
-                             data: Dict[str, Any], beside: Optional[set] = None) -> None:
+                             data: Dict[str, Any]) -> None:
         """PS-573: under a case taken from the decode record, the input may not give a
         field only another case of the match declares (`chosen` None for the default).
 
-        "Only": a name declared outside the match as well - by another construct of the
-        same object (`beside`) - is not one only another case declares. The spec
-        prototype does not look outside the match; this one does, since a sibling match
-        reporting the same name (dragino lht65's TempC_DS) is otherwise rejected."""
+        "Only" is read within the match alone (CR-2026-164): a name that something outside
+        it also declares is still one only another case of this match declares. The
+        match's `default` list is one of its cases."""
         cases = match_def.get('cases') or {}
         default = self._default_body(match_def)
         if chosen is not None and chosen in cases:
@@ -8025,7 +8022,7 @@ class SchemaInterpreter:
             others |= set(record_declared_fields(body))
         if chosen is not None and default is not None:
             others |= set(record_declared_fields(default))
-        clash = sorted(n for n in others - mine - (beside or set()) if n in data)
+        clash = sorted(n for n in others - mine if n in data)
         if clash:
             raise ValueError(f"Field {match_label(match_def)}: the input gives '{clash[0]}', "
                              f"which only another case declares, against the recorded "
