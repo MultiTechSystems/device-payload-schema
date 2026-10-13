@@ -569,6 +569,10 @@ x <= 0, leaves the field absent rather than reporting NaN (PS-100, PS-282).
           type: u8
 ```
 
+The older `type: match` spelling, with `on:` for the discriminator and a `default` case, is
+withdrawn: a schema using it is rejected at load with "`type: match` with `on:` is
+withdrawn; write `match: {field: $name, cases: ...}` (Clause 4)".
+
 ### Match on the bytes remaining
 
 Some devices tell their layouts apart by length alone. `remaining: true` makes the

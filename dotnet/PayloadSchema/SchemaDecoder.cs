@@ -278,19 +278,6 @@ public static class SchemaDecoder
                 continue;
             }
 
-            // Top-level match (type: match with on:) -- merge results
-            if (field.Type == FieldType.Match && string.IsNullOrEmpty(field.Name))
-            {
-                var matchResult = DecodeMatch(field, ctx);
-                if (matchResult is Dictionary<string, object?> matchMap)
-                {
-                    MergeTo(result, matchMap);
-                    foreach (var kv in matchMap)
-                        ctx.BindOutput(kv.Key, kv.Value);
-                }
-                continue;
-            }
-
             var value = DecodeField(field, ctx, schema);
 
             if (value is AbsentReading absent)

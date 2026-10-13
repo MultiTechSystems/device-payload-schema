@@ -89,23 +89,8 @@ public static partial class SchemaParser
             var typeText = type == null ? null : Scalar(type);
             if (typeText == "skip") continue;
             if (type == null && NameKey(item, "object") != null) continue;   // PS-466 names it
+            if (typeText == "match") continue;   // the withdrawn `type: match`, which Cr159 names
             var name = NameKey(item, "name") is YamlScalarNode ns ? ns.Value ?? "" : "";
-            if (typeText == "match" && name.Length == 0)
-            {
-                // The older `type: match` + `on:` spelling of the match construct.
-                var cases = NameKey(item, "cases");
-                if (cases is YamlSequenceNode list)
-                {
-                    foreach (var c in list.Children)
-                        if (c is YamlMappingNode cm) WalkNames(NameKey(cm, "fields"), where);
-                }
-                else if (cases is YamlMappingNode map)
-                {
-                    foreach (var kv in map.Children) WalkNames(kv.Value, where);
-                }
-                WalkNames(NameKey(item, "default"), where);
-                continue;
-            }
             if (name.Length == 0)
                 throw new InvalidOperationException(
                     $"{where}: field {position}, a {typeText ?? "field"}, has no name; a field that "

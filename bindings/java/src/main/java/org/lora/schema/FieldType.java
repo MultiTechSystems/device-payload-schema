@@ -95,7 +95,6 @@ public enum FieldType {
             case "bytes" -> BYTES;
             case "skip" -> SKIP;
             case "object" -> OBJECT;
-            case "match" -> MATCH;
             case "repeat" -> REPEAT;
             case "number" -> NUMBER;
             case "integer" -> INTEGER;

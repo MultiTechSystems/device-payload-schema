@@ -19,12 +19,17 @@ final class Cr159 {
     static final String CONFIRMED = "`confirmed` is withdrawn: confirmed or unconfirmed is "
             + "chosen per transmission, not by the schema (CR-2026-159, PS-448)";
 
+    /** The legacy {@code type: match}, whose discriminator was {@code on:}. */
+    static final String TYPE_MATCH = "`type: match` with `on:` is withdrawn; write "
+            + "`match: {field: $name, cases: ...}` (Clause 4)";
+
     /**
-     * {@code formula}, {@code encode_formula}, and {@code min} or {@code max} on a field that
+     * {@code type: match}, {@code formula}, {@code encode_formula}, and {@code min} or {@code max} on a field that
      * is no repeat (they bound a repeat's element count; a value range is
      * {@code valid_range}, PS-395). A transform's {@code clamp} is checkStage's.
      */
     static void checkField(Map<?, ?> fm) {
+        if ("match".equals(fm.get("type"))) throw new SchemaException(TYPE_MATCH);
         if (fm.containsKey("formula")) throw new SchemaException(FORMULA);
         if (fm.containsKey("encode_formula")) throw new SchemaException(ENCODE_FORMULA);
         if (!"repeat".equals(fm.get("type"))) {

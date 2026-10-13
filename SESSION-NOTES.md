@@ -593,9 +593,8 @@ schemas pass, and the three that do not are named in the test with their reasons
 ### `match` in the output schema
 
 `process_fields` handled `switch` and `tlv` but not `match`, so every field inside a match
-case was undeclared. Both syntaxes are covered now - the nested `match:` form with `cases`
-keyed by value, and the legacy `type: match`/`on:` form with cases as a list of
-`{case, fields}` - along with `default` when it carries fields, a literal `default` key
+case was undeclared. The nested `match:` form with `cases`
+keyed by value is covered (the legacy `type: match`/`on:` form was withdrawn later), along with `default` when it carries fields, a literal `default` key
 inside `cases`, and the `name:` key, which reports the discriminator itself (`var:` only
 stores it, so it declares nothing). `default: error` and `default: skip` report nothing.
 

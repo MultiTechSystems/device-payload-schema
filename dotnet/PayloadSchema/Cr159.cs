@@ -17,6 +17,10 @@ internal static class Cr159
     public const string Confirmed = "`confirmed` is withdrawn: confirmed or unconfirmed is chosen per "
         + "transmission, not by the schema (CR-2026-159, PS-448)";
 
+    /// <summary>The legacy `type: match`, whose discriminator was `on:`; `match:` replaces it.</summary>
+    public const string TypeMatch = "`type: match` with `on:` is withdrawn; write `match: {field: $name, "
+        + "cases: ...}` (Clause 4)";
+
     static bool Has(YamlMappingNode map, string key) => map.Children.ContainsKey(new YamlScalarNode(key));
 
     /// <summary>
@@ -26,6 +30,9 @@ internal static class Cr159
     /// </summary>
     public static void CheckField(YamlMappingNode fm)
     {
+        if (fm.Children.TryGetValue(new YamlScalarNode("type"), out var matchType)
+            && matchType is YamlScalarNode { Value: "match" })
+            throw new InvalidOperationException(TypeMatch);
         if (Has(fm, "formula")) throw new InvalidOperationException(Formula);
         if (Has(fm, "encode_formula")) throw new InvalidOperationException(EncodeFormula);
         var type = fm.Children.TryGetValue(new YamlScalarNode("type"), out var t) && t is YamlScalarNode ts

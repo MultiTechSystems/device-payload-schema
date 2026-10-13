@@ -158,16 +158,12 @@ def binary_schema_to_dict(schema: BinarySchema) -> Dict[str, Any]:
             if f.consume:
                 d['consume'] = 1
         elif f.type_code == TypeCode.MATCH:
-            d['type'] = 'match'
-            d['on'] = f'${f.match_var}'
-            d['cases'] = []
+            cases = {}
             for case_val, case_fields in f.cases:
-                case_dict = {'fields': [field_to_dict(cf) for cf in case_fields]}
-                if case_val == -1:
-                    case_dict['default'] = 'skip'
-                else:
-                    case_dict['case'] = case_val
-                d['cases'].append(case_dict)
+                if case_val != -1:
+                    cases[case_val] = [field_to_dict(cf) for cf in case_fields]
+            d = {'match': {'field': f'${f.match_var}', 'cases': cases,
+                           'default': 'skip'}}
         else:
             type_map = type_names.get(f.type_code, {})
             d['type'] = type_map.get(f.size, 'u8')

@@ -81,7 +81,6 @@ const (
 	// Lowercase variants
 	TypeBitsLower   FieldType = "bits"
 	TypeSkipLower   FieldType = "skip"
-	TypeMatchLower  FieldType = "match"
 	TypeObjectLower FieldType = "object"
 	TypeTLVLower    FieldType = "tlv"
 
@@ -204,8 +203,8 @@ type Field struct {
 	// Match inline (for Option B syntax: `- match: { field: $var, cases: {...} }`)
 	MatchInline *Field `json:"-" yaml:"-"`
 	// The `default` of an Option B match: "error", "skip", or a field list decoded when
-	// no case matches (CR-2026-020). Distinct from Case.Default, which marks a case in
-	// the legacy list spelling.
+	// no case matches (CR-2026-020). Distinct from Case.Default, which marks a case
+	// keyed `default`.
 	MatchDefault any `json:"-" yaml:"-"`
 
 	// The repeat iterator and reserved trailers (0.5.2 wave 6a; see wave6a.go).
@@ -280,7 +279,6 @@ type Transform struct {
 // Case represents a match case in conditional parsing.
 type Case struct {
 	Case    any     `json:"case,omitempty" yaml:"case,omitempty"`
-	Match   any     `json:"match,omitempty" yaml:"match,omitempty"` // Legacy support
 	Default bool    `json:"default,omitempty" yaml:"default,omitempty"`
 	Fields  []Field `json:"fields,omitempty" yaml:"fields,omitempty"`
 }
@@ -1432,26 +1430,6 @@ func parseFieldMap(fm map[string]any, node *yaml.Node) Field {
 	// Nested fields (for Object type)
 	if fieldsRaw, ok := fm["fields"].([]any); ok {
 		f.Fields = parseFieldsRaw(fieldsRaw)
-	}
-	
-	// Match cases (array format)
-	if casesRaw, ok := fm["cases"].([]any); ok {
-		for _, cr := range casesRaw {
-			if cm, ok := cr.(map[string]any); ok {
-				c := Case{}
-				c.Case = cm["case"]
-				if c.Case == nil {
-					c.Case = cm["match"]
-				}
-				if def, ok := cm["default"].(bool); ok {
-					c.Default = def
-				}
-				if caseFieldsRaw, ok := cm["fields"].([]any); ok {
-					c.Fields = parseFieldsRaw(caseFieldsRaw)
-				}
-				f.Cases = append(f.Cases, c)
-			}
-		}
 	}
 	
 	// TLV-specific fields
@@ -2827,7 +2805,7 @@ func decodeField(field Field, ctx *DecodeContext) (any, error) {
 			return nil, err
 		}
 
-	case TypeMatch, TypeMatchLower:
+	case TypeMatch:
 		value, err = decodeMatch(field, ctx)
 		if err != nil {
 			return nil, err
@@ -3345,9 +3323,6 @@ func decodeMatch(field Field, ctx *DecodeContext) (any, error) {
 		}
 
 		caseVal := c.Case
-		if caseVal == nil {
-			caseVal = c.Match // Legacy support
-		}
 		if caseVal == nil {
 			continue
 		}
@@ -3930,7 +3905,7 @@ func fixedElementSizeKnown(fields []Field) (int, bool) {
 		default:
 			size := inferLengthFromType(f.Type)
 			if _, known := canonicalTypes[string(f.Type)]; !known || f.Type == TypeObjectLower ||
-				f.Type == TypeRepeatLower || f.Type == TypeEnumLower || f.Type == TypeMatchLower ||
+				f.Type == TypeRepeatLower || f.Type == TypeEnumLower ||
 				f.Type == TypeBitfieldString || f.Type == "" {
 				return 0, false
 			}
@@ -4407,9 +4382,6 @@ func reverseArithmetic(num float64, field Field) (float64, error) {
 // list of values, or an "a..b" range, the same spellings decodeMatch accepts.
 func caseMatchesValue(value int, c Case) bool {
 	raw := c.Case
-	if raw == nil {
-		raw = c.Match
-	}
 	if raw == nil {
 		return false
 	}
@@ -4951,11 +4923,7 @@ func encodeMatch(field Field, siblings []Field, data map[string]any, ctx *Encode
 		} else if f, ok := toFloat64(discriminator); ok && f != math.Trunc(f) {
 			// A fraction selects no case toInt would truncate it into (decodeMatch).
 			for _, c := range declared {
-				raw := c.Case
-				if raw == nil {
-					raw = c.Match
-				}
-				if !c.Default && fractionInRangePattern(f, raw) {
+				if !c.Default && fractionInRangePattern(f, c.Case) {
 					chosen, chosenKey = nonNilFields(c.Fields), fmt.Sprintf("%v", c.Case)
 					break
 				}

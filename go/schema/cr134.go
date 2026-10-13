@@ -23,7 +23,7 @@ func missingFieldError(name string) error {
 // CR-2026-139): in the field's reported form, encoded exactly as that value given as
 // input, so one that cannot be encoded is rejected as such input is (PS-168). A declared
 // default is a defined absence (PS-551 as amended). An enum's `default` is its unmapped
-// label (PS-068) and a legacy `type: match`'s its fallback case, so neither is written.
+// label (PS-068), so it is not written.
 // Read from the declaration as written: the typed model keeps only the enum's.
 func fieldDefault(f Field) (any, bool) {
 	if f.decl == nil {
@@ -33,7 +33,7 @@ func fieldDefault(f Field) (any, bool) {
 	if !ok {
 		return nil, false
 	}
-	if t, _ := f.decl["type"].(string); t == "enum" || t == "match" {
+	if t, _ := f.decl["type"].(string); t == "enum" {
 		return nil, false
 	}
 	return v, true
@@ -139,9 +139,6 @@ func exactCaseValue(c Case) (int64, bool) {
 		return 0, false
 	}
 	raw := c.Case
-	if raw == nil {
-		raw = c.Match
-	}
 	switch v := raw.(type) {
 	case bool:
 		return 0, false

@@ -369,7 +369,7 @@ func coveredPeeks(fields []Field) map[int]bool {
 		}
 		t := string(f.Type)
 		construct := f.MatchInline != nil || f.TLVInline != nil || len(f.ByteGroup) > 0 ||
-			f.Flagged != nil || f.Ref2 != "" || f.Type == TypeMatch || f.Type == TypeMatchLower ||
+			f.Flagged != nil || f.Ref2 != "" || f.Type == TypeMatch ||
 			f.Type == TypeTLV || f.Type == TypeTLVLower
 		bits := strings.ContainsAny(t, "[:<")
 		switch {

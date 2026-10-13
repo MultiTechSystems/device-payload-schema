@@ -56,8 +56,6 @@ def test_the_validator_accepts_it():
     # PS-068: an enum's default is its unmapped label, not a value to write.
     ({"name": "e", "type": "enum", "base": "u8", "values": {1: "a"}, "default": "x"},
      (False, None)),
-    # A legacy `type: match`'s default is its fallback case.
-    ({"type": "match", "on": "k", "cases": [], "default": "skip"}, (False, None)),
 ])
 def test_which_defaults_are_written(field, expected):
     assert field_default(field) == expected

@@ -216,28 +216,6 @@ def test_case_swap_of_identical_bodies_is_equivalent():
     assert equivalent == {"CASE": 1}
 
 
-def test_legacy_match_cases():
-    schema = {
-        "name": "t",
-        "fields": [
-            {"name": "kind", "type": "u8"},
-            {
-                "type": "match",
-                "on": "kind",
-                "cases": [
-                    {"case": 1, "fields": [{"name": "a", "type": "u8"}]},
-                    {"case": 2, "fields": [{"name": "b", "type": "u8"}]},
-                ],
-            },
-        ],
-    }
-    mutants, _ = mutants_of(schema, "CASE")
-    swap = [m for m in mutants if "swap" in m.detail][0]
-    cases = applied(schema, swap)["fields"][1]["cases"]
-    assert [c["case"] for c in cases] == [2, 1]
-    assert len(mutants) == 3
-
-
 def test_flagged_moves_a_group_bit():
     schema = {
         "name": "t",

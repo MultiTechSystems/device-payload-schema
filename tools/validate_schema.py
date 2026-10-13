@@ -194,7 +194,6 @@ _CONTEXT_LABELS = {
     "guard": "guard block",
     "guard_when": "guard condition",
     "vector": "test vector",
-    "legacy_case": "match case",
 }
 
 
@@ -778,7 +777,7 @@ def validate_field_list(fields: List[Dict], path: str, errors: List[str],
         'bool', 'bytes', 'string', 'ascii', 'hex', 'base64',
         # PS-519: a literal type only; not an alias of `bool`, which reads a bit.
         'boolean',
-        'object', 'match', 'enum', 'repeat', 'skip',
+        'object', 'enum', 'repeat', 'skip',
         'bitfield_string', 'number',
         # PS-283: a computed field declaring an integer result.
         'integer',
