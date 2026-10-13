@@ -110,7 +110,6 @@ fields:
                     - mult: 10
                     - add: 1500
                   unit: "mV"
-                  sensor: voltage
                   # SenML has no mV unit, and the vendor reports millivolts, so a
                   # senml annotation would have to misdeclare the value by 1000x.
                   ipso: {object: 3316, instance: 0, resource: 5700}
@@ -173,7 +172,6 @@ fields:
                   - name: battery_voltage_enabled
                     type: bool
                     bit: 7
-                    sensor: none
                   - name: sabotage_contact_states_enabled
                     type: bool
                     bit: 6
@@ -196,7 +194,6 @@ fields:
                   - mult: 10
                   - add: 1500
                 unit: "mV"
-                sensor: voltage
                 ipso: {object: 3316, instance: 0, resource: 5700}
                 semantic: "battery.voltage"
         # COMMAND_ID_GET_SABOTAGE_CONTACT_STATE

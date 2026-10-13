@@ -3393,9 +3393,10 @@ Known weaknesses, so you neither trip over them nor assume they are intentional:
   in the device repository documents each normalized measurement and its unit, and
   the vendor's raw values are already in those units. Note that TTN's normalized
   `battery` is a *voltage* while the milesight raw field is a percentage 0-100.
-  Those fields still declare `sensor: percentage`, which once stopped the scorer
-  detecting them as IPSO 3316 voltage. The scorer now follows IL-204 (below), so the
-  word `battery` asks for no object at all, and the key is inert. Quantities whose SenML unit is a different scale (pressure in
+  Those fields once declared `sensor: percentage` to stop the scorer detecting
+  them as IPSO 3316 voltage. The scorer now follows IL-204 (below), so the word
+  `battery` asks for no object at all; the `sensor:` key is gone from every schema
+  and strict validation rejects it (PS-448). Quantities whose SenML unit is a different scale (pressure in
   hPa against SenML's Pa, distance in mm against m) carry a `unit:` but no
   annotation, because a mismatched annotation misdeclares the value.
 - **Flags packed into a byte need `consume: 1` on the last field.** An explicit bit
@@ -3415,6 +3416,11 @@ Known weaknesses, so you neither trip over them nor assume they are intentional:
   `raw`, ...) and no medium that lacks a TTN path (`internal`, `leaf`, `board`, ...).
   The old name-to-object table, under which `battery`, `voltage`, `current` or
   `latitude` each demanded an object, is gone. A unit never selects an object (IL-203).
+  A field whose `lookup` reports text (string labels, or only a `${value}` default) is a
+  label, not a reading, so a quantity word in its name asks for nothing
+  (`temperature_sensor_status`, `temperature_unit`); a lookup with numeric labels feeds
+  arithmetic and its field stays a reading (`lookup_reports_text`). This replaced the
+  `sensor: none` opt-out; the IL agreed the scorer may refine IL-204 this way.
   A generic object (3300, 3320, 3325, 3332) is never a mismatch (IL-199). A
   name-silent field's annotation is neither expected nor flagged. See
   `docs/IPSO-REFERENCE.md`. **A schema with no field IL-204 places gets half the

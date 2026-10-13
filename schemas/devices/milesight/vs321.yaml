@@ -60,21 +60,18 @@ fields:
         "[255, 254]":
           - name: reset_event
             type: u8
-            sensor: none
             lookup: {1: "reset", default: "reset"}
             # raw: readResetEvent(1)
         # DEVICE STATUS
         "[255, 11]":
           - name: device_status
             type: u8
-            sensor: none
             lookup: {1: "on", default: "on"}
             # raw: readDeviceStatus(1)
         # BATTERY
         "[1, 117]":
           - name: battery
             unit: "%"
-            sensor: percentage
             ipso: {object: 3320, instance: 0, resource: 5700}
             senml: {name: "battery", unit: "/100"}
             semantic: "battery"
@@ -84,14 +81,12 @@ fields:
         "[3, 103]":
           - name: temperature_sensor_status
             type: u8
-            sensor: none
             lookup: ["normal", "over_range", "read_failed"]
             # raw: readSensorStatus(2)
         # HUMIDITY
         "[4, 104]":
           - name: humidity_sensor_status
             type: u8
-            sensor: none
             lookup: ["normal", "over_range", "read_failed"]
             # raw: readSensorStatus(2)
         # PEOPLE TOTAL COUNTS
@@ -102,7 +97,6 @@ fields:
         "[7, 255]":
           - name: illuminance_status
             type: u8
-            sensor: none
             lookup: ["dim", "bright"]
             # raw: readIlluminanceStatus(bytes[i])
         # CONFIDENCE STATUS
@@ -113,7 +107,6 @@ fields:
             length: 1
           - name: detection_status
             type: u8
-            sensor: none
             lookup: {0: "normal", 1: "unavailable", default: "unknown"}
             # raw: readDetectionStatus(bytes[i + 1])
         # TIMESTAMP
@@ -124,7 +117,6 @@ fields:
         "[131, 103]":
           - name: temperature
             unit: "°C"
-            sensor: temperature
             ipso: {object: 3303, instance: 0, resource: 5700}
             senml: {name: "temperature", unit: "Cel"}
             semantic: "temperature"
@@ -132,14 +124,12 @@ fields:
             div: 10
           - name: temperature_alarm
             type: u8
-            sensor: none
             lookup: ["threshold_alarm_release", "threshold_alarm"]
             # raw: readTemperatureAlarm(bytes[i + 2])
         # HUMIDITY ALARM
         "[132, 104]":
           - name: humidity
             unit: "%"
-            sensor: humidity
             ipso: {object: 3304, instance: 0, resource: 5700}
             senml: {name: "humidity", unit: "%RH"}
             semantic: "humidity"
@@ -148,7 +138,6 @@ fields:
             # raw: readUInt8(bytes[i]) / 2
           - name: humidity_alarm
             type: u8
-            sensor: none
             lookup: ["threshold_alarm_release", "threshold_alarm"]
             # raw: readHumidityAlarm(bytes[i + 1])
 

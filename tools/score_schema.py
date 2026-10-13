@@ -859,9 +859,6 @@ IL204_QUANTITY_IPSO = {
     'precipitation': (3300, frozenset({3300})),
 }
 
-#: `sensor:` values by which a field declares it is not a reading.
-_SENSOR_OPT_OUT = frozenset({'none', 'false', 'no'})
-
 
 class Il204Placement(NamedTuple):
     """Where IL-204 puts a field, and which step decided it.
@@ -870,7 +867,7 @@ class Il204Placement(NamedTuple):
       'qualifier' -- step 2: a qualifier word; not a reading.
       'name'      -- step 3: placed on `path` from the name.
       'medium'    -- step 3: a reading of `quantity` whose medium has no path.
-      'declared'  -- the field's `sensor: none` says it is not a reading.
+      'labelled'  -- the field reports a `lookup` label, not a measured value.
       'none'      -- the name names no quantity; only the IPSO object (step 4)
                      could place it, and the scorer takes no evidence from that.
     """
@@ -896,32 +893,45 @@ def il204_words(field_name: str) -> List[str]:
     return _name_tokens(field_name)
 
 
+def lookup_reports_text(lookup: Any) -> bool:
+    """True where a lookup reports text: every label it lists is a string, or it lists
+    none and its `default` is a `${value}` template (which yields a string).
+
+    A lookup whose labels are numbers feeds arithmetic - Elvaco's exponent table - and
+    its field stays a reading, keeping its IPSO and SenML demands.
+    """
+    if isinstance(lookup, list):
+        labels, default = lookup, None
+    elif isinstance(lookup, dict):
+        labels = [v for k, v in lookup.items() if str(k) != 'default']
+        default = lookup.get('default')
+    else:
+        return False
+    if labels:
+        return all(isinstance(v, str) for v in labels)
+    return isinstance(default, str) and '${value}' in default
+
+
 def classify_il204(field: Dict[str, Any]) -> Il204Placement:
     """Place a field by IL-204's steps 2 and 3 (step 1 is `field_map`, which a
     schema does not carry).
 
-    A field may state its quantity with `sensor:`, a scorer hint that IL-204
-    does not know. `sensor: none` says the field is not a reading -- the escape
-    for a status or mode byte whose name holds a quantity word, as `field_map` is
-    for an integrator. `sensor: <quantity>` stands for a quantity word the name
-    lacks, the medium still read from the name. Any other value is ignored, so
-    `moisture_at_level_3` declaring `sensor: percentage` is still placed by its
-    name. The qualifier step comes first, as in IL-204.
+    A field whose `lookup` reports text is a label, not a measured value, so it is not a
+    reading whatever its name says: `temperature_sensor_status` with the labels
+    "read error" and "out of range" is a status. This stands where an earlier
+    revision read a `sensor: none` hint, which the key vocabulary does not
+    contain (PS-448). The qualifier step comes first, as in IL-204.
     """
     words = il204_words(str(field.get('name', '')))
     qualifier = next((w for w in words if w in IL204_QUALIFIER_WORDS), None)
     if qualifier is not None:
         return Il204Placement('qualifier', word=qualifier)
 
-    declared = str(field.get('sensor', '')).strip().lower()
-    if declared in _SENSOR_OPT_OUT:
-        return Il204Placement('declared', word=declared)
-    if declared in IL204_QUANTITY_PATHS:
-        quantity = declared  # type: Optional[str]
-    else:
-        quantity = next((w for w in words if w in IL204_QUANTITY_PATHS), None)
-        if quantity is None:
-            return Il204Placement('none')
+    if lookup_reports_text(field.get('lookup')):
+        return Il204Placement('labelled')
+    quantity = next((w for w in words if w in IL204_QUANTITY_PATHS), None)
+    if quantity is None:
+        return Il204Placement('none')
 
     medium = next(
         (w for w in words

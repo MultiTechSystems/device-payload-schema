@@ -16,7 +16,6 @@ fields:
         "[255, 11]":
           - name: power
             type: u8
-            sensor: none
             # raw: "on"
             # The vendor reports "on" whatever the byte holds.
             lookup: {1: "on", default: "on"}

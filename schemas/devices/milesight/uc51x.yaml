@@ -60,21 +60,18 @@ fields:
         "[255, 254]":
           - name: reset_event
             type: u8
-            sensor: none
             lookup: {1: "reset", default: "reset"}
             # raw: readResetEvent(1)
         # DEVICE STATUS
         "[255, 11]":
           - name: device_status
             type: u8
-            sensor: none
             lookup: {1: "on", default: "on"}
             # raw: readDeviceStatus(1)
         # BATTERY
         "[1, 117]":
           - name: battery
             unit: "%"
-            sensor: percentage
             ipso: {object: 3320, instance: 0, resource: 5700}
             senml: {name: "battery", unit: "/100"}
             semantic: "battery"
@@ -84,14 +81,12 @@ fields:
         "[3, 1]":
           - name: valve_1_result
             type: u8
-            sensor: none
             lookup: ["success", "failed"]
             # raw: readDelayControlResult(1)
         # VALVE 2
         "[5, 1]":
           - name: valve_2_result
             type: u8
-            sensor: none
             lookup: ["success", "failed"]
             # raw: readDelayControlResult(1)
         # VALVE 1 Pulse
@@ -123,7 +118,6 @@ fields:
         "[185, 123]":
           - name: pressure_sensor_status
             type: u8
-            sensor: none
             # raw: readSensorStatus(bytes[i])
             lookup: {1: "sensor error", default: "unknown"}
         # CUSTOM MESSAGE (hardware_version >= v4.0 and firmware_version >= v1.1)
