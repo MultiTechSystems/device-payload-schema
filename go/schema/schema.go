@@ -1008,6 +1008,10 @@ func ParseSchema(data string) (*Schema, error) {
 	if err := checkSampled(raw, order); err != nil {
 		return nil, err
 	}
+	// CR-2026-161: a lookup's labels are of one type (PS-571).
+	if err := checkLookupTypes(raw, order); err != nil {
+		return nil, err
+	}
 
 	schema := &Schema{repeatOnly: repeatOnlyNames(raw), keyOrder: order}
 	schema.rawName = raw["name"]

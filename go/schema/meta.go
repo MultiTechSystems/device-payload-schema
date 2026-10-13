@@ -271,7 +271,7 @@ func (s *Schema) metaDeclarations(fields any) *declarations {
 							length = n
 						}
 					}
-					found.setDefault(label, map[string]any{"name": label, "type": fmt.Sprintf("u%d", 8*length)})
+					found.setDefault(label, map[string]any{"name": label, "type": fmt.Sprintf("u%d", 8*length), "_reports": "integer"}) // PS-570
 				}
 			}
 			if t, _ := f["type"].(string); t == "match" {
@@ -373,6 +373,9 @@ func (s *Schema) fieldMeta(decl map[string]any, repeat map[string]any, siblings 
 	declaredType := metaType(decl)
 	if declaredType != "" {
 		entry["type"] = declaredType
+	}
+	if reports := reportsOf(decl); reports != "" {
+		entry["reports"] = reports // PS-570
 	}
 	senml := asStringMap(decl["senml"])
 	if senml == nil {

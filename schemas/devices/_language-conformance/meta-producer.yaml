@@ -21,7 +21,7 @@ test_vectors:
     expected_meta:
       schema: meta_producer
       fields:
-        reading: {type: u8, unit: Cel, description: One-byte reading}
+        reading: {type: u8, reports: integer, unit: Cel, description: One-byte reading}
   - name: second_case
     source: spec-example
     payload: "02 FF9C"
@@ -29,4 +29,4 @@ test_vectors:
     expected_meta:
       schema: meta_producer
       fields:
-        reading: {type: s16, unit: Cel, description: Two-byte reading}
+        reading: {type: s16, reports: integer, unit: Cel, description: Two-byte reading}

@@ -23,4 +23,4 @@ test_vectors:
     expected_meta:
       schema: meta_tlv_channels
       fields:
-        channels: {type: tlv}
+        channels: {type: tlv, reports: array}

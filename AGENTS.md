@@ -2935,6 +2935,39 @@ improved. The Go, Java and C# corpus runners write per-vector reports only when
     No corpus vector encodes a nibble decimal or a fractional written discriminator, so no
     floor moves.
 
+- **CR-2026-161 (PS-570, PS-571; la-payload-schema branch `cr/0.5.6-apply-158-162`, for 0.5.6):
+  `_meta` carries `reports`, and a lookup's labels are of one type.**
+  - **PS-570:** every `_meta` entry derived from a declaration, at any depth, carries `reports`,
+    the JSON type PS-279 selects, right after `type` (key order is compared exactly): `integer`,
+    `number`, `string`, `boolean`, `object` or `array`. A match discriminator is `integer`, a
+    `merge: false` tlv's `channels` is `array`, `bytes` with `format: array` is `array`, a field
+    with a lookup reports its labels' type whatever arithmetic precedes it (the lookup is the
+    last step, PS-443; integer-only numeric labels `integer`, other numeric `number`, a
+    `${value}` default `string`), and an undeclared PS-499 entry `{}` has none. One function per
+    language, mirroring the prototype's `reports_of`: Python `reports_of`
+    (`tools/schema_interpreter.py`), Go `reportsOf` (`go/schema/cr161.go`), Java `Reports.of`,
+    C# `Meta.ReportsOf`. The discriminator and `channels` have no declaration of their own, so
+    the first is given an internal `_reports` key beside its pseudo-declaration and the second
+    is recognised by its `tlv`. C has no `_meta`.
+  - **PS-571:** a lookup whose labels (a non-`${value}` `default` counts as one) mix JSON types
+    is rejected at load, `Field 'f': its lookup mixes boolean, string labels; a lookup's labels
+    are of one type (PS-571)`, the types sorted, integer and other numbers both `number`.
+    Python `lookup_type_errors` from `schema_iterator_errors` (so the interpreter, the
+    validator and the TS013 generator), Go `checkLookupTypes`, Java `Reports.check`, C#
+    `Meta.CheckLookupTypes`. Measured before enforcing: no schema in the corpus, library or
+    examples is rejected. Only one existing test tripped it, and it was a bug in the test:
+    `lookup: {1: on, default: unknown}` is `true` under YAML 1.1, so the labels were a boolean
+    and a string. **Quote `"on"`/`"off"`/`"yes"`/`"no"` as lookup labels**: PyYAML and SnakeYAML
+    read them as booleans and C# (YAML 1.2) as strings, which is also why the shared cases
+    quote them.
+  - **`expected_meta` fixtures:** 12 `_language-conformance` fixtures changed, each entry
+    gaining `reports` from the spec rule (they are compared exactly), and four Python tests that
+    spell a `_meta` entry out. `make gate-verdicts` rule 3 (`_meta` identical to Python's in Go,
+    Java and C#) is the check that the four producers agree.
+  - **Cases:** `tests/cr-2026-161-cases.yaml` (the prototype's `TestCR2026161MetaReports`, 16),
+    read by `test_cr_2026_161_cases.py`, Go `cr161_test.go`, Java `CR2026161Test`, C#
+    `CR2026_161Tests`. No corpus vector changes, so no floor moves.
+
 ## Converting a vendor codec
 
 The converters in `tools/` (`convert_decentlab.py`, `convert_milesight.py`) do the
