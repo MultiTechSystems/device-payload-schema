@@ -5,13 +5,13 @@ Reference implementation of the LoRaWAN Payload Schema decoder and encoder in Go
 ## Installation
 
 ```bash
-go get github.com/MultiTechSystems/lorawan-payload-schema/go/schema
+go get github.com/MultiTechSystems/device-payload-schema/go/schema
 ```
 
 ## Usage
 
 ```go
-import "github.com/MultiTechSystems/lorawan-payload-schema/go/schema"
+import "github.com/MultiTechSystems/device-payload-schema/go/schema"
 
 // Parse a schema from YAML
 s, err := schema.ParseSchema(`

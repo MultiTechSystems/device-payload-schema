@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"math"
 	"os"
-	"path/filepath"
 	"testing"
 
 	"gopkg.in/yaml.v3"
@@ -24,7 +23,7 @@ type cr154Case struct {
 }
 
 func loadCR154(t *testing.T) (encode, decode []cr154Case) {
-	raw, err := os.ReadFile(filepath.Join("..", "..", "tests", "cr-2026-154-cases.yaml"))
+	raw, err := os.ReadFile(repoPath(t, "tests", "cr-2026-154-cases.yaml"))
 	if err != nil {
 		t.Fatalf("read cases: %v", err)
 	}

@@ -4,7 +4,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 
@@ -16,7 +15,7 @@ import (
 // shared with the reference, Java and C# in tests/cr-2026-160-cases.yaml.
 
 func TestCR160SharedCases(t *testing.T) {
-	raw, err := os.ReadFile(filepath.Join("..", "..", "tests", "cr-2026-160-cases.yaml"))
+	raw, err := os.ReadFile(repoPath(t, "tests", "cr-2026-160-cases.yaml"))
 	if err != nil {
 		t.Fatalf("read cases: %v", err)
 	}

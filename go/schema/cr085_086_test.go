@@ -106,7 +106,7 @@ func TestCR085ATagCutOffAtTheEndIsAnError(t *testing.T) {
 // Measured on a real schema: ws50x's port 85 frame with one byte after a complete entry
 // decoded successfully in Go.
 func TestCR085CutOffTagOnACorpusSchema(t *testing.T) {
-	raw, err := os.ReadFile("../../schemas/devices/milesight/ws50x.yaml")
+	raw, err := os.ReadFile(repoPath(t, "schemas", "devices", "milesight", "ws50x.yaml"))
 	if err != nil {
 		t.Skip(err)
 	}

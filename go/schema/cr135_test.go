@@ -4,7 +4,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 
@@ -25,7 +24,7 @@ type cr135Case struct {
 }
 
 func TestCR135SharedCases(t *testing.T) {
-	raw, err := os.ReadFile(filepath.Join("..", "..", "tests", "cr-2026-135-cases.yaml"))
+	raw, err := os.ReadFile(repoPath(t, "tests", "cr-2026-135-cases.yaml"))
 	if err != nil {
 		t.Fatalf("read cases: %v", err)
 	}

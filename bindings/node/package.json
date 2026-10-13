@@ -31,7 +31,7 @@
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/MultiTechSystems/lorawan-payload-schema"
+    "url": "https://github.com/MultiTechSystems/device-payload-schema"
   },
   "gypfile": true
 }
