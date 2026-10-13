@@ -44,7 +44,7 @@ def test_the_interpreter_refuses_it_on_decode_and_encode(case):
 def test_the_validator_and_the_generator_refuse_it(case):
     schema = yaml.safe_load(case["schema"])
     assert case["error"] in validate_schema_structure(schema)
-    with pytest.raises(ValueError, match="CR-2026-159"):
+    with pytest.raises(ValueError, match="is withdrawn"):
         TS013Generator(schema).generate()
 
 

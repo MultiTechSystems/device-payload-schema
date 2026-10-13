@@ -100,15 +100,8 @@
           },
           "description": "Nested fields for object type"
         },
-        "on": {
-          "type": "string",
-          "description": "Match discriminator field name (legacy syntax)"
-        },
-        "cases": {
-          "description": "Match cases: legacy [{case:, fields:}] or Option B {value: [fields]}"
-        },
         "default": {
-          "description": "Default case behavior: 'error', 'skip', or {fields: [...]}"
+          "description": "The value an encoder writes where the input omits the field (PS-554); an enum's unmapped label (PS-068)"
         },
         "semantic": {
           "type": "object",

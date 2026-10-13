@@ -466,13 +466,6 @@ def schema_errors(schema: Dict) -> List[str]:
         if not isinstance(field, dict):
             errors.append(f"field {field!r} is not a mapping")
             continue
-        if field.get('type') == 'match':
-            # encode_schema() writes a match record, which schema_load_binary() does not
-            # parse: it reads the record's bytes as ordinary fields.
-            errors.append(f"field {field.get('name', '?')!r}: `type: match` - the C "
-                          "binary loader has no match record; refused rather than "
-                          "dropped (PS-446)")
-            continue
         errors.extend(field_errors(field, endian))
         # The consume marker after a bit range is the byte 0x01, which is also the
         # type byte of a plain u8. A bit range that does not consume, followed by one,

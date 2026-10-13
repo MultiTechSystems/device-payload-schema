@@ -285,9 +285,6 @@ func (s *Schema) metaDeclarations(fields any) *declarations {
 					found.setDefault(label, map[string]any{"name": label, "type": fmt.Sprintf("u%d", 8*length), "_reports": "integer"}) // PS-570
 				}
 			}
-			if t, _ := f["type"].(string); t == "match" {
-				visitCases(f["cases"])
-			}
 			if tlv := asStringMap(f["tlv"]); tlv != nil {
 				if tlv["merge"] == false {
 					// Its entries are reported as a list under the fixed key `channels`
@@ -703,9 +700,6 @@ func checkMetaDeclarations(raw map[string]any, order keyOrder) error {
 					if def, ok := match["default"].([]any); ok {
 						visit(def)
 					}
-				}
-				if t, _ := f["type"].(string); t == "match" {
-					visitCases(f["cases"], visitList)
 				}
 				if tlv := asStringMap(f["tlv"]); tlv != nil {
 					if tlv["merge"] == false {

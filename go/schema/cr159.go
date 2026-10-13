@@ -14,6 +14,9 @@ const (
 	withdrawnEncodeFormula = "`encode_formula` is withdrawn with `formula` (CR-2026-159, PS-448)"
 	withdrawnClamp         = "`clamp` is withdrawn; use a `floor` stage and a `ceiling` stage " +
 		"(CR-2026-159, PS-115)"
+	// The legacy `type: match`, whose discriminator was `on:`; `match:` replaces it.
+	withdrawnTypeMatch = "`type: match` with `on:` is withdrawn; write `match: {field: $name, " +
+		"cases: ...}` (Clause 4)"
 	withdrawnConfirmed = "`confirmed` is withdrawn: confirmed or unconfirmed is chosen per " +
 		"transmission, not by the schema (CR-2026-159, PS-448)"
 )

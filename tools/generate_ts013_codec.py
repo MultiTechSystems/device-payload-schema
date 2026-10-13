@@ -533,7 +533,7 @@ function encMissing(name) {                           // missing_field_message
 function encHasDefault(f) {                           // field_default
   // PS-554: a declared `default` is a defined absence, in reported form, encoded as
   // input. An enum's is its unmapped label (PS-068), a legacy match's its fallback case.
-  return "default" in f && f.type !== "enum" && f.type !== "match";
+  return "default" in f && f.type !== "enum";
 }
 
 // declared_sources: every name a field list declares, whether some declaration reads

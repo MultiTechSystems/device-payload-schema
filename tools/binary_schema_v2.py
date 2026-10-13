@@ -298,7 +298,6 @@ class BinarySchemaEncoder:
             'base64': (FieldType.BYTES, 0),
             'skip': (FieldType.SKIP, 0),
             'object': (FieldType.OBJECT, 0),
-            'match': (FieldType.MATCH, 0),
             'enum': (FieldType.ENUM, 1),
             'string': (FieldType.LITERAL, 0),
             'number': (FieldType.LITERAL, 0),
@@ -313,6 +312,9 @@ class BinarySchemaEncoder:
         """Encode a single field definition."""
         field_type = field_def.get('type', 'u8')
         name = field_def.get('name', '')
+        
+        if field_type == 'match':
+            raise ValueError("`type: match` with `on:` is withdrawn; write `match: {field: $name, cases: ...}` (Clause 4)")
         
         # Option B: match: as top-level key
         if 'match' in field_def and not field_def.get('type'):
@@ -331,11 +333,6 @@ class BinarySchemaEncoder:
         
         # Check for bitfield
         bitfield = self._parse_bitfield(field_type)
-        
-        # Handle special types (legacy syntax)
-        if field_type == 'match':
-            self._encode_match(field_def, output)
-            return
         
         if field_type == 'object':
             self._encode_object(field_def, output)
@@ -446,69 +443,6 @@ class BinarySchemaEncoder:
         output.write(encode_varint(len(nested_fields)))
         for nf in nested_fields:
             self._encode_field(nf, output)
-    
-    def _encode_match(self, field_def: dict, output: io.BytesIO):
-        """Encode match/conditional block."""
-        type_byte = (FieldType.MATCH << 4)
-        
-        # Check for merge flag
-        flags = 0
-        if field_def.get('merge'):
-            flags |= FieldFlags.MERGE
-        
-        output.write(bytes([type_byte, flags]))
-        
-        name = field_def.get('name', '')
-        name_idx = self.strings.add(name) if name else 0xFFFF
-        output.write(struct.pack('<H', name_idx))
-        
-        # Discriminator
-        on = field_def.get('on', '')
-        if on.startswith('$'):
-            # Variable reference
-            var_name = on[1:]
-            var_idx = self.strings.add(var_name)
-            output.write(bytes([0x01]))  # variable mode
-            output.write(encode_varint(var_idx))
-        else:
-            # Inline byte read
-            length = field_def.get('length', 1)
-            output.write(bytes([0x00]))  # inline mode
-            output.write(encode_varint(length))
-        
-        # Cases
-        cases = field_def.get('cases', [])
-        output.write(encode_varint(len(cases)))
-        
-        for case in cases:
-            if 'default' in case:
-                # Default case marker
-                output.write(bytes([0xFF]))
-                default_val = case.get('default')
-                if default_val == 'skip':
-                    output.write(bytes([0x00]))
-                elif default_val == 'error':
-                    output.write(bytes([0x01]))
-                else:
-                    output.write(bytes([0x02]))
-            else:
-                case_val = case.get('case')
-                if isinstance(case_val, list):
-                    # Multiple values
-                    output.write(bytes([0xFE]))
-                    output.write(encode_varint(len(case_val)))
-                    for v in case_val:
-                        output.write(encode_signed_varint(int(v)))
-                else:
-                    # Single value
-                    output.write(bytes([0x00]))
-                    output.write(encode_signed_varint(int(case_val)))
-            
-            # Case fields
-            case_fields = case.get('fields', [])
-            output.write(encode_varint(len(case_fields)))
-            for cf in case_fields:
-                self._encode_field(cf, output)
     
     def _encode_match_option_b(self, field_def: dict, output: io.BytesIO):
         """Encode match using Option B syntax (match: as top-level key)."""
@@ -698,11 +632,6 @@ class BinarySchemaEncoder:
             # Byte group fields
             if f.get('byte_group'):
                 self._collect_all_strings(f['byte_group'])
-            # Match cases (legacy)
-            if f.get('type') == 'match':
-                for case in f.get('cases', []):
-                    if case.get('fields'):
-                        self._collect_all_strings(case['fields'])
             # Option B: match: as top-level key
             if 'match' in f and not f.get('type'):
                 match_def = f['match']
@@ -906,7 +835,7 @@ class BinarySchemaDecoder:
         return {'byte_group': fields, 'size': group_size}
     
     def _decode_match(self, stream: io.BytesIO) -> dict:
-        """Decode match block."""
+        """Decode a match record, as _encode_match_option_b writes it, into `match:`."""
         flags = stream.read(1)[0]
         
         name_idx = struct.unpack('<H', stream.read(2))[0]
@@ -914,52 +843,52 @@ class BinarySchemaDecoder:
         
         # Discriminator
         mode = stream.read(1)[0]
+        match = {}
         if mode == 0x01:
             var_idx = decode_varint(stream)
-            on = '$' + self.strings.get(var_idx)
+            match['field'] = '$' + self.strings.get(var_idx)
         else:
-            length = decode_varint(stream)
-            on = None  # inline
+            match['length'] = decode_varint(stream)
+        if stream.read(1)[0] == 0x01:
+            match['var'] = self.strings.get(decode_varint(stream))
+        if name:
+            match['name'] = name
         
         # Cases
         case_count = decode_varint(stream)
-        cases = []
+        cases = {}
         
         for _ in range(case_count):
             case_type = stream.read(1)[0]
-            
-            case_def = {}
-            if case_type == 0xFF:
-                # Default
-                default_mode = stream.read(1)[0]
-                if default_mode == 0x00:
-                    case_def['default'] = 'skip'
-                elif default_mode == 0x01:
-                    case_def['default'] = 'error'
-                else:
-                    case_def['default'] = True
-            elif case_type == 0xFE:
+            if case_type == 0xFE:
                 # Multiple values
                 val_count = decode_varint(stream)
-                case_def['case'] = [decode_signed_varint(stream) for _ in range(val_count)]
+                key = str([decode_signed_varint(stream) for _ in range(val_count)])
             else:
                 # Single value
-                case_def['case'] = decode_signed_varint(stream)
-            
-            # Case fields
+                key = decode_signed_varint(stream)
             field_count = decode_varint(stream)
-            case_def['fields'] = [self._decode_field(stream) for _ in range(field_count)]
-            cases.append(case_def)
+            cases[key] = [self._decode_field(stream) for _ in range(field_count)]
+        match['cases'] = cases
         
-        match = {'type': 'match', 'cases': cases}
-        if name:
-            match['name'] = name
-        if on:
-            match['on'] = on
+        # The default follows the counted cases, marked 0xFF.
+        marker = stream.read(1)
+        if marker == b'\xff':
+            default_mode = stream.read(1)[0]
+            if default_mode == 0x00:
+                match['default'] = 'skip'
+            elif default_mode == 0x01:
+                match['default'] = 'error'
+            elif default_mode == 0x03:
+                count = decode_varint(stream)
+                match['default'] = [self._decode_field(stream) for _ in range(count)]
+        elif marker:
+            stream.seek(-1, io.SEEK_CUR)
+        
         if flags & FieldFlags.MERGE:
             match['merge'] = True
         
-        return match
+        return {'match': match}
     
     def _get_type_string(self, field_type: FieldType, size: int) -> str:
         """Convert field type and size to type string."""
@@ -1086,17 +1015,16 @@ if __name__ == '__main__':
                 {'name': 'counter', 'type': 'u8[0:3]', 'consume': 1},
                 {'name': 'event', 'type': 'u8', 'var': 'evt', 
                  'lookup': {0: 'reset', 1: 'data', 2: 'alarm'}},
-                {'name': 'payload', 'type': 'match', 'on': '$evt', 'merge': True,
-                 'cases': [
-                     {'case': 0, 'fields': [
+                {'match': {'field': '$evt', 'merge': True,
+                 'cases': {
+                     0: [
                          {'name': 'device_id', 'type': 'u16'}
-                     ]},
-                     {'case': 1, 'fields': [
+                     ],
+                     1: [
                          {'name': 'temperature', 'type': 's16', 'div': 100},
                          {'name': 'humidity', 'type': 'u8', 'mult': 0.5}
                      ]},
-                     {'default': 'skip'}
-                 ]}
+                 'default': 'skip'}}
             ]
         }
         

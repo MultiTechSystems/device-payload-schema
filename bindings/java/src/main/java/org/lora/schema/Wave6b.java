@@ -221,14 +221,13 @@ final class Wave6b {
      * {@code default}, which is in the field's reported form and is encoded exactly as that
      * value given as input, so one that cannot be encoded is rejected as such input is
      * (PS-168). A declared default is a defined absence (PS-551 as amended). An enum's
-     * {@code default} is its unmapped label (PS-068) and a legacy {@code type: match}'s its
-     * fallback case, so neither is written. Read from the declaration as written.
+     * {@code default} is its unmapped label (PS-068), so it is not written. Read from the declaration as written.
      */
     static boolean hasFieldDefault(Field field) {
         Map<String, Object> raw = field.getRaw();
         if (raw == null || !raw.containsKey("default")) return false;
         Object type = raw.get("type");
-        return !"enum".equals(type) && !"match".equals(type);
+        return !"enum".equals(type);
     }
 
     static Object fieldDefault(Field field) {

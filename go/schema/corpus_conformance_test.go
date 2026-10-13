@@ -131,7 +131,7 @@ type corpusSchema struct {
 }
 
 func TestCorpusConformance(t *testing.T) {
-	root := filepath.Join("..", "..", "schemas", "devices")
+	root := repoPath(t, "schemas", "devices")
 	if override := os.Getenv("CORPUS_ROOT"); override != "" {
 		root = override // see corpus_report_test.go
 	}

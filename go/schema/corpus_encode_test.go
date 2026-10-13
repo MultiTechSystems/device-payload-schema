@@ -111,7 +111,7 @@ func schemaShape(raw string) string {
 }
 
 func TestCorpusEncodeRoundTrip(t *testing.T) {
-	root := filepath.Join("..", "..", "schemas", "devices")
+	root := repoPath(t, "schemas", "devices")
 	byShape := map[string]map[string]int{}
 	total := 0
 
@@ -224,7 +224,7 @@ const encodePlainFloorTotal = 2135 // +1: repeat-sampled (CR-2026-156); +1: nega
 // TestCorpusEncodePlainRoundTrip measures the unordered pair, so the two contracts are
 // ratcheted separately and neither can be mistaken for the other.
 func TestCorpusEncodePlainRoundTrip(t *testing.T) {
-	root := filepath.Join("..", "..", "schemas", "devices")
+	root := repoPath(t, "schemas", "devices")
 	exact, total := 0, 0
 
 	err := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {

@@ -4,7 +4,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 
@@ -24,7 +23,7 @@ type silentEmptyCase struct {
 }
 
 func TestSilentEmptySharedCases(t *testing.T) {
-	raw, err := os.ReadFile(filepath.Join("..", "..", "tests", "silent-empty-cases.yaml"))
+	raw, err := os.ReadFile(repoPath(t, "tests", "silent-empty-cases.yaml"))
 	if err != nil {
 		t.Fatalf("read cases: %v", err)
 	}

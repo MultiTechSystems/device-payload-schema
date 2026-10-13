@@ -1,4 +1,4 @@
-module github.com/MultiTechSystems/lorawan-payload-schema/go/schema
+module github.com/MultiTechSystems/device-payload-schema/go/schema
 
 go 1.21
 

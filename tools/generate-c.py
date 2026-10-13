@@ -66,11 +66,6 @@ def generate_struct(schema: dict) -> str:
         if field_name.startswith('_'):
             continue
         
-        # Handle match/conditional - create union
-        if field_type == 'match':
-            lines.append(f"    /* Conditional field - see cases */")
-            continue
-        
         # Handle bitfields
         if ':' in str(field_type):
             base_type, bits = field_type.split(':')
@@ -120,11 +115,6 @@ def generate_decoder(schema: dict) -> str:
         if field_name.startswith('_'):
             continue
             
-        # Skip conditional types for now
-        if field_type == 'match':
-            lines.append(f"    /* TODO: conditional field {field_name} */")
-            continue
-        
         # Handle bitfields
         if ':' in str(field_type):
             base_type, bits = field_type.split(':')
@@ -206,10 +196,6 @@ def generate_encoder(schema: dict) -> str:
         if field_name.startswith('_'):
             continue
             
-        if field_type == 'match':
-            lines.append(f"    /* TODO: conditional field {field_name} */")
-            continue
-        
         # Handle bitfields
         if ':' in str(field_type):
             base_type, bits = field_type.split(':')

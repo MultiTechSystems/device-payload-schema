@@ -228,7 +228,7 @@ public class Field {
     /**
      * The {@code default} of an Option B match: {@code "error"}, {@code "skip"}, or a
      * field list decoded when no case matches (CR-2026-020). Distinct from
-     * {@link Case#isDefault()}, which marks a case in the legacy list spelling.
+     * {@link Case#isDefault()}, which marks a case keyed {@code default}.
      */
     private Object matchDefault;
 

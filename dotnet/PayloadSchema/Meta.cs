@@ -272,9 +272,6 @@ public static partial class Meta
                             new YamlScalarNode("_reports"), new YamlScalarNode("integer") { Style = ScalarStyle.DoubleQuoted });  // PS-570
                     }
                 }
-                if (Value(f, "type") is "match" && Get(f, "cases") is YamlMappingNode legacy)
-                    foreach (var body in legacy.Children.Values)
-                        Visit(Items(body));
                 if (Get(f, "tlv") is YamlMappingNode tlv)
                 {
                     if (MergeIsFalse(tlv))
@@ -602,9 +599,6 @@ public static partial class Meta
                         if (Get(match, "default") is YamlSequenceNode fallback)
                             Visit(Items(fallback));
                     }
-                    if (Value(f, "type") is "match" && Get(f, "cases") is YamlMappingNode legacy)
-                        foreach (var body in legacy.Children.Values)
-                            Visit(Items(body));
                     if (Get(f, "tlv") is YamlMappingNode tlv)
                     {
                         var bodies = CaseBodies(Get(tlv, "cases")).OfType<YamlSequenceNode>().ToList();

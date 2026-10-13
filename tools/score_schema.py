@@ -450,9 +450,9 @@ console.log(JSON.stringify({{ passed, failed, errors }}));
 
 
 def _match_selector(match_def: Dict[str, Any]) -> str:
-    """The name a match's branches are listed under: its `field` (or legacy `on`)
+    """The name a match's branches are listed under: its `field`
     without the `$`, else the `name` an inline discriminator reports under."""
-    on_field = match_def.get('on', match_def.get('field')) or match_def.get('name', '')
+    on_field = match_def.get('field') or match_def.get('name', '')
     return str(on_field).lstrip('$')
 
 
@@ -536,8 +536,8 @@ def analyze_branch_coverage(schema: Dict[str, Any]) -> Tuple[float, List[str]]:
             if not isinstance(field, dict):
                 continue
             # Switch/match branches
-            if 'match' in field or field.get('type') == 'match':
-                match_def = field.get('match', field)
+            if 'match' in field:
+                match_def = field['match']
                 if not isinstance(match_def, dict):
                     match_def = {}
                 on_field = _match_selector(match_def)
@@ -617,7 +617,7 @@ def analyze_branch_coverage(schema: Dict[str, Any]) -> Tuple[float, List[str]]:
             covered.add(('port', 'fPort', str(fport)))
 
         # A top-level selector's value in the output, for the forms the recorder
-        # does not see (the legacy `type: match` with `on:`).
+        # does not see.
         for kind, selector, value in branches:
             if kind == 'port':
                 continue
@@ -1109,15 +1109,9 @@ def check_semantic_annotations(schema: Dict[str, Any]) -> Tuple[Dict[str, Any], 
                 continue
 
             # Handle nested structures
-            if field_type in ('object', 'match'):
+            if field_type == 'object':
                 if 'fields' in field:
                     scan_fields(field['fields'], f"{full_name}.")
-                if 'cases' in field:
-                    for case_def in field.get('cases', {}).values():
-                        if isinstance(case_def, dict) and 'fields' in case_def:
-                            scan_fields(case_def['fields'], f"{full_name}.")
-                        elif isinstance(case_def, list):
-                            scan_fields(case_def, f"{full_name}.")
                 continue
             
             # Skip raw/internal/component fields

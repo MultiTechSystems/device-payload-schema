@@ -120,9 +120,6 @@ func nestedDiscriminator(field Field, data map[string]any, label string) (int64,
 		return 0, nil, "", false, undeterminedCaseError(label)
 	}
 	raw := filled[0].c.Case
-	if raw == nil {
-		raw = filled[0].c.Match
-	}
 	value, single := exactCaseValue(filled[0].c)
 	if !single {
 		return 0, nil, "", false, undeterminedCaseError(label)

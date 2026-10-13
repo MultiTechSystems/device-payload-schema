@@ -139,10 +139,10 @@ def get_info(input_data: str) -> dict:
                 counts = {'fields': 0, 'matches': 0, 'lookups': 0, 'objects': 0}
             for f in (fields or []):
                 counts['fields'] += 1
-                if f.get('type') == 'match':
+                if isinstance(f.get('match'), dict):
                     counts['matches'] += 1
-                    for case in f.get('cases', []):
-                        count_features(case.get('fields'), counts)
+                    for body in (f['match'].get('cases') or {}).values():
+                        count_features(body, counts)
                 elif f.get('type') == 'object':
                     counts['objects'] += 1
                     count_features(f.get('fields'), counts)

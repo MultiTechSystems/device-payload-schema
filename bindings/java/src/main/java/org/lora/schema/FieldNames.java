@@ -102,21 +102,9 @@ final class FieldNames {
             Object type = item.get("type");
             if ("skip".equals(type)) continue;
             if (item.containsKey("object") && !hasType) continue;   // PS-466 names it
+            if ("match".equals(type)) continue;   // the withdrawn `type: match`, which Cr159 names
             Object nameValue = item.get("name");
             String name = nameValue instanceof String s ? s : "";
-            if ("match".equals(type) && name.isEmpty()) {
-                // The older `type: match` + `on:` spelling of the match construct.
-                Object cases = item.get("cases");
-                if (cases instanceof List<?> list2) {
-                    for (Object c : list2) {
-                        if (c instanceof Map<?, ?> cm) walk(cm.get("fields"), where);
-                    }
-                } else {
-                    for (Object body : caseBodies(cases)) walk(body, where);
-                }
-                walk(item.get("default"), where);
-                continue;
-            }
             if (name.isEmpty()) {
                 String kind = hasType ? String.valueOf(type) : "field";
                 throw new SchemaException(where + ": field " + position + ", a " + kind

@@ -1094,11 +1094,10 @@ def field_default(field_def):
     lookup - and the caller encodes it exactly as that value given as input, so one that
     cannot be encoded is rejected as such input is (PS-168). A declared default is a
     defined absence (PS-551 as amended). An enum's `default` is its unmapped label
-    (PS-068) and a legacy `type: match`'s is its fallback case, so neither is a value to
-    write. Since CR-2026-134 a declared default was rejected as a missing value.
+    (PS-068), so it is not a value to write. Since CR-2026-134 a declared default was rejected as a missing value.
     """
     if isinstance(field_def, dict) and 'default' in field_def \
-            and field_def.get('type') not in ('enum', 'match'):
+            and field_def.get('type') != 'enum':
         return True, field_def['default']
     return False, None
 
@@ -1471,6 +1470,12 @@ WITHDRAWN_KEYS = {
 }
 
 
+#: The legacy `type: match` spelling (`on:` for the discriminator, a `default` case for the
+#: fallback) is gone; Clause 4's `match:` construct replaces it.
+WITHDRAWN_TYPE_MATCH = ("`type: match` with `on:` is withdrawn; write `match: {field: $name, "
+                        "cases: ...}` (Clause 4)")
+
+
 def withdrawn_errors(schema):
     """CR-2026-159: `formula`, `encode_formula` and a port's `confirmed` are rejected at
     load, and so are `min` and `max` on any field that is not a repeat (they bound a
@@ -1481,6 +1486,8 @@ def withdrawn_errors(schema):
 
     def check_field(node):
         name = node.get('name', '<unnamed>')
+        if node.get('type') == 'match':
+            errors.append(WITHDRAWN_TYPE_MATCH)
         for key in ('formula', 'encode_formula'):
             if key in node:
                 errors.append(WITHDRAWN_KEYS[key])
@@ -2617,7 +2624,7 @@ def case_body_errors(schema):
     A bare string such as `cases: {5: skip}` was taken for one: the validator crashed
     walking it and the decoder failed with `'str' object has no attribute 'get'` only
     when a payload reached that case. Rejected at load, naming the case, as Go, Java
-    and C# do. A legacy `type: match` lists its cases and is not checked here.
+    and C# do.
     """
     errors = []
 
@@ -2954,16 +2961,8 @@ def field_name_errors(schema):
                 continue
             if 'object' in item and 'type' not in item:
                 continue            # the withdrawn `object:` key, which PS-466 names
-            if item.get('type') == 'match' and not item.get('name'):
-                # The older `type: match` + `on:` spelling of the match construct, which
-                # this repository still reads; its cases are a list of `{case, fields}`.
-                cases = item.get('cases')
-                bodies = (list(cases.values()) if isinstance(cases, dict) else
-                          [c.get('fields') for c in cases if isinstance(c, dict)]
-                          if isinstance(cases, list) else [])
-                for body in bodies + [item.get('default')]:
-                    walk(body, where)
-                continue
+            if item.get('type') == 'match':
+                continue            # the withdrawn `type: match`, which withdrawn_errors names
             name = item.get('name')
             if not (isinstance(name, str) and name):
                 kind = item.get('type', 'field')
@@ -3623,10 +3622,6 @@ def meta_declarations(fields):
                     found.setdefault(label, {'name': label,
                                              'type': 'u%d' % (8 * int(match.get('length', 1))),
                                              '_reports': 'integer'})         # PS-570
-            if f.get('type') == 'match' and isinstance(f.get('cases'), dict):
-                for body in f['cases'].values():
-                    if isinstance(body, list):
-                        visit(body)
             tlv = f.get('tlv')
             if isinstance(tlv, dict):
                 if tlv.get('merge', True) is False:
@@ -3959,10 +3954,6 @@ def meta_declaration_errors(schema):
                             visit(body)
                     if isinstance(match.get('default'), list):
                         visit(match['default'])
-                if f.get('type') == 'match' and isinstance(f.get('cases'), dict):
-                    for body in f['cases'].values():
-                        if isinstance(body, list):
-                            visit(body)
                 tlv = f.get('tlv')
                 if isinstance(tlv, dict):
                     bodies = [b for b in (tlv.get('cases') if isinstance(tlv.get('cases'), dict) else {}).values()
@@ -4470,7 +4461,7 @@ class SchemaInterpreter:
     # Go and Java both compute an effective endian per field from the *context* endian,
     # so a parent's override does not reach a nested member there, and this must not be
     # the one implementation where it does.
-    _ENDIAN_OPAQUE_TYPES = ('object', 'repeat', 'match', 'switch')
+    _ENDIAN_OPAQUE_TYPES = ('object', 'repeat', 'switch')
 
     def _decode_field(self, field_def: Dict[str, Any], buf: bytes,
                       pos: int) -> Tuple[Any, int]:
@@ -4744,10 +4735,6 @@ class SchemaInterpreter:
         if field_type == 'enum':
             # Enum type: decode base type then map to string
             return self._decode_enum(field_def, buf, pos)
-        
-        if field_type == 'match':
-            # Conditional decoding
-            return self._decode_match(field_def, buf, pos)
         
         # PS-327/PS-328: reject, naming the field and the type. `float`, `double`,
         # `UDec`, `SDec` and `version_string` were read here once; none is a type of
@@ -5132,14 +5119,8 @@ class SchemaInterpreter:
     def _decode_match(self, field_def: Dict[str, Any], buf: bytes, 
                       pos: int) -> Tuple[Dict[str, Any], int]:
         """
-        Decode conditional/match field.
+        Decode a `match` construct (Clause 4):
         
-        Supports both legacy syntax and Option B syntax:
-        
-        Legacy:
-          type: match, on: field_name, cases: [{case: 1, fields: [...]}, ...]
-        
-        Option B:
           match:
             field: $var_name    # variable-based
             length: 1           # OR inline read
@@ -5155,68 +5136,9 @@ class SchemaInterpreter:
         - Range: "2..5" or 2..5
         - Default handling: default: error | skip | {fields}
         """
-        # Option B syntax: match_def is the nested dict under 'match:'
         match_def = field_def.get('match', {})
-        if isinstance(match_def, dict) and match_def:
-            return self._decode_match_option_b(match_def, buf, pos)
-        
-        # Legacy syntax
-        on_field = field_def.get('on')
-        cases = field_def.get('cases', [])
-        default = field_def.get('default', 'error')
-        
-        # Get the discriminator value from previously decoded fields
-        discriminator = None
-        if on_field and hasattr(self, '_current_data') and self._current_data:
-            # Handle $ prefix for variable reference
-            field_name = on_field.lstrip('$')
-            discriminator = self._current_data.get(field_name)
-            # Also check variables store
-            if discriminator is None and hasattr(self, '_variables'):
-                discriminator = self._variables.get(field_name)
-        
-        if discriminator is None:
-            # Fallback: peek at next byte as discriminator
-            if pos < len(buf):
-                discriminator = buf[pos]
-        
-        # Find matching case
-        matched_case = None
-        for case in cases:
-            case_pattern = case.get('case')
-            if self._match_case_pattern(discriminator, case_pattern):
-                matched_case = case
-                break
-        
-        # Handle no match
-        if matched_case is None:
-            if default == 'error':
-                raise ValueError(f"No matching case for value {discriminator}")
-            elif default == 'skip':
-                return {}, pos
-            elif isinstance(default, dict) and 'fields' in default:
-                # Default case with fields
-                matched_case = default
-            else:
-                return {}, pos
-        
-        # Decode matched case fields
-        result = {}
-        case_fields = matched_case.get('fields', [])
-        for cf in case_fields:
-            name = cf.get('name') or ''         # PS-553: only a skip is nameless
-            if name.startswith('_'):
-                # Internal field - decode and bind, but don't output
-                value, pos = self._decode_field(cf, buf, pos)
-                self._bind_internal(cf, name, value)
-            else:
-                value, pos = self._decode_field(cf, buf, pos)
-                value = self._apply_modifiers(value, cf)
-                if name:
-                    result[name] = value
-        
-        return result, pos
-    
+        return self._decode_match_option_b(match_def, buf, pos)
+
     def _bind(self, field_def: Dict[str, Any], names: List[Optional[str]], value: Any) -> None:
         """Bind a decoded field's value under each of `names`, as PS-523 says.
 
@@ -6667,16 +6589,6 @@ class SchemaInterpreter:
                             result.quality[name] = quality
                 except Exception as e:
                     result.errors.append(error_text(f"Error computing {name}: ", e))
-                continue
-            
-            # Handle match at field level (legacy: no name, type: match)
-            if field_type == 'match' and not name:
-                try:
-                    match_result, pos = self._decode_match(field_def, payload, pos)
-                    result.data.update(match_result)
-                except Exception as e:
-                    result.errors.append(error_text(f"Error in match: ", e))
-                    break
                 continue
             
             # An internal field is read and bound, but not reported. It used to be

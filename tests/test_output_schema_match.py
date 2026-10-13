@@ -5,10 +5,7 @@ match case was missing from the output schema. The three corpus schemas that use
 construct described almost nothing: rbs30x.yaml declared 3 properties and its decoder
 reports 50.
 
-Both syntaxes are covered. Option B nests the construct under `match:` with `cases`
-keyed by value; the legacy form puts `on:`/`cases:` on a `type: match` field, with cases
-as a list of `{case, fields}`. Nothing in the corpus uses the legacy form, so its tests
-are the only thing holding that path up.
+The construct nests under `match:` with `cases` keyed by value.
 """
 
 import sys
@@ -47,14 +44,6 @@ class TestOptionB:
             "        1: [{name: b, type: u8}]\n"
         )
         assert {"a", "b"} <= set(props(schema))
-
-    def test_a_case_given_as_a_dict_with_fields_contributes(self):
-        schema = option_b(
-            "      field: $k\n"
-            "      cases:\n"
-            "        0:\n          fields: [{name: a, type: u8}]\n"
-        )
-        assert "a" in props(schema)
 
     def test_name_declares_the_discriminator(self):
         # `name:` puts the matched value itself in the output.
@@ -151,43 +140,6 @@ class TestOptionB:
             "                0: [{name: deep, type: u8}]\n"
         )
         assert "deep" in props(schema)
-
-
-class TestLegacySyntax:
-    """`type: match` with `on:`. Unused in the corpus, so only these tests cover it."""
-
-    def test_cases_as_a_list_of_case_field_pairs(self):
-        schema = yaml.safe_load(
-            "name: t\nendian: big\nfields:\n"
-            "  - name: kind\n    type: u8\n"
-            "  - name: body\n    type: match\n    'on': kind\n"
-            "    cases:\n"
-            "      - case: 1\n        fields: [{name: a, type: u8}]\n"
-            "      - case: 2\n        fields: [{name: b, type: u8}]\n"
-        )
-        assert {"a", "b"} <= set(props(schema))
-
-    def test_default_fields_contribute(self):
-        schema = yaml.safe_load(
-            "name: t\nendian: big\nfields:\n"
-            "  - name: kind\n    type: u8\n"
-            "  - name: body\n    type: match\n    'on': kind\n"
-            "    cases:\n"
-            "      - case: 1\n        fields: [{name: a, type: u8}]\n"
-            "    default: [{name: fallback, type: u8}]\n"
-        )
-        assert "fallback" in props(schema)
-
-    def test_the_match_field_itself_is_not_declared_as_a_value(self):
-        # `body` is the construct, not a reported scalar.
-        schema = yaml.safe_load(
-            "name: t\nendian: big\nfields:\n"
-            "  - name: kind\n    type: u8\n"
-            "  - name: body\n    type: match\n    'on': kind\n"
-            "    cases:\n"
-            "      - case: 1\n        fields: [{name: a, type: u8}]\n"
-        )
-        assert "body" not in props(schema)
 
 
 class TestMatchBranches:

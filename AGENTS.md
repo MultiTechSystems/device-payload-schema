@@ -2544,8 +2544,7 @@ improved. The Go, Java and C# corpus runners write per-vector reports only when
   `Schema 't': field 1, a u8, has no name; a field that reads or reports a value is named,
   and padding is a `skip` (PS-553)` - the position is 1-based within its list, the type
   is as written (`a field` where there is none), and an object's or repeat's members add
-  `, in 'o'`; a port adds `, port N`. Exempt: constructs (`match` - the older `type: match`
-  spelling too - `byte_group`, `flagged`, `tlv`, `records`), a byte_group member (reserved
+  `, in 'o'`; a port adds `, port N`. Exempt: constructs (`match`, `byte_group`, `flagged`, `tlv`, `records`), a byte_group member (reserved
   bits), a repeat's `element`, and the withdrawn `object:` key, which PS-466 names.
   - **Where:** Python `field_name_errors`, run by `schema_iterator_errors`, so the
     interpreter, the validator and the TS013 generator all refuse it; Go `cr138.go`,
@@ -2571,9 +2570,8 @@ improved. The Go, Java and C# corpus runners write per-vector reports only when
   given as input: `{div: 10, default: 2.5}` writes `0x19`, `{lookup: {1: eco, 2: boost},
   default: boost}` writes `0x02`, and one that cannot be encoded is rejected as such input
   is (`Field 'x': 300 encodes as 300, outside 0 to 255 (PS-168)`). A decoder ignores it.
-  An enum's `default` is its unmapped label (PS-068) and a legacy `type: match`'s its
-  fallback case; neither is ever written, so an omitted enum is still `Missing required
-  field`. This reverses #116, which rejected a declared default as a missing value.
+  An enum's `default` is its unmapped label (PS-068) and is never written, so an omitted
+  enum is still `Missing required field`. This reverses #116, which rejected a declared default as a missing value.
   - **Where:** one predicate per language - Python `field_default`, Go `fieldDefault`
     (`cr134.go`), Java `Wave6b.hasFieldDefault`, C# `SchemaEncoder.HasFieldDefault`, the
     runtime's `encHasDefault` - consulted at every missing-input site: a field list, the
@@ -3107,7 +3105,27 @@ improved. The Go, Java and C# corpus runners write per-vector reports only when
     `div`/`add` or `ref` + `mult`. `tests/cr-2026-159-cases.yaml` is one case list read by
     `test_cr_2026_159_withdrawals.py` (interpreter, validator, generator, binary converter),
     Go `cr159_test.go`, Java `CR2026159Test`, C# `CR2026_159Tests`.
-
+- **The legacy `type: match` is removed (cleanup, after CR-2026-159's pattern).** The spelling
+  with `on:` for the discriminator and a `default` case for the fallback is not in the
+  specification (Clause 4 replaced `on` with `field`; PS-448 rejects `on`, PS-575 an unquoted
+  one). Every load path now refuses it with "`type: match` with `on:` is withdrawn; write
+  `match: {field: $name, cases: ...}` (Clause 4)": Python `withdrawn_errors`
+  (`WITHDRAWN_TYPE_MATCH`, so the interpreter, the validator, the TS013 generator and
+  `schema_binary.py`), Go `withdrawnTypeMatch` from `checkTypeVocabulary` (before the
+  unknown-type check, which would otherwise say `unknown type: match`), Java `Cr159.TYPE_MATCH`
+  and C# `Cr159.TypeMatch`. The decode, encode, `_meta` and name-check paths for it, the
+  list-form `cases` parse, `Case.Match`, Java's `on` read, `FieldType.fromString("match")` and
+  `"match"` in the type vocabulary are gone; the internal `FieldType.Match` that an inline
+  `match:` is parsed into stays. The meta-schema lost `definitions.field`'s `on` and
+  `cases`, and the vocabulary's `on`, `cases` and `legacy_case` context (hints now name the
+  replacement). Measured before removing: no schema in `schemas/devices`, `schemas/library`,
+  `examples`, the docs or the private registry used it, so nothing was converted and no vector
+  or floor moved. The only users were 11 Go tests, one C# test, three output-schema tests, one
+  mutation-harness test and two binary-schema tests, all deleted or rewritten to the
+  `match:` construct. Cases: three added to `tests/cr-2026-159-cases.yaml` (quote `on`
+  in a case, or PS-575 refuses it first), read by all four loaders. The legacy binary
+  encoders `binary_schema.py` and `binary_schema_v2.py` raise on it, and v2 now decodes a match
+  record into `match:`.
 - **CR-2026-160 (PS-059; la-payload-schema branch `cr/0.5.6-apply-158-162`, for 0.5.6): a bit
   range's base is any multiple of 8 from 8 to 64, and the wide widths are bases only.** `u40`,
   `u48`, `u56` and `s40`, `s48`, `s56` are valid as `uN[a:b]`/`sN[a:b]`, a non-consuming one
@@ -3310,8 +3328,8 @@ Known weaknesses, so you neither trip over them nor assume they are intentional:
     also refuses two groups claiming the same bit, which JSON Schema cannot express —
     `test_cr_2026_017_flagged_meta_schema.py` records that division of labour.
   - `definitions.match` (CR-2026-018), six keys, describing the Option B block under a
-    `match:` key. The older `type: match` with `on:` spelling keeps its keys on
-    `definitions.field`.
+    `match:` key. The older `type: match` with `on:` spelling is withdrawn, and
+    its `on` and `cases` keys left `definitions.field`.
   - `byte_group` and `repeat` (CR-2026-019), seven field-level keys — `byte_group`,
     `size`, `count`, `byte_length`, `until`, `max`, `min`. `byte_group` has two
     spellings, an object carrying its own `size` and an array taking `size` from the

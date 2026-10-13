@@ -703,14 +703,9 @@ class TestMatchConditional:
         schema = {
             'fields': [
                 {'name': 'msg_type', 'type': 'u8'},
-                {
-                    'type': 'match',
-                    'on': 'msg_type',
-                    'cases': [
-                        {'case': 1, 'fields': [{'name': 'temp', 'type': 's16', 'mult': 0.01}]},
-                        {'case': 2, 'fields': [{'name': 'humidity', 'type': 'u8'}]},
-                    ]
-                }
+                {'match': {'field': '$msg_type',
+           'cases': {1: [{'name': 'temp', 'type': 's16', 'mult': 0.01}],
+                     2: [{'name': 'humidity', 'type': 'u8'}]}}}
             ]
         }
         interpreter = SchemaInterpreter(schema)
@@ -726,13 +721,8 @@ class TestMatchConditional:
         schema = {
             'fields': [
                 {'name': 'msg_type', 'type': 'u8'},
-                {
-                    'type': 'match',
-                    'on': 'msg_type',
-                    'cases': [
-                        {'case': [1, 2, 3], 'fields': [{'name': 'data', 'type': 'u8'}]},
-                    ]
-                }
+                {'match': {'field': '$msg_type',
+           'cases': {'[1, 2, 3]': [{'name': 'data', 'type': 'u8'}]}}}
             ]
         }
         interpreter = SchemaInterpreter(schema)
@@ -747,13 +737,8 @@ class TestMatchConditional:
         schema = {
             'fields': [
                 {'name': 'msg_type', 'type': 'u8'},
-                {
-                    'type': 'match',
-                    'on': 'msg_type',
-                    'cases': [
-                        {'case': '10..20', 'fields': [{'name': 'data', 'type': 'u8'}]},
-                    ]
-                }
+                {'match': {'field': '$msg_type',
+           'cases': {'10..20': [{'name': 'data', 'type': 'u8'}]}}}
             ]
         }
         interpreter = SchemaInterpreter(schema)
@@ -775,14 +760,9 @@ class TestMatchConditional:
         schema = {
             'fields': [
                 {'name': 'msg_type', 'type': 'u8'},
-                {
-                    'type': 'match',
-                    'on': 'msg_type',
-                    'default': 'skip',
-                    'cases': [
-                        {'case': 1, 'fields': [{'name': 'data', 'type': 'u8'}]},
-                    ]
-                }
+                {'match': {'field': '$msg_type',
+           'default': 'skip',
+           'cases': {1: [{'name': 'data', 'type': 'u8'}]}}}
             ]
         }
         interpreter = SchemaInterpreter(schema)
@@ -797,14 +777,9 @@ class TestMatchConditional:
         schema = {
             'fields': [
                 {'name': 'msg_type', 'type': 'u8'},
-                {
-                    'type': 'match',
-                    'on': 'msg_type',
-                    'default': 'error',
-                    'cases': [
-                        {'case': 1, 'fields': [{'name': 'data', 'type': 'u8'}]},
-                    ]
-                }
+                {'match': {'field': '$msg_type',
+           'default': 'error',
+           'cases': {1: [{'name': 'data', 'type': 'u8'}]}}}
             ]
         }
         interpreter = SchemaInterpreter(schema)
@@ -2387,21 +2362,14 @@ class TestComplexMatchDefault:
     - M129: Exactly one matching case processed
     """
     
-    def test_match_default_with_fields_legacy(self):
-        """Test legacy match with default: {fields: [...]}."""
+    def test_match_default_with_fields(self):
+        """Test match with default: [fields]."""
         schema = {
             'fields': [
                 {'name': 'msg_type', 'type': 'u8'},
-                {
-                    'type': 'match',
-                    'on': 'msg_type',
-                    'default': {'fields': [
-                        {'name': 'raw_data', 'type': 'u16'},
-                    ]},
-                    'cases': [
-                        {'case': 1, 'fields': [{'name': 'temp', 'type': 's16'}]},
-                    ]
-                }
+                {'match': {'field': '$msg_type',
+           'default': [{'name': 'raw_data', 'type': 'u16'}],
+           'cases': {1: [{'name': 'temp', 'type': 's16'}]}}}
             ]
         }
         interpreter = SchemaInterpreter(schema)
@@ -2805,13 +2773,9 @@ class TestMatchEdgeCases:
         schema = {
             'fields': [
                 {'name': 'v', 'type': 'u8'},
-                {
-                    'type': 'match', 'on': 'v',
-                    'default': 'skip',
-                    'cases': [
-                        {'case': '10..20', 'fields': [{'name': 'd', 'type': 'u8'}]},
-                    ]
-                }
+                {'match': {'field': '$v',
+           'default': 'skip',
+           'cases': {'10..20': [{'name': 'd', 'type': 'u8'}]}}}
             ]
         }
         interpreter = SchemaInterpreter(schema)
@@ -2824,13 +2788,9 @@ class TestMatchEdgeCases:
         schema = {
             'fields': [
                 {'name': 'v', 'type': 'u8'},
-                {
-                    'type': 'match', 'on': 'v',
-                    'default': 'skip',
-                    'cases': [
-                        {'case': '10..20', 'fields': [{'name': 'd', 'type': 'u8'}]},
-                    ]
-                }
+                {'match': {'field': '$v',
+           'default': 'skip',
+           'cases': {'10..20': [{'name': 'd', 'type': 'u8'}]}}}
             ]
         }
         interpreter = SchemaInterpreter(schema)
@@ -4056,12 +4016,10 @@ class TestEdgeCasesAndSecurity:
         def make_nested_match(depth):
             if depth == 0:
                 return {'name': 'leaf', 'type': 'u8'}
-            return {
-                'name': f'match_{depth}',
-                'type': 'match',
-                'on': '$type',
-                'cases': [{'case': 1, 'fields': [make_nested_match(depth-1)]}]
-            }
+            return {'match': {
+                'field': '$type',
+                'cases': {1: [make_nested_match(depth-1)]}
+            }}
         
         schema = {'fields': [
             {'name': 'type', 'type': 'u8', 'var': 'type'},
@@ -4199,10 +4157,9 @@ class TestEdgeCasesAndSecurity:
         """Match with no matching case handles gracefully."""
         schema = {'fields': [
             {'name': 'type', 'type': 'u8', 'var': 't'},
-            {'name': 'data', 'type': 'match', 'on': '$t', 'cases': [
-                {'case': 1, 'fields': [{'name': 'a', 'type': 'u8'}]},
-                {'case': 2, 'fields': [{'name': 'b', 'type': 'u8'}]},
-            ]}
+            {'match': {'field': '$t',
+           'cases': {1: [{'name': 'a', 'type': 'u8'}],
+                     2: [{'name': 'b', 'type': 'u8'}]}}}
         ]}
         interp = SchemaInterpreter(schema)
         result = interp.decode(bytes([99, 42]))  # type=99, no matching case
