@@ -8,7 +8,7 @@ import (
 )
 
 func TestDraginoLAQ4Schema(t *testing.T) {
-    laq4, err := os.ReadFile("../../schemas/devices/dragino/laq4.yaml")
+    laq4, err := os.ReadFile(repoPath(t, "schemas", "devices", "dragino", "laq4.yaml"))
     if err != nil {
         t.Fatalf("Error reading LAQ4: %v", err)
     }
@@ -37,7 +37,7 @@ func TestDraginoLAQ4Schema(t *testing.T) {
 }
 
 func TestDigitalMatterOysterS24(t *testing.T) {
-    oyster, err := os.ReadFile("../../schemas/devices/digital-matter/oyster.yaml")
+    oyster, err := os.ReadFile(repoPath(t, "schemas", "devices", "digital-matter", "oyster.yaml"))
     if err != nil {
         t.Fatalf("Error reading Oyster: %v", err)
     }

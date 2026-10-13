@@ -4,7 +4,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"os"
-	"path/filepath"
 	"reflect"
 	"testing"
 
@@ -52,7 +51,7 @@ func cr159Normalize(v any) any {
 }
 
 func TestCR159SharedCases(t *testing.T) {
-	raw, err := os.ReadFile(filepath.Join("..", "..", "tests", "cr-2026-159-cases.yaml"))
+	raw, err := os.ReadFile(repoPath(t, "tests", "cr-2026-159-cases.yaml"))
 	if err != nil {
 		t.Fatalf("read cases: %v", err)
 	}

@@ -6,7 +6,6 @@ package schema
 import (
 	"encoding/hex"
 	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -80,8 +79,7 @@ func TestCR037IntegerReportsAnIntegerAndRejectsAFraction(t *testing.T) {
 }
 
 func TestCR037TheVocabularyFixtureRoundTrips(t *testing.T) {
-	raw, err := os.ReadFile(filepath.Join("..", "..", "schemas", "devices",
-		"_language-conformance", "type-vocabulary.yaml"))
+	raw, err := os.ReadFile(repoPath(t, "schemas", "devices", "_language-conformance", "type-vocabulary.yaml"))
 	if err != nil {
 		t.Fatal(err)
 	}

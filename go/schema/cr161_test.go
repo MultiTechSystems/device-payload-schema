@@ -3,7 +3,6 @@ package schema
 import (
 	"encoding/hex"
 	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 
@@ -15,7 +14,7 @@ import (
 // tests/cr-2026-161-cases.yaml.
 
 func TestCR161SharedCases(t *testing.T) {
-	raw, err := os.ReadFile(filepath.Join("..", "..", "tests", "cr-2026-161-cases.yaml"))
+	raw, err := os.ReadFile(repoPath(t, "tests", "cr-2026-161-cases.yaml"))
 	if err != nil {
 		t.Fatalf("read cases: %v", err)
 	}
