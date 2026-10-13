@@ -57,7 +57,7 @@ class CR2026004Test {
                 fields:
                   - name: state
                     type: u8
-                    lookup: {1: "on", default: unknown}
+                    lookup: {1: 'on', default: unknown}
                 """;
         assertEquals("unknown", decode(yaml, new byte[] {9}).get("state"));
     }

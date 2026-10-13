@@ -53,7 +53,7 @@ name: with_default
 fields:
   - name: state
     type: u8
-    lookup: {1: ""on"", default: unknown}
+    lookup: {1: 'on', default: unknown}
 ";
         Assert.Equal("unknown", Decode(yaml, new byte[] { 0x09 })["state"]);
     }

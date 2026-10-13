@@ -2003,10 +2003,10 @@ improved. The Go, Java and C# corpus runners write per-vector reports only when
   with no `value` (PS-519), a non-boolean `value` such as `"true"`, `1` or `null`
   (PS-520), and a lookup or modifier on it (PS-358) are refused at load by all four, the
   validator and the TS013 generator. `tools/schema_binary.py` refuses it for C (PS-446)
-  and the C harness files it as a C gap. **YAML 1.1 `yes`/`on` is deliberately not
-  detected**: PyYAML and SnakeYAML hand the check a boolean for it, C# (YAML 1.2) a string
-  it rejects, and PS-520 permits both, so no shared vector may use one. Fixture:
-  `boolean-literal.yaml`.
+  and the C harness files it as a C gap. **A YAML 1.1 `yes`/`on` was not detected
+  here, and is now (CR-2026-164, PS-575, below)**: PyYAML and SnakeYAML hand the check a
+  boolean for it, C# (YAML 1.2) a string it rejects, so the loader refuses the text first
+  and no vector can use one. Fixture: `boolean-literal.yaml`.
 - **CR-2026-102: `ipso` and `senml` are mappings** (PS-510). `ipso` must be a mapping
   carrying `object`, `senml` a mapping; `ipso: 3303` is not a shorthand and is refused at
   load, with the spec prototype's wording, identical everywhere: `The ipso of '{name}' is a
@@ -3131,6 +3131,37 @@ improved. The Go, Java and C# corpus runners write per-vector reports only when
   - **Cases:** `tests/cr-2026-161-cases.yaml` (the prototype's `TestCR2026161MetaReports`, 16),
     read by `test_cr_2026_161_cases.py`, Go `cr161_test.go`, Java `CR2026161Test`, C#
     `CR2026_161Tests`. No corpus vector changes, so no floor moves.
+
+- **CR-2026-164 (PS-575; la-payload-schema `cr/0.5.6-apply-164`, for 0.5.6): a plain YAML 1.1
+  boolean scalar is rejected where YAML text is loaded.** A plain (unquoted) scalar whose text
+  is exactly `yes`, `no`, `on` or `off` in the spellings lower, Capitalised and UPPER is
+  refused, since YAML 1.1 loaders read it as a boolean and YAML 1.2 ones as a string. `y`, `Y`,
+  `n` and `N` are not in the list (fields called `y` and `n` stay valid), and a quoted value,
+  `true`/`false`, a longer plain string containing one, a comment and a block scalar's text
+  are all accepted. The text is the prototype's: `Line 4: the unquoted value 'on' is a boolean
+  in YAML 1.1 and a string in YAML 1.2; quote it ("on") or write true or false (PS-575)`,
+  1-based line, the first one in the document.
+  - **Detected from the raw YAML before anything is constructed**, so the loaders agree:
+    Python `check_yaml_booleans` in `tools/schema_interpreter.py` (`yaml.parse` events,
+    `ScalarEvent.style is None`; raises `YamlBooleanError`), called by the interpreter CLI,
+    `validate_schema.load_schema_text`, the TS013 generator's `load_schema` and
+    `schema_binary.py`'s `encode`/`info`; Go `checkYAMLBooleans` in `go/schema/cr164.go`
+    (`yaml.Node`, `Kind == ScalarNode`, `Style == 0`), the first thing `ParseSchema` does;
+    Java `Schema.checkYamlBooleans` (SnakeYAML events, `ScalarStyle.PLAIN`), first in
+    `fromYaml`; C# `SchemaParser.CheckYamlBooleans` in `Cr164.cs` (`YamlScalarNode.Style ==
+    ScalarStyle.Plain`, over the loaded model, first violation by line), first in `Parse`.
+    Mapping keys are scalars too and are checked. Text that is not well-formed YAML is left to
+    the loader that follows.
+  - **Not checked: a schema handed over as a built mapping** (`SchemaInterpreter(dict)`,
+    `Schema({...})`, a YAML tree in Java or C# already parsed) - there is no text, and a
+    YAML 1.1 loader has already turned `on` into `True`. **C has no YAML reader**, so the
+    rule does not apply to it (`schema_binary.py`, which feeds C, refuses the YAML first).
+  - **Measured before:** no file in `schemas/devices`, `schemas/library`, `examples` or
+    `tests` (414 YAML files) holds one, so no vector or floor moves.
+  - **Cases:** `tests/cr-2026-164-cases.yaml` (six rejections, six accepted including
+    `name: y` / `name: n`), read by `tests/test_cr_2026_164_yaml_booleans.py` (reference,
+    validator, generator, converter and the CLIs), Go `cr164_test.go`, Java `CR2026164Test`
+    and C# `CR2026_164Tests`.
 
 ## Converting a vendor codec
 

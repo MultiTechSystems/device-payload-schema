@@ -947,6 +947,11 @@ func findFieldNodes(root *yaml.Node, path ...string) []*yaml.Node {
 
 // ParseSchema parses a schema from YAML or JSON string.
 func ParseSchema(data string) (*Schema, error) {
+	// CR-2026-164 (PS-575): a plain YAML 1.1 boolean scalar, found in the node tree before
+	// any value is constructed.
+	if err := checkYAMLBooleans(data); err != nil {
+		return nil, err
+	}
 	// First parse raw to handle TLV cases (which use map instead of array)
 	var raw map[string]any
 	if err := yaml.Unmarshal([]byte(data), &raw); err != nil {

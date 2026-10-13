@@ -1,0 +1,148 @@
+# CR-2026-164 (PS-575): a schema loaded from YAML text holds no plain (unquoted) scalar that
+# YAML 1.1 reads as a boolean and YAML 1.2 as a string.
+#
+# The twelve spellings of yes, no, on and off are refused, found in the raw YAML (events,
+# nodes) before any value is constructed, in the spec prototype's text, with a 1-based line.
+# A quoted value, `true` and `false`, a longer plain string that merely contains one, and
+# the field names `y` and `n` (which common YAML 1.1 loaders read as text) are accepted. A
+# schema handed over as an already-built mapping is not checked, so this is a text-loading
+# rule: it cannot be a corpus vector, which is why it is here.
+#
+# One case list, read by the reference (tests/test_cr_2026_164_yaml_booleans.py, which also
+# runs the validator, the TS013 generator and the binary converter for C over it), Go
+# (go/schema/cr164_test.go), Java (CR2026164Test.java) and C# (CR2026_164Tests.cs). C has no
+# YAML reader, so the rule does not apply to it.
+#
+# Each case gives `schema` (YAML text) and either `error` - the whole message - or `payload`
+# (hex) and `expected` (JSON text): the schema loads, decodes the payload to exactly that
+# object and re-encodes it to the payload.
+
+cases:
+
+# --- Rejected -------------------------------------------------------------------------
+
+- name: on_in_a_flow_lookup
+  schema: |
+    name: t
+    version: 1
+    fields:
+      - {name: s, type: u8, lookup: [on, x]}
+  error: "Line 4: the unquoted value 'on' is a boolean in YAML 1.1 and a string in YAML 1.2; quote it (\"on\") or write true or false (PS-575)"
+
+- name: Off_capitalised
+  schema: |
+    name: t
+    version: 1
+    fields:
+      - {name: s, type: u8, lookup: [Off, x]}
+  error: "Line 4: the unquoted value 'Off' is a boolean in YAML 1.1 and a string in YAML 1.2; quote it (\"Off\") or write true or false (PS-575)"
+
+- name: YES_upper_case
+  schema: |
+    name: t
+    version: 1
+    fields:
+      - {name: s, type: u8, lookup: [YES, x]}
+  error: "Line 4: the unquoted value 'YES' is a boolean in YAML 1.1 and a string in YAML 1.2; quote it (\"YES\") or write true or false (PS-575)"
+
+- name: no_in_a_block_lookup
+  schema: |
+    name: t
+    version: 1
+    fields:
+      - name: s
+        type: u8
+        lookup:
+          - x
+          - no
+  error: "Line 8: the unquoted value 'no' is a boolean in YAML 1.1 and a string in YAML 1.2; quote it (\"no\") or write true or false (PS-575)"
+
+- name: a_plain_mapping_key
+  schema: |
+    name: t
+    version: 1
+    fields:
+      - name: s
+        type: u8
+        lookup: {0: a, on: b}
+  error: "Line 6: the unquoted value 'on' is a boolean in YAML 1.1 and a string in YAML 1.2; quote it (\"on\") or write true or false (PS-575)"
+
+- name: a_plain_value_of_a_key
+  schema: |
+    name: t
+    version: 1
+    description: off
+    fields:
+      - {name: s, type: u8}
+  error: "Line 3: the unquoted value 'off' is a boolean in YAML 1.1 and a string in YAML 1.2; quote it (\"off\") or write true or false (PS-575)"
+
+- name: the_first_one_is_named
+  schema: |
+    name: t
+    version: 1
+    fields:
+      - {name: s, type: u8, lookup: [No, ON]}
+  error: "Line 4: the unquoted value 'No' is a boolean in YAML 1.1 and a string in YAML 1.2; quote it (\"No\") or write true or false (PS-575)"
+
+# --- Accepted -------------------------------------------------------------------------
+
+- name: fields_named_y_and_n
+  schema: |
+    name: t
+    version: 1
+    fields:
+      - {name: y, type: s16}
+      - {name: n, type: u8}
+  payload: "fffe05"
+  expected: '{"y": -2, "n": 5}'
+
+- name: fields_named_Y_and_N
+  schema: |
+    name: t
+    version: 1
+    fields:
+      - {name: Y, type: u8}
+      - {name: N, type: u8}
+  payload: "0102"
+  expected: '{"Y": 1, "N": 2}'
+
+- name: quoted_values
+  schema: |
+    name: t
+    version: 1
+    fields:
+      - {name: s, type: u8, lookup: ["on", 'off']}
+  payload: "01"
+  expected: '{"s": "off"}'
+
+- name: true_and_false
+  schema: |
+    name: t
+    version: 1
+    fields:
+      - {name: b, type: u8, lookup: [true, false]}
+  payload: "01"
+  expected: '{"b": false}'
+
+- name: a_longer_plain_string_that_contains_one
+  schema: |
+    name: t
+    version: 1
+    description: turn on the lights, yes or no
+    fields:
+      - {name: s, type: u8, lookup: [on and off, x]}
+  payload: "00"
+  expected: '{"s": "on and off"}'
+
+- name: one_in_a_comment_and_in_a_block_scalar
+  schema: |
+    # on, off, yes, no
+    name: t
+    version: 1
+    description: |
+      on
+      off
+    fields:
+      - {name: v, type: u8}
+  payload: "07"
+  expected: '{"v": 7}'

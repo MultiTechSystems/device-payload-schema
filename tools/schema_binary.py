@@ -828,6 +828,18 @@ def dump_binary(data: bytes) -> str:
     return '\n'.join(lines)
 
 
+def _load_yaml_checked(path: Path):
+    """Read a schema's YAML text; PS-575 refuses a plain YAML 1.1 boolean first."""
+    from schema_interpreter import YamlBooleanError, check_yaml_booleans
+    text = path.read_text()
+    try:
+        check_yaml_booleans(text)
+    except YamlBooleanError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        sys.exit(1)
+    return yaml.safe_load(text)
+
+
 def main():
     parser = argparse.ArgumentParser(description='Binary schema encoder/decoder')
     subparsers = parser.add_subparsers(dest='command', required=True)
@@ -861,7 +873,7 @@ def main():
         sys.exit(1)
     
     if args.command == 'encode':
-        schema = yaml.safe_load(args.input.read_text())
+        schema = _load_yaml_checked(args.input)
         try:
             binary = encode_schema(schema, names=not args.no_names)
         except UnrepresentableSchemaError as exc:
@@ -903,7 +915,7 @@ def main():
         print(dump_binary(binary))
     
     elif args.command == 'info':
-        schema = yaml.safe_load(args.input.read_text())
+        schema = _load_yaml_checked(args.input)
         try:
             binary = encode_schema(schema)
         except UnrepresentableSchemaError as exc:

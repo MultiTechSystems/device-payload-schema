@@ -374,7 +374,7 @@ fields:
     type: u8
   - name: data
     type: match
-    on: $msg_type
+    "on": $msg_type
     cases:
       - case: 1
         fields:
@@ -1973,8 +1973,8 @@ fields:
     type: enum
     base: u8
     values:
-      0: off
-      1: on
+      0: 'off'
+      1: 'on'
 `
 	schema, err := ParseSchema(schemaYAML)
 	if err != nil {
@@ -2577,7 +2577,7 @@ fields:
     type: enum
     base: u8
     values:
-      0: off
+      0: 'off'
       1: low
       2: medium
       3: high
@@ -2933,7 +2933,7 @@ fields:
     var: type
   - name: data
     type: match
-    on: $type
+    "on": $type
     cases:
       - case: 1
         fields:
@@ -3691,7 +3691,7 @@ name: match_var_not_found_test
 fields:
   - name: data
     type: match
-    on: $nonexistent
+    "on": $nonexistent
     cases:
       - case: 1
         fields:
@@ -3923,7 +3923,7 @@ fields:
     var: v
   - name: category
     type: match
-    on: $v
+    "on": $v
     cases:
       - case:
           min: 0
@@ -3973,7 +3973,7 @@ fields:
     var: c
   - name: result
     type: match
-    on: $c
+    "on": $c
     cases:
       - case: [1, 2, 3]
         fields:
@@ -5158,7 +5158,7 @@ fields:
     var: t1
   - name: outer
     type: match
-    on: $t1
+    "on": $t1
     cases:
       - case: 1
         fields:
@@ -5167,7 +5167,7 @@ fields:
             var: t2
           - name: inner
             type: match
-            on: $t2
+            "on": $t2
             cases:
               - case: 1
                 fields:
@@ -5893,7 +5893,7 @@ fields:
     var: t
   - name: data
     type: match
-    on: $t
+    "on": $t
     cases:
       - case: 1
         fields:
@@ -6332,7 +6332,7 @@ fields:
     var: t
   - name: data
     type: match
-    on: $t
+    "on": $t
     cases:
       - case: 1
         fields:
@@ -6423,7 +6423,7 @@ fields:
     var: h
   - name: payload_type
     type: match
-    on: $h
+    "on": $h
     cases:
       - case: 1
         fields:
@@ -6754,7 +6754,7 @@ fields:
     var: t
   - name: data
     type: match
-    on: $t
+    "on": $t
     cases:
       - case: 1
         fields:

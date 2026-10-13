@@ -9484,6 +9484,35 @@ def encode_payload(schema: Dict[str, Any], data: Dict[str, Any]) -> bytes:
     return result.payload
 
 
+#: Plain scalars that YAML 1.1 loaders read as booleans and YAML 1.2 loaders as strings
+#: (PS-575, CR-2026-164). `y` and `n` are not here: common loaders read them as text, and
+#: they are field names (an accelerometer's `y` axis).
+YAML11_BOOLEANS = frozenset(
+    ['yes', 'Yes', 'YES', 'no', 'No', 'NO', 'on', 'On', 'ON', 'off', 'Off', 'OFF'])
+
+
+class YamlBooleanError(ValueError):
+    """A schema's YAML text holds a plain scalar the two YAML versions read differently."""
+
+
+def check_yaml_booleans(content: str) -> None:
+    """PS-575: reject a plain (unquoted) scalar whose text is a YAML 1.1 boolean, found in
+    the event stream before any value is constructed, so a YAML 1.1 and a YAML 1.2 loader
+    agree. Applies where YAML text is loaded; a mapping already built is not checked."""
+    import yaml
+    try:
+        for event in yaml.parse(content):
+            if (isinstance(event, yaml.ScalarEvent) and event.style is None
+                    and event.value in YAML11_BOOLEANS):
+                raise YamlBooleanError(
+                    f"Line {event.start_mark.line + 1}: the unquoted value '{event.value}' "
+                    f"is a boolean in YAML 1.1 and a string in YAML 1.2; quote it "
+                    f"(\"{event.value}\") or write true or false (PS-575)")
+    except yaml.YAMLError:
+        # Not well-formed YAML: the loader that follows reports it.
+        return
+
+
 def _cli(argv: List[str]) -> int:
     """``decode <schema.yaml> <hex> [--fport N]``: print the result as JSON.
 
@@ -9507,7 +9536,13 @@ def _cli(argv: List[str]) -> int:
     args = parser.parse_args(argv)
 
     with open(args.schema, encoding='utf-8') as handle:
-        schema = yaml.safe_load(handle)
+        text = handle.read()
+    try:
+        check_yaml_booleans(text)
+    except YamlBooleanError as exc:
+        print(f'Error: {exc}', file=sys.stderr)
+        return 1
+    schema = yaml.safe_load(text)
     payload = bytes.fromhex(args.payload.replace(' ', ''))
     result = SchemaInterpreter(schema).decode(payload, fPort=args.fport)
     print(json.dumps({

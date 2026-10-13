@@ -176,7 +176,7 @@ func TestEncodeWritesABitRangeField(t *testing.T) {
 	// name; encoding had no equivalent of decodeField's pre-switch check and wrote
 	// nothing. One byte of the value, as the reference interpreter writes it.
 	source := "name: t\nendian: big\nfields:\n" +
-		"  - name: flag\n    type: u8[0:0]\n    lookup: [off, on]\n"
+		"  - name: flag\n    type: u8[0:0]\n    lookup: ['off', 'on']\n"
 
 	got, err := encodeHex(t, source, map[string]any{"flag": "on"})
 	if err != nil {

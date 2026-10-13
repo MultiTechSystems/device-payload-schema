@@ -5536,10 +5536,16 @@ def fix_yaml_booleans(obj):
     return obj
 
 
+def check_yaml_booleans(text: str) -> None:
+    from schema_interpreter import check_yaml_booleans as check
+    check(text)
+
+
 def load_schema(path: Path) -> Dict[str, Any]:
     with open(path) as f:
-        schema = yaml.safe_load(f)
-    return fix_yaml_booleans(schema)
+        text = f.read()
+    check_yaml_booleans(text)  # PS-575
+    return fix_yaml_booleans(yaml.safe_load(text))
 
 
 def main():

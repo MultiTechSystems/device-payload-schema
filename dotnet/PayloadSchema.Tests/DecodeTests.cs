@@ -335,7 +335,7 @@ fields:
     type: u8
     var: msg_type
   - type: match
-    on: $msg_type
+    'on': $msg_type
     cases:
       - case: 1
         fields:

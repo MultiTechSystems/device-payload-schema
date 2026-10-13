@@ -71,7 +71,34 @@ public class Schema {
     public Map<String, PortDef> getPorts() { return ports; }
     public void setPorts(Map<String, PortDef> ports) { this.ports = ports; }
 
+    /** Plain scalars that YAML 1.1 reads as booleans and YAML 1.2 as strings (PS-575). */
+    private static final Set<String> YAML11_BOOLEANS = Set.of(
+        "yes", "Yes", "YES", "no", "No", "NO", "on", "On", "ON", "off", "Off", "OFF");
+
+    /**
+     * CR-2026-164 (PS-575): reject a plain (unquoted) scalar whose text is a YAML 1.1 boolean,
+     * found in the event stream before any value is constructed. {@code y} and {@code n} are
+     * field names and stay valid. Text that is not well-formed YAML is left to the loader.
+     */
+    static void checkYamlBooleans(String yamlContent) {
+        try {
+            for (org.yaml.snakeyaml.events.Event event : new Yaml().parse(new StringReader(yamlContent))) {
+                if (event instanceof org.yaml.snakeyaml.events.ScalarEvent scalar
+                        && scalar.getScalarStyle() == org.yaml.snakeyaml.DumperOptions.ScalarStyle.PLAIN
+                        && YAML11_BOOLEANS.contains(scalar.getValue())) {
+                    throw new SchemaException("Line " + (scalar.getStartMark().getLine() + 1)
+                        + ": the unquoted value '" + scalar.getValue() + "' is a boolean in YAML 1.1"
+                        + " and a string in YAML 1.2; quote it (\"" + scalar.getValue()
+                        + "\") or write true or false (PS-575)");
+                }
+            }
+        } catch (org.yaml.snakeyaml.error.YAMLException e) {
+            // Not well-formed YAML: the loader that follows reports it.
+        }
+    }
+
     public static Schema fromYaml(String yamlContent) {
+        checkYamlBooleans(yamlContent);
         Yaml yaml = new Yaml();
         Map<String, Object> raw = yaml.load(yamlContent);
         return parseRaw(raw);

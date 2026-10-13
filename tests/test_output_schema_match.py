@@ -160,7 +160,7 @@ class TestLegacySyntax:
         schema = yaml.safe_load(
             "name: t\nendian: big\nfields:\n"
             "  - name: kind\n    type: u8\n"
-            "  - name: body\n    type: match\n    on: kind\n"
+            "  - name: body\n    type: match\n    'on': kind\n"
             "    cases:\n"
             "      - case: 1\n        fields: [{name: a, type: u8}]\n"
             "      - case: 2\n        fields: [{name: b, type: u8}]\n"
@@ -171,7 +171,7 @@ class TestLegacySyntax:
         schema = yaml.safe_load(
             "name: t\nendian: big\nfields:\n"
             "  - name: kind\n    type: u8\n"
-            "  - name: body\n    type: match\n    on: kind\n"
+            "  - name: body\n    type: match\n    'on': kind\n"
             "    cases:\n"
             "      - case: 1\n        fields: [{name: a, type: u8}]\n"
             "    default: [{name: fallback, type: u8}]\n"
@@ -183,7 +183,7 @@ class TestLegacySyntax:
         schema = yaml.safe_load(
             "name: t\nendian: big\nfields:\n"
             "  - name: kind\n    type: u8\n"
-            "  - name: body\n    type: match\n    on: kind\n"
+            "  - name: body\n    type: match\n    'on': kind\n"
             "    cases:\n"
             "      - case: 1\n        fields: [{name: a, type: u8}]\n"
         )

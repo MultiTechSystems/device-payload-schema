@@ -45,7 +45,7 @@ public class CR2026_111Tests
     public void AMappingMissIsNullToo()
     {
         var output = SchemaDecoder.Decode(Parse(
-            "  - name: v\n    type: repeat\n    count: 2\n    element: {type: u8, lookup: {1: on}}\n"),
+            "  - name: v\n    type: repeat\n    count: 2\n    element: {type: u8, lookup: {1: 'on'}}\n"),
             Convert.FromHexString("0102"));
         Assert.Equal(new object?[] { "on", null }, Values(output, "v"));
     }
