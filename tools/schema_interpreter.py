@@ -2950,6 +2950,7 @@ def schema_iterator_errors(schema):
     errors = field_name_errors(schema)
     errors.extend(withdrawn_errors(schema))                          # CR-2026-159
     errors.extend(numeral_errors(schema))                            # PS-560
+    errors.extend(lookup_type_errors(schema))                        # PS-571
     errors.extend(iterator_errors(schema.get('fields')))
     errors.extend(ipso_instance_errors(schema))                      # PS-548
     for port, entry in (schema.get('ports') or {}).items():
@@ -3486,7 +3487,8 @@ def meta_declarations(fields):
                 label = match.get('name')
                 if isinstance(label, str) and not label.startswith('_'):
                     found.setdefault(label, {'name': label,
-                                             'type': 'u%d' % (8 * int(match.get('length', 1)))})
+                                             'type': 'u%d' % (8 * int(match.get('length', 1))),
+                                             '_reports': 'integer'})         # PS-570
             if f.get('type') == 'match' and isinstance(f.get('cases'), dict):
                 for body in f['cases'].values():
                     if isinstance(body, list):
@@ -3590,6 +3592,97 @@ def meta_reference(value, repeat=None, bare=False, siblings=None):
     return listing
 
 
+def lookup_labels(lookup):
+    """A lookup's labels, and its `default` where that is not a `${value}` template."""
+    if isinstance(lookup, (list, tuple)):
+        return list(lookup)
+    if isinstance(lookup, dict):
+        return [v for k, v in lookup.items()
+                if not (k == 'default' and isinstance(v, str) and LOOKUP_VALUE_TOKEN in v)]
+    return []
+
+
+def json_kind(value):
+    """The JSON type of a lookup label: boolean, integer, number or string."""
+    if isinstance(value, bool):
+        return 'boolean'
+    if isinstance(value, int):
+        return 'integer'
+    if isinstance(value, float):
+        return 'integer' if value.is_integer() else 'number'
+    return 'string'
+
+
+_REPORTS_FLOATS = ('number', 'f16', 'bf16', 'f32', 'f64', 'f32le16', 'f32be16le', 'uflt16',
+                   'sflt16', 'sflt24', 'udec', 'sdec')
+
+
+def reports_of(field_def):
+    """PS-570: the JSON type PS-279 selects for a field's reported value, from the schema
+    alone (the spec prototype's reports_of). A lookup is the last step (PS-443), so a field
+    with one reports its labels' type whatever precedes it; a `${value}` default reports a
+    string. None where nothing declares one."""
+    if '_reports' in field_def:                       # a match discriminator or `channels`
+        return field_def['_reports']
+    lookup = field_def.get('lookup')
+    if lookup is not None:
+        if lookup_template(lookup) is not None:
+            return 'string'
+        kinds = {json_kind(v) for v in lookup_labels(lookup)}
+        if kinds == {'integer', 'number'}:
+            return 'number'
+        return next(iter(kinds)) if len(kinds) == 1 else None
+    if isinstance(field_def.get('tlv'), dict) and not field_def.get('type'):
+        return 'array'                                # `channels` of a merge: false tlv
+    t = str(field_def.get('type', '')).lower()
+    if t == 'repeat':
+        return 'array'
+    if t == 'object':
+        return 'object'
+    if t in ('string', 'number', 'boolean') and 'value' in field_def:          # a literal
+        return t
+    if t == 'bytes' and field_def.get('format') == 'array':
+        return 'array'
+    if t in ('bool', 'boolean'):
+        return 'boolean'
+    if t == 'ascii':
+        return 'integer' if field_def.get('numeral') else 'string'
+    if t in ('string', 'bitfield_string', 'enum', 'bytes', 'hex', 'base64'):
+        return 'string'
+    if any(k in field_def for k in ('mult', 'div', 'add', 'polynomial', 'transform')):
+        return 'number'
+    if t == 'integer':
+        return 'integer'
+    if t in _REPORTS_FLOATS:
+        return 'number'
+    if _BIT_RANGE.match(t) or t in INTEGER_TYPE_INFO:
+        return 'integer'
+    return None
+
+
+def lookup_type_errors(node, _top=True):
+    """PS-571: every label of one lookup, and a `default` that is not a `${value}` template,
+    is of one JSON type (integers and other numbers are one type, number)."""
+    errors = []
+    if isinstance(node, list):
+        for item in node:
+            errors.extend(lookup_type_errors(item, False))
+    elif isinstance(node, dict):
+        if 'lookup' in node and 'type' in node:
+            kinds = {('number' if k == 'integer' else k)
+                     for k in map(json_kind, lookup_labels(node['lookup']))}
+            if len(kinds) > 1:
+                errors.append(f"Field '{node.get('name')}': its lookup mixes "
+                              f"{', '.join(sorted(kinds))} labels; a lookup's labels are of "
+                              f"one type (PS-571)")
+        for key, value in node.items():
+            if _top and key == 'test_vectors':
+                continue
+            if isinstance(value, (list, dict)):
+                errors.extend(lookup_type_errors(value, False))
+    return errors
+
+
 def field_meta(field_def, repeat=None, siblings=None):
     """One `_meta.fields` entry, derived from one declaration (PS-178, PS-493, PS-480,
     PS-371, PS-481). `repeat` is the repeat whose elements the field belongs to, for the
@@ -3599,6 +3692,9 @@ def field_meta(field_def, repeat=None, siblings=None):
     declared_type = meta_type(field_def)
     if declared_type is not None:
         entry['type'] = declared_type
+    reports = reports_of(field_def)
+    if reports is not None:
+        entry['reports'] = reports                                       # PS-570
     senml = field_def.get('senml') if isinstance(field_def.get('senml'), dict) else {}
     unit = senml.get('unit') or field_def.get('unit')          # PS-178, no conversion
     if unit is not None:

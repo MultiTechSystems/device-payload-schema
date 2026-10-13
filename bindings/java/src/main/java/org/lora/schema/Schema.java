@@ -118,6 +118,8 @@ public class Schema {
         FieldNames.check(raw);
         // CR-2026-156: `sampled` only on a repeat, with a usable interval, order and anchor (PS-569).
         Sampled.check(raw);
+        // CR-2026-161: a lookup's labels are of one type (PS-571).
+        Reports.check(raw);
         Schema schema = new Schema();
         schema.repeatOnlyNames = Wave6a.repeatOnlyNames(raw);
         schema.metaName = raw.get("name");

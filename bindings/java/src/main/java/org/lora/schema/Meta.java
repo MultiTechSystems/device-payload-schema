@@ -107,6 +107,7 @@ final class Meta {
                         pseudo.put("name", label);
                         pseudo.put("type", "u" + (8 * pyInt(match.containsKey("length")
                                 ? match.get("length") : 1)));
+                        pseudo.put("_reports", "integer");                       // PS-570
                         found.put(label, pseudo);
                     }
                 }
@@ -237,6 +238,8 @@ final class Meta {
         Map<String, Object> entry = new LinkedHashMap<>();
         String declaredType = metaType(fieldDef);
         if (declaredType != null) entry.put("type", declaredType);
+        String reports = Reports.of(fieldDef);
+        if (reports != null) entry.put("reports", reports);                               // PS-570
         Map<?, ?> senml = fieldDef.get("senml") instanceof Map<?, ?> s ? s : Map.of();
         Object unit = truthy(senml.get("unit")) ? senml.get("unit") : fieldDef.get("unit");
         if (unit != null) entry.put("unit", reference(unit, repeat, false, siblings));   // PS-178

@@ -46,10 +46,12 @@ test_vectors:
     fields:
       probes:
         type: repeat
+        reports: array
         elements:
-          unit_code: {type: u8}
+          unit_code: {type: u8, reports: string}
           reading:
             type: s16
+            reports: number
             unit: {field: unit_code, values: [Cel, "%RH"]}
             ipso: {object: 3303, instance: {index: i, count: 2}, resource: 5700}
             senml: {name: "probe_${i}"}

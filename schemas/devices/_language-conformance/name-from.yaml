@@ -17,5 +17,5 @@ test_vectors:
   expected_meta:
     schema: probe_name_from
     fields:
-      idx: {type: u8}
-      channel_3_reading: {type: u8}
+      idx: {type: u8, reports: integer}
+      channel_3_reading: {type: u8, reports: integer}

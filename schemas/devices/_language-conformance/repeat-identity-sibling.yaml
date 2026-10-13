@@ -40,17 +40,19 @@ test_vectors:
   expected_meta:
     schema: probe_repeat_identity_sibling
     fields:
-      n: {type: u8}
+      n: {type: u8, reports: integer}
       codes:
         type: repeat
-        element: {type: u8}
+        reports: array
+        element: {type: u8, reports: string}
       readings:
         type: repeat
+        reports: array
         identity:
           repeat: codes
           values: ["1.8.1", "2.8.1", "${value}"]
           open: true
-        element: {type: u32}
+        element: {type: u32, reports: integer}
 - name: unlabelled_code
   source: spec-example
   payload: "01 09 00000005"
