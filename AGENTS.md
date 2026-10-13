@@ -2980,6 +2980,22 @@ improved. The Go, Java and C# corpus runners write per-vector reports only when
     `test_cr_2026_159_withdrawals.py` (interpreter, validator, generator, binary converter),
     Go `cr159_test.go`, Java `CR2026159Test`, C# `CR2026_159Tests`.
 
+- **CR-2026-160 (PS-059; la-payload-schema branch `cr/0.5.6-apply-158-162`, for 0.5.6): a bit
+  range's base is any multiple of 8 from 8 to 64, and the wide widths are bases only.** `u40`,
+  `u48`, `u56` and `s40`, `s48`, `s56` are valid as `uN[a:b]`/`sN[a:b]`, a non-consuming one
+  included (Dragino lse01-121 reads bit 7 of its seventh byte with `u56[7:7]`, `consume: 0`),
+  and are not field types of PS-052: a standalone `type: u56` is an unknown type.
+  - **Measured before any change: every path already behaved so.** Python, Go (whose bit-range
+    pattern gained 40/48/56 in #142 without its type table following), Java, C#, the TS013
+    generator, the validator and C's `schema_binary.py` all rejected a standalone wide type and
+    all read a wide range; this change is the cases and this entry. The error text is each
+    implementation's existing unknown-type message, not one string: the shared cases match on
+    the type's name, as the prototype's test does.
+  - **Cases:** `tests/cr-2026-160-cases.yaml` (the prototype's `TestCR2026160WideBitRangeBases`
+    case for case, plus a u40 and a signed s48 range), read by `test_cr_2026_160_cases.py`
+    (reference, validator, generator and `encode_schema`), Go `cr160_test.go`, Java
+    `CR2026160Test`, C# `CR2026_160Tests`. They are not corpus vectors, so no floor moves.
+
 ## Converting a vendor codec
 
 The converters in `tools/` (`convert_decentlab.py`, `convert_milesight.py`) do the
