@@ -881,9 +881,11 @@ function encFlagged(out, fg, data, ctx) {             // _encode_flagged
   // CR-2026-136: the given groups' members are one field list, laid out as a decoder
   // reads them (a bool or bit range is its bits of a shared byte; an object is encoded).
   var groups = fg.groups || [], members = [];
+  var recorded = encRecordedFlags(fg, ctx);           // PS-573: the groups its flags set
   for (var i = 0; i < groups.length; i++) {
     var gfs = groups[i].fields || [];
-    if (!encGroupGiven(groups[i], data)) continue;
+    if (recorded !== null ? !(Math.floor(recorded / Math.pow(2, groups[i].bit || 0)) % 2)
+                          : !encGroupGiven(groups[i], data)) continue;
     if (gfs.some(function (g) { return g && typeof g === "object" && !g.name; })) {
       // A construct in the group (a nested flagged block, a byte_group): all of it.
       gfs.forEach(function (g) { if (g && typeof g === "object") members.push(g); });
@@ -1033,7 +1035,7 @@ function encParseInt0(text) {                         // int(text, 0)
   return neg ? -n : n;
 }
 
-function encMatch(out, f, data, ctx, peeked) {        // _encode_match
+function encMatch(out, f, data, ctx, peeked, siblings) {   // _encode_match
   var m = f.match || {}, cases = m.cases || {}, length = m.length;
   var dflt = m["default"] === undefined ? "error" : m["default"];
   var disc = null;
@@ -1050,10 +1052,29 @@ function encMatch(out, f, data, ctx, peeked) {        // _encode_match
     }
   }
   var key = null, body = null;
+  // PS-573: where the input gives no discriminator, the decode record's is written and its
+  // case taken - before any derivation, which PS-574 makes the fallback.
+  var given = disc !== null && disc !== undefined;
+  if (m.field && ctx.rec && ctx.rec.supplied[String(m.field).replace(/^\$+/, "")]) given = false;
+  var record = encRecorded(ctx, "matches", m);
+  if (record === null || typeof record !== "object" || Array.isArray(record)) record = undefined;
+  var recordedKey;
+  if (!given && record !== undefined) {
+    if (m.remaining === true) recordedKey = encRecordedCase(m, record["case"]);
+    else if (disc === null || disc === undefined) disc = record.value;
+  }
   if (length !== undefined && length !== null && typeof disc === "number" && isFinite(disc) &&
       !Number.isInteger(disc)) {                      // check_written_discriminator (PS-557)
     encFail("Field " + (m.name ? "'" + m.name + "'" : "an unnamed match") + ": the discriminator " +
             String(disc) + " is not an integer, so it cannot be written (PS-557)");
+  }
+  if (length !== undefined && length !== null && typeof disc === "number" && isFinite(disc)) {
+    // PS-168, before a case is looked for, as the spec prototype checks it.
+    encFits(encRint(disc), parseInt(length, 10) * 8, false, { name: m.name || m["var"] || "match" }, disc);
+  }
+  if (recordedKey !== undefined) {
+    if (recordedKey !== "default") { key = recordedKey; body = cases[recordedKey]; }
+    else body = encDefaultBody(m) || [];
   }
   if (disc !== null && disc !== undefined) {
     var ordered = encCaseKeys(m);
@@ -1063,6 +1084,7 @@ function encMatch(out, f, data, ctx, peeked) {        // _encode_match
       if (encCasePattern(disc, k)) { key = k; body = cases[k]; break; }
     }
   }
+  if (record !== undefined && !given) encCheckRecordedCase(m, key, data, encDeclaredBeside(f, siblings));   // PS-573
   if (body === null && (disc === null || disc === undefined)) {
     // PS-563: by score only where no discriminator is given; a given one matching no
     // case takes the default or is rejected (PS-565).
@@ -1097,15 +1119,15 @@ function encMatch(out, f, data, ctx, peeked) {        // _encode_match
   if (body === null) {
     if (Array.isArray(dflt)) body = dflt;
     else if (Array.isArray(cases["default"])) body = cases["default"];
-    else if (inline && !known) encFail(encMissing(label));   // PS-551, PS-442, named by the discriminator
+    else if (inline && !known) encFail(encMissing(label) + " (PS-574)");   // PS-551, PS-442, named by the discriminator
     else if (dflt === "skip") body = [];
     else if (known) encFail("No matching case for value " + String(disc));   // PS-442
-    else encFail(encMissing(m.name || m["var"] || String(m.field || "match").replace(/^\$+/, "")));
+    else encFail(encMissing(m.name || m["var"] || String(m.field || "match").replace(/^\$+/, "")) + " (PS-574)");
   }
   if (inline) {
     var value = disc;
     if (!known) {
-      if (key === null) encFail(encMissing(label));
+      if (key === null) encFail(encMissing(label) + " (PS-574)");
       value = encExactCase(key);
       if (value === null) encFail("match case " + JSON.stringify(key) + " names no single discriminator value");
     }
@@ -1250,7 +1272,8 @@ function encRepeatElementsBody(out, f, data, records, count, ctx) {
     if (rec === null || typeof rec !== "object" || Array.isArray(rec)) encFail("repeat field " + JSON.stringify(name) + ": expected each record to be a mapping");
     if (f.index) { var copy = {}; for (var k in rec) copy[k] = rec[k]; copy[f.index] = i + (f.index_base || 0); rec = copy; }
     var element = [];
-    encList(element, rf, rec, ctx);
+    var pushed = encPush(ctx, f.__ptr, "repeat", i);  // PS-572: the element's position
+    try { encList(element, rf, rec, ctx); } finally { encPop(ctx, pushed); }
     encCheckPeeks(element);           // PS-551: an element's bytes close with it
     for (var eb = 0; eb < element.length; eb++) out.push(element[eb]);
   }
@@ -1653,10 +1676,11 @@ function encTlvBody(out, f, data, ctx) {
   });
   // Payload order, so a payload round-trips; entries of one name keep the order taken.
   written.sort(function (a, b) { return a.p - b.p || a.seq - b.seq; });
-  written.forEach(function (w) {
+  written.forEach(function (w, entryIndex) {
     encTlvTag(out, w.key, tlv, ctx);
     var value = [];
-    encList(value, w.body, w.data, ctx);
+    var pushed = encPush(ctx, tlv.__ptr, "tlv", entryIndex);   // PS-572: in payload order
+    try { encList(value, w.body, w.data, ctx); } finally { encPop(ctx, pushed); }
     encCheckPeeks(value);              // PS-551: a tlv value is measured whole
     if (lsize > 0) encWriteInt(out, value.length, lsize, false, ctx.endian);
     for (var i = 0; i < value.length; i++) out.push(value[i]);
@@ -1837,9 +1861,163 @@ function encSoleCase(m, data) {                       // _sole_case_given
   return (best === null || best.tied) ? null : encExactCase(best.key);
 }
 
+// --- The decode record (PS-572, PS-573; CR-2026-162) ---
+// ctx.rec holds the `_decode` given in the input, with the occurrence frames (DecodeTrace).
+// Every construct and internal field the record can locate carries its JSON Pointer as
+// `__ptr`, computed at generation time over the `$ref`-expanded document.
+function encLoc(ctx, node) {                          // DecodeTrace.loc
+  var p = node && node.__ptr;
+  if (typeof p !== "string") return null;
+  var frames = ctx.rec.frames.slice().sort(function (a, b) { return b[0].length - a[0].length; });
+  frames.forEach(function (fr) {
+    var anchor = fr[0];
+    if (p === anchor || p.indexOf(anchor + "/") === 0) {
+      var rest = p.substring(anchor.length);
+      p = fr[1] === "repeat" ? anchor + "/repeat[" + fr[2] + "]" + rest : anchor + "[" + fr[2] + "]" + rest;
+    }
+  });
+  return p;
+}
+
+function encRecorded(ctx, table, node) {              // DecodeTrace.lookup; undefined if none
+  if (!ctx.rec) return undefined;
+  var where = encLoc(ctx, node);
+  if (where === null || !Object.prototype.hasOwnProperty.call(ctx.rec[table], where)) return undefined;
+  return ctx.rec[table][where];
+}
+
+function encPush(ctx, ptr, kind, index) {             // DecodeTrace.push
+  if (!ctx.rec || typeof ptr !== "string") return false;
+  ctx.rec.frames.push([ptr, kind, index]);
+  return true;
+}
+
+function encPop(ctx, pushed) { if (pushed) ctx.rec.frames.pop(); }
+
+function encPyRepr(v) {                               // Python's repr, for PS-573's text
+  if (typeof v === "string") return "'" + v + "'";
+  if (v === true) return "True";
+  if (v === false) return "False";
+  if (v === null || v === undefined) return "None";
+  if (typeof v === "object") return JSON.stringify(v);
+  return String(v);
+}
+
+function encSame(a, b) {
+  if (typeof a === "number" && typeof b === "number") return a === b;
+  return JSON.stringify(a) === JSON.stringify(b);
+}
+
+function encRecordedInputs(fields, data, d, ctx) {    // _recorded_inputs
+  function internal(f) {
+    var name = f.name;
+    if (typeof name !== "string" || name.charAt(0) !== "_" || ENC_COMPUTED.indexOf(f.type) >= 0 ||
+        encIsLiteral(f) || "value" in f) return;
+    var rec = encRecorded(ctx, "internal", f);
+    if (rec === undefined) return;
+    if (Object.prototype.hasOwnProperty.call(data, name) && !ctx.rec.supplied[name]) {
+      if (!encSame(data[name], rec)) encFail("Field '" + name + "' is given " + encPyRepr(data[name]) + ", but the decode record holds " + encPyRepr(rec) + " (PS-573)");
+      return;
+    }
+    d[name] = rec;
+    ctx.rec.supplied[name] = true;
+  }
+  (fields || []).forEach(function (f) {
+    if (!f || typeof f !== "object") return;
+    if (f.byte_group !== undefined) {
+      var members = Array.isArray(f.byte_group) ? f.byte_group : (f.byte_group.fields || []);
+      members.forEach(function (m) { if (m && typeof m === "object") internal(m); });
+      return;
+    }
+    if (f.flagged && typeof f.flagged === "object" && !f.type) {
+      var mask = String(f.flagged.field || "").replace(/^\$+/, "");
+      var flags = encRecorded(ctx, "flagged", f.flagged);
+      if (mask && flags !== undefined && (data[mask] === undefined || data[mask] === null) &&
+          (d[mask] === undefined || d[mask] === null)) d[mask] = flags;
+      return;
+    }
+    internal(f);
+  });
+}
+
+function encRecordedFlags(fg, ctx) {                  // _recorded_flags
+  if (!ctx.rec) return null;
+  var mask = String(fg.field || "").replace(/^\$+/, "");
+  if (Object.prototype.hasOwnProperty.call(ctx.rec.inputs, mask)) return null;
+  var rec = encRecorded(ctx, "flagged", fg);
+  return typeof rec === "number" ? Math.floor(rec) : null;
+}
+
+function encRecordDeclared(fields, skip) {            // record_declared_fields
+  var found = [];
+  function walk(items) {
+    (Array.isArray(items) ? items : []).forEach(function (item) {
+      if (!item || typeof item !== "object" || Array.isArray(item) || item === skip) return;
+      if ("type" in item) {
+        if (item.name && found.indexOf(item.name) < 0) found.push(item.name);
+        walk(item.trailer);
+        return;
+      }
+      var spec;
+      ["match", "tlv", "flagged", "byte_group", "records"].some(function (k) {
+        if (k in item) { spec = item[k]; return true; }
+        return false;
+      });
+      if (Array.isArray(spec)) {
+        spec.forEach(function (part) { walk(Array.isArray(part) ? part : [part]); });
+      } else if (spec && typeof spec === "object") {
+        walk(spec.fields);
+        var cs = spec.cases || {};
+        Object.keys(cs).forEach(function (k) { if (k.indexOf("__") !== 0) walk(cs[k]); });
+        (spec.groups || []).forEach(function (g) { walk(g && g.fields); });
+      }
+    });
+  }
+  walk(fields);
+  return found;
+}
+
+function encMatchLabel(m) {                           // match_label
+  var n = m.name || m["var"];
+  return n ? "'" + n + "'" : "an unnamed match";
+}
+
+function encDeclaredBeside(f, siblings) {             // _declared_beside
+  var names = {};
+  [siblings, ENC_SCOPE].forEach(function (scope) {
+    if (Array.isArray(scope)) encRecordDeclared(scope, f).forEach(function (n) { names[n] = true; });
+  });
+  return names;
+}
+
+function encCheckRecordedCase(m, chosen, data, beside) {   // _check_recorded_case (PS-573)
+  var cases = m.cases || {}, dflt = encDefaultBody(m);
+  var mine = encRecordDeclared(chosen !== null && Array.isArray(cases[chosen]) ? cases[chosen] : dflt);
+  var others = {};
+  encCaseKeys(m).forEach(function (k) {
+    if (k === "default" || (chosen !== null && String(k) === String(chosen))) return;
+    encRecordDeclared(cases[k]).forEach(function (n) { others[n] = true; });
+  });
+  if (chosen !== null && dflt) encRecordDeclared(dflt).forEach(function (n) { others[n] = true; });
+  var clash = Object.keys(others).filter(function (n) {
+    return mine.indexOf(n) < 0 && !(beside && beside[n]) && Object.prototype.hasOwnProperty.call(data, n);
+  }).sort();
+  if (clash.length) encFail("Field " + encMatchLabel(m) + ": the input gives '" + clash[0] + "', which only another case declares, against the recorded case (PS-573)");
+}
+
+function encRecordedCase(m, key) {                    // _recorded_case
+  if (key === "default") return "default";
+  var keys = encCaseKeys(m);
+  for (var i = 0; i < keys.length; i++) {
+    if (keys[i] !== "default" && String(keys[i]).trim() === String(key).trim()) return keys[i];
+  }
+  encFail("Field " + encMatchLabel(m) + ": the recorded case " + encPyRepr(key) + " is not a case of the match (PS-573)");
+}
+
 function encDerive(fields, data, ctx) {                 // _derive_inputs
   var d = {};
   for (var k in data) d[k] = data[k];
+  if (ctx.rec) encRecordedInputs(fields, data, d, ctx);   // PS-573
   (fields || []).forEach(function (f) {
     if (!f || typeof f !== "object") return;
     var src;
@@ -1869,7 +2047,12 @@ function encDerive(fields, data, ctx) {                 // _derive_inputs
         declared += Math.pow(2, g.bit || 0);
         if (encGroupGiven(g, data)) bits += Math.pow(2, g.bit || 0);
       });
-      var given = d[name];
+      var given = data[name];
+      if ((given === undefined || given === null) && encRecordedFlags(f.flagged, ctx) !== null) {
+        if (d[name] === undefined || d[name] === null) d[name] = encRecordedFlags(f.flagged, ctx);
+        return;                         // PS-573: the groups written are the ones it sets
+      }
+      if (given === undefined || given === null) given = d[name];
       if (given === undefined || given === null) { d[name] = bits; return; }
       // The groups test what a reference to the mask binds (PS-523, CR-2026-132): an
       // enum's code, the number under a text label, as _encode_reference gives it.
@@ -1933,7 +2116,7 @@ function encList(out, fields, data, ctx, top) {
       if (!encHas(data, okey === null ? f.name : okey)) { omitted = omitted || f.name; return; }
       if (omitted) encFail("optional field " + JSON.stringify(f.name) + " is supplied while the earlier optional field " + JSON.stringify(omitted) + " is not (PS-405)");
     }
-    if ("match" in f && !f.type) { return encMatch(out, f, data, ctx, fr.pend); }
+    if ("match" in f && !f.type) { return encMatch(out, f, data, ctx, fr.pend, fields); }
     if ("tlv" in f && !f.type) { encTlv(out, f, data, ctx); return; }
     if ("byte_group" in f) { encByteGroup(out, f, data, ctx); return; }
     if ("flagged" in f && !f.type) { return encFlagged(out, f.flagged, data, ctx); }
@@ -1995,6 +2178,17 @@ function encodeRoot(fields, data, endian) {
   // wa: PS-537's warnings, reported after the others as the reference reports them.
   var ctx = { endian: endian, w: [], wa: [], t564: [], d564: 0 }, out = [];
   ENC_SCOPE = fields;
+  if (data && typeof data === "object" && ("_decode" in data || "_meta" in data)) {
+    // PS-573: a decode record given in the input as `_decode`; `_meta` is not input.
+    var given = data, rec = data._decode;
+    data = {};
+    Object.keys(given).forEach(function (k) { if (k !== "_decode" && k !== "_meta") data[k] = given[k]; });
+    if (rec && typeof rec === "object") {
+      ctx.rec = { matches: rec.matches || {}, internal: rec.internal || {}, flagged: rec.flagged || {},
+                  frames: [], supplied: {}, inputs: {} };
+      Object.keys(data).forEach(function (k) { ctx.rec.inputs[k] = true; });
+    }
+  }
   encList(out, fields, data || {}, ctx, true);
   encCheckPeeks(out);                                    // PS-551 (CR-2026-141)
   ctx.t564.forEach(function (c) {                        // PS-564
@@ -2144,6 +2338,33 @@ def _annotate_on_repeat(node):
             'members': {k: sorted(v) for k, v in plan['members'].items()},
             'order': [str(key) for key in tlv['cases']],
         })
+    return out
+
+
+def _annotate_pointers(node, pointer):
+    """The encoder plan with `__ptr`, the JSON Pointer into the `$ref`-expanded document
+    (PS-572), on each node a decode record locates: a match, tlv or flagged construct, a
+    repeat, an internal field and a field holding `records`. The runtime composes the
+    occurrence indices onto it (encLoc), as DecodeTrace.loc does. Keys the generator adds
+    (`__order`, `__on_repeat`) are not part of the document and are not walked."""
+    from schema_interpreter import pointer_segment
+    if isinstance(node, list):
+        return [_annotate_pointers(item, f"{pointer}/{i}") for i, item in enumerate(node)]
+    if not isinstance(node, dict):
+        return node
+    out = {}
+    for key, value in node.items():
+        if isinstance(key, str) and key.startswith('__'):
+            out[key] = value
+        else:
+            out[key] = _annotate_pointers(value, f"{pointer}/{pointer_segment(key)}")
+    for key in ('match', 'tlv', 'flagged'):
+        if isinstance(out.get(key), dict) and not node.get('type'):
+            out[key] = dict(out[key], __ptr=f"{pointer}/{key}")
+    name = node.get('name')
+    if node.get('type') == 'repeat' or 'records' in node \
+            or (isinstance(name, str) and name.startswith('_')):
+        out['__ptr'] = pointer
     return out
 
 
@@ -4915,13 +5136,15 @@ function writeS(buf, pos, size, value, endian) {
     # Encoder generation
     # ---------------------------------------------------------------
     def _gen_encode_fields(self) -> str:
+        from schema_interpreter import pointer_segment
         parts = [f'var ENC_VARS = {json.dumps(self._enc_vars(), default=str)};',
                  f'var ENC_NAMED = {json.dumps(self._enc_named(), default=str)};']
         if self.has_ports:
             for port_key, port_def in self.schema['ports'].items():
                 fname = f'encodePort{port_key}'
                 fields = port_def.get('fields', [])
-                parts.append(self._gen_encode_fn(fname, fields))
+                parts.append(self._gen_encode_fn(
+                    fname, fields, f"/ports/{pointer_segment(port_key)}/fields"))
         else:
             # A schema with neither ports nor downlink_commands used to get no encoder at
             # all, so its generated codec could not build a downlink even where the
@@ -4929,10 +5152,10 @@ function writeS(buf, pos, size, value, endian) {
             # returned "No downlink encoding defined". PS-287 reads an entry that declares
             # no direction as accepting either, so refusing to encode contradicts it.
             fields = self.schema.get('fields', [])
-            parts.append(self._gen_encode_fn('encodePayload', fields))
+            parts.append(self._gen_encode_fn('encodePayload', fields, '/fields'))
         return '\n\n'.join(parts)
 
-    def _gen_encode_fn(self, fname: str, fields: List[Dict]) -> str:
+    def _gen_encode_fn(self, fname: str, fields: List[Dict], pointer: str = '/fields') -> str:
         """An encoder: the field list as data, walked by the runtime encoder.
 
         The field list was unrolled into code at generation time, a second hand-kept copy
@@ -4942,6 +5165,7 @@ function writeS(buf, pos, size, value, endian) {
         """
         plan = self._expand_refs(list(fields)) if isinstance(fields, list) else fields
         plan = _annotate_on_repeat(plan)
+        plan = _annotate_pointers(plan, pointer)
         return '\n'.join([
             f'var {fname}_FIELDS = {json.dumps(plan, default=str, separators=(",", ":"))};',
             f'function {fname}(d, endian) {{',

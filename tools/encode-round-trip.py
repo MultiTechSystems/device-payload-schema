@@ -301,6 +301,9 @@ def run():
     parser.add_argument("--list", action="store_true",
                         help="print `schema::vector` per line, sorted, for diffing "
                              "against another implementation's failures")
+    parser.add_argument("--decode-record", action="store_true",
+                        help="decode with `interpret(..., decode_record=True)` and encode "
+                             "that output, `_decode` included (PS-572, PS-573)")
     args = parser.parse_args()
 
     rows = []
@@ -322,7 +325,10 @@ def run():
             name = vector.get("name", "?")
             try:
                 decoder = SchemaInterpreter(schema)
-                decoded = decoder.decode(want, port) if port else decoder.decode(want)
+                if args.decode_record:
+                    decoded = decoder.interpret(want, port, decode_record=True)
+                else:
+                    decoded = decoder.decode(want, port) if port else decoder.decode(want)
                 if decoded.errors:
                     counts["decode-error"] += 1
                     continue
