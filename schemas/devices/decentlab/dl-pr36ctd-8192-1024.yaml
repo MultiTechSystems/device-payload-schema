@@ -22,6 +22,7 @@ fields:
                 - div: 8192
                 - add: -4
               unit: "bar"
+              semantic: "air.pressure"
             - name: temperature_electronics
               type: u16
               transform:
@@ -48,6 +49,7 @@ fields:
               type: u16
               div: 1000
               unit: "V"
+              semantic: "battery"
 test_vectors:
   - name: vendor_reference_1
     description: "Vendor-published test payload, decoded by the vendor's own decoder"

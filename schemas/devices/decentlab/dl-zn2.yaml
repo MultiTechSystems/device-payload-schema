@@ -51,6 +51,7 @@ fields:
               type: u16
               div: 1000
               unit: "V"
+              semantic: "battery"
 
 test_vectors:
   # Payloads from main() in the vendor decoder (decentlab-decoders DL-ZN2.js) or

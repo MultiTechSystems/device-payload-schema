@@ -44,7 +44,7 @@ fields:
               unit: "V"
               ipso: {object: 3316, instance: 0, resource: 5700}
               senml: {name: "vbat", unit: "V"}
-              semantic: "battery.voltage"
+              semantic: "battery"
 
 test_vectors:
   - name: ttn_declared_example_1

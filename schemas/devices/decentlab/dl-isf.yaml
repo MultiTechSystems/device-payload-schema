@@ -71,6 +71,7 @@ fields:
                 - add: -327.68
               unit: "°C"
               senml: {unit: Cel}
+              semantic: "air.temperature"
             - name: max_voltage
               type: u16
               transform:
@@ -104,6 +105,7 @@ fields:
               type: u16
               div: 1000
               unit: "V"
+              semantic: "battery"
 
 test_vectors:
   # The word-ordered field's bytes are the vendor-documented pair from

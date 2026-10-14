@@ -54,6 +54,7 @@ fields:
                 - add: -3276.8
               unit: "°C"
               senml: {unit: Cel}
+              semantic: "soil.temperature"
             - name: electrical_conductivity
               type: u16
               unit: "µS⋅cm⁻¹"
@@ -63,6 +64,7 @@ fields:
               type: u16
               div: 1000
               unit: "V"
+              semantic: "battery"
 test_vectors:
   - name: vendor_reference_1
     description: "Vendor-published test payload, decoded by the vendor's own decoder"

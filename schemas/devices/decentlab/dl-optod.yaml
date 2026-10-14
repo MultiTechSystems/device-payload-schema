@@ -26,7 +26,7 @@ fields:
               unit: "°C"
               ipso: {object: 3303, instance: 0, resource: 5700}
               senml: {name: "temperature", unit: "Cel"}
-              semantic: "temperature"
+              semantic: "air.temperature"
             - name: oxygen_saturation
               type: u16
               transform:
@@ -49,7 +49,6 @@ fields:
               unit: "ppm"
               ipso: {object: 3325, instance: 0, resource: 5700}
               senml: {name: "oxygen_concentration_alt", unit: "ppm"}
-              semantic: "oxygen.concentration.alt"
         - bit: 1
           fields:
             - name: battery_voltage
@@ -59,7 +58,7 @@ fields:
 
               ipso: {object: 3316, instance: 0, resource: 5700}
               senml: {name: "battery_voltage", unit: "V"}
-              semantic: "battery.voltage"
+              semantic: "battery"
 test_vectors:
   - name: min_payload_vendor_1
     description: "Vendor-published test payload, decoded by the vendor's own decoder"

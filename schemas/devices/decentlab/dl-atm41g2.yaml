@@ -43,6 +43,7 @@ fields:
                 - add: -327.68
               unit: "m⋅s⁻¹"
               senml: {unit: m/s}
+              semantic: "wind.speed"
             - name: wind_direction
               type: u16
               transform:
@@ -50,6 +51,7 @@ fields:
                 - add: -3276.8
               unit: "°"
               senml: {unit: deg}
+              semantic: "wind.direction"
             - name: maximum_wind_speed
               type: u16
               transform:
@@ -64,6 +66,7 @@ fields:
                 - add: -3276.8
               unit: "°C"
               senml: {unit: Cel}
+              semantic: "air.temperature"
             - name: vapor_pressure
               type: u16
               transform:
@@ -76,6 +79,7 @@ fields:
                 - div: 100
                 - add: -327.68
               unit: "kPa"
+              semantic: "air.pressure"
             - name: relative_humidity
               type: u16
               transform:
@@ -83,6 +87,7 @@ fields:
                 - add: -3276.8
               unit: "%"
               senml: {unit: "%RH"}
+              semantic: "air.relativeHumidity"
             - name: internal_temperature
               type: u16
               transform:
@@ -123,6 +128,7 @@ fields:
               type: u16
               div: 1000
               unit: "V"
+              semantic: "battery"
 
 test_vectors:
   # The word-ordered field's bytes are the vendor-documented pair from

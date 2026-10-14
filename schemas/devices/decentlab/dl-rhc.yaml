@@ -28,6 +28,7 @@ fields:
               div: 100
               unit: "%"
               senml: {unit: "%RH"}
+              semantic: "air.relativeHumidity"
             - name: air_temperature
               type: u16
               transform:
@@ -35,12 +36,14 @@ fields:
                 - add: -327.68
               unit: "°C"
               senml: {unit: Cel}
+              semantic: "air.temperature"
         - bit: 1
           fields:
             - name: battery_voltage
               type: u16
               div: 1000
               unit: "V"
+              semantic: "battery"
 
 test_vectors:
   # The word-ordered field's bytes are the vendor-documented pair from

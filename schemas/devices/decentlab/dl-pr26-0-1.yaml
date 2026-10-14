@@ -22,6 +22,7 @@ fields:
                 - div: 32768
                 - add: -0.5
               unit: "bar"
+              semantic: "air.pressure"
             - name: temperature
               type: u16
               transform:
@@ -29,12 +30,14 @@ fields:
                 - add: -51.2
               unit: "°C"
               senml: {unit: Cel}
+              semantic: "air.temperature"
         - bit: 1
           fields:
             - name: battery_voltage
               type: u16
               div: 1000
               unit: "V"
+              semantic: "battery"
 test_vectors:
   - name: vendor_reference_1
     description: "Vendor-published test payload, decoded by the vendor's own decoder"

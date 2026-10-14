@@ -28,12 +28,14 @@ fields:
                 - add: -3276.8
               unit: "°C"
               senml: {unit: Cel}
+              semantic: "soil.temperature"
         - bit: 1
           fields:
             - name: battery_voltage
               type: u16
               div: 1000
               unit: "V"
+              semantic: "battery"
 test_vectors:
   - name: vendor_reference_1
     description: "Vendor-published test payload, decoded by the vendor's own decoder"

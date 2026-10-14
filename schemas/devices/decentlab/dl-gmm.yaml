@@ -39,7 +39,7 @@ fields:
               unit: "%"
               ipso: {object: 3304, instance: 0, resource: 5700}
               senml: {name: "air_humidity", unit: "%RH"}
-              semantic: "air.humidity"
+              semantic: "air.relativeHumidity"
             - name: co2_concentration
               type: u16
               transform:
@@ -48,13 +48,14 @@ fields:
               unit: "ppm"
               ipso: {object: 3325, instance: 0, resource: 5700}
               senml: {name: "co2_concentration", unit: "ppm"}
-              semantic: "co2.concentration"
+              semantic: "air.co2"
             - name: atmospheric_pressure
               type: u16
               transform:
                 - add: -32768
                 - div: 100
               unit: "kPa"
+              semantic: "air.pressure"
             - name: vapor_pressure_deficit
               type: u16
               transform:
@@ -77,7 +78,7 @@ fields:
 
               ipso: {object: 3316, instance: 0, resource: 5700}
               senml: {name: "battery_voltage", unit: "V"}
-              semantic: "battery.voltage"
+              semantic: "battery"
 test_vectors:
   - name: min_payload_vendor_1
     description: "Vendor-published test payload, decoded by the vendor's own decoder"

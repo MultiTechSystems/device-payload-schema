@@ -37,6 +37,7 @@ fields:
                 - add: -327.68
               unit: "%"
               senml: {unit: "%RH"}
+              semantic: "air.relativeHumidity"
             - name: dew_point
               type: u16
               transform:
@@ -63,6 +64,7 @@ fields:
               type: u16
               div: 1000
               unit: "V"
+              semantic: "battery"
 test_vectors:
   - name: vendor_reference_1
     description: "Vendor-published test payload, decoded by the vendor's own decoder"

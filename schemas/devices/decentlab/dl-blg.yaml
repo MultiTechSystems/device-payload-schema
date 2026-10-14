@@ -63,6 +63,7 @@ fields:
               type: number
               unit: "°C"
               senml: {unit: Cel}
+              semantic: "air.temperature"
               compute:
                 op: div
                 a: 1
@@ -75,6 +76,7 @@ fields:
               type: u16
               div: 1000
               unit: "V"
+              semantic: "battery"
 
 test_vectors:
   # Both payloads are the vendor decoder's own examples (the `main()` in

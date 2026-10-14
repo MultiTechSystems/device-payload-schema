@@ -10,6 +10,7 @@ fields:
     type: u8
     div: 10
     unit: "V"
+    semantic: "battery"
   - name: _significant
     type: u8
   - name: humidity
@@ -17,10 +18,12 @@ fields:
     div: 10
     unit: "%"
     senml: {unit: "/100"}
+    semantic: "air.relativeHumidity"
   - name: temperature
     type: s16
     div: 10
     unit: "°C"
+    semantic: "air.temperature"
   - name: ec
     type: u16
     unit: "µS/cm"

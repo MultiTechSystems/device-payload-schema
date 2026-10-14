@@ -23,7 +23,6 @@ fields:
     type: u8
     unit: "°C"
     senml: {unit: "Cel"}
-    semantic: "thermostat.setpoint"
     valid_range: [5, 30]
     description: "User-set target temperature"
 
@@ -31,7 +30,6 @@ fields:
     type: u8
     description: "Raw temperature sensor value (before formula)"
     senml: {unit: "Cel"}
-    semantic: "temperature.raw"
 
   # Temperature formula depends on reason byte (firmware version):
   # - 0x01: (raw * 165) / 256 - 40 = raw * 0.64453125 - 40  (standard)
@@ -78,14 +76,13 @@ fields:
     unit: "°C"
     ipso: {object: 3303}
     senml: {unit: "Cel"}
-    semantic: "temperature.ambient"
+    semantic: "air.temperature"
     valid_range: [-40, 85]
 
   - name: relativeHumidityRaw
     type: u8
     description: "Raw humidity sensor value (before scaling)"
     senml: {unit: "%RH"}
-    semantic: "humidity.raw"
 
   # Humidity: (raw * 100) / 256 = raw * 0.390625
   # Rounded to 2 decimal places to match original codec
@@ -99,7 +96,7 @@ fields:
     unit: "%"
     ipso: {object: 3304}
     senml: {unit: "%RH"}
-    semantic: "humidity.relative"
+    semantic: "air.relativeHumidity"
     valid_range: [0, 100]
 
   - name: motorPositionLow
@@ -169,7 +166,7 @@ fields:
     unit: "V"
     ipso: {object: 3316}
     senml: {unit: "V"}
-    semantic: "battery.voltage"
+    semantic: "battery"
     valid_range: [2.0, 3.6]
     description: "Battery voltage (2.0V to 3.5V range)"
 
@@ -234,7 +231,6 @@ fields:
     unit: "%"
     senml: {unit: "/100"}
     ipso: {object: 3337}
-    semantic: "valve.position"
     valid_range: [0, 100]
     description: "Valve openness percentage (0=closed, 100=open)"
 
@@ -245,7 +241,6 @@ fields:
     unit: "°C"
     ipso: {object: 3308}
     senml: {unit: "Cel"}
-    semantic: "thermostat.setpoint.precise"
     description: "Target temperature with decimal precision"
 
 test_vectors:

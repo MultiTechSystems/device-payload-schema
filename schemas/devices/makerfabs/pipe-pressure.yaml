@@ -10,6 +10,7 @@ fields:
     type: u8
     div: 10
     unit: "V"
+    semantic: "battery"
   - name: volt_pressure
     type: u16
     div: 1000

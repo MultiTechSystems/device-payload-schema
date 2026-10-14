@@ -10,6 +10,7 @@ fields:
     type: u8
     div: 10
     unit: "V"
+    semantic: "battery"
   - name: gSensorState
     type: u8
   - name: gpsStatus
@@ -30,6 +31,7 @@ fields:
     type: u32
     div: 100000
     unit: "°"
+    semantic: "position.latitude"
   - name: nsHemi
     type: u8
     lookup:
@@ -39,6 +41,7 @@ fields:
     type: u32
     div: 100000
     unit: "°"
+    semantic: "position.longitude"
   - name: ewHemi
     type: u8
     lookup:

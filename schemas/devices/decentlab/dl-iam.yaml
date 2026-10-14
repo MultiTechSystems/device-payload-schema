@@ -20,6 +20,7 @@ fields:
               type: u16
               div: 1000
               unit: "V"
+              semantic: "battery"
         - bit: 1
           fields:
             - name: air_temperature
@@ -31,6 +32,7 @@ fields:
                 - add: -45
               unit: "°C"
               senml: {unit: Cel}
+              semantic: "air.temperature"
             - name: air_humidity
               type: u16
               transform:
@@ -40,12 +42,14 @@ fields:
                 - div: 65535
               unit: "%"
               senml: {unit: "%RH"}
+              semantic: "air.relativeHumidity"
         - bit: 2
           fields:
             - name: barometric_pressure
               type: u16
               mult: 2
               unit: "Pa"
+              semantic: "air.pressure"
         - bit: 3
           fields:
             - name: ambient_light_visible_infrared
@@ -133,12 +137,14 @@ fields:
                     gt: 0
                 else: 0
               unit: "lx"
+              semantic: "air.lightIntensity"
         - bit: 4
           fields:
             - name: co2_concentration
               type: u16
               add: -32768
               unit: "ppm"
+              semantic: "air.co2"
             - name: co2_sensor_status
               type: u16
             - name: raw_ir_reading

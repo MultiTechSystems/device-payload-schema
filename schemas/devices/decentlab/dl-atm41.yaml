@@ -27,6 +27,7 @@ fields:
                 - add: -32768
                 - div: 1000
               unit: "mm"
+              semantic: "rain.cumulative"
             - name: lightning_strike_count
               type: u16
               add: -32768
@@ -41,6 +42,7 @@ fields:
                 - div: 100
               unit: "m⋅s⁻¹"
               senml: {unit: m/s}
+              semantic: "wind.speed"
             - name: wind_direction
               type: u16
               transform:
@@ -78,6 +80,7 @@ fields:
                 - add: -32768
                 - div: 100
               unit: "kPa"
+              semantic: "air.pressure"
             - name: relative_humidity
               type: u16
               transform:
@@ -86,7 +89,7 @@ fields:
               unit: "%"
               ipso: {object: 3304, instance: 0, resource: 5700}
               senml: {name: "relative_humidity", unit: "%RH"}
-              semantic: "relative.humidity"
+              semantic: "air.relativeHumidity"
             - name: sensor_temperature_internal
               type: u16
               transform:
@@ -95,7 +98,6 @@ fields:
               unit: "°C"
               ipso: {object: 3303, instance: 1, resource: 5700}
               senml: {name: "sensor_temperature_internal", unit: "Cel"}
-              semantic: "sensor.temperature.internal"
             - name: x_orientation_angle
               type: u16
               transform:
@@ -116,7 +118,6 @@ fields:
               unit: "°"
               ipso: {object: 3332, instance: 1, resource: 5700}
               senml: {name: "compass_heading", unit: "deg"}
-              semantic: "compass.heading"
             - name: north_wind_speed
               type: u16
               transform:
@@ -140,7 +141,7 @@ fields:
 
               ipso: {object: 3316, instance: 0, resource: 5700}
               senml: {name: "battery_voltage", unit: "V"}
-              semantic: "battery.voltage"
+              semantic: "battery"
 test_vectors:
   - name: min_payload_vendor_1
     description: "Vendor-published test payload, decoded by the vendor's own decoder"

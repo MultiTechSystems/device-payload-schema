@@ -59,7 +59,7 @@ ports:
               unit: "V"
               ipso: {object: 3316, instance: 0, resource: 5700}
               senml: {name: "vbat", unit: "V"}
-              semantic: "battery.voltage"
+              semantic: "battery"
             - name: LowBattery
               type: u8[7:7]
               consume: 1
@@ -88,7 +88,6 @@ ports:
                       unit: "%"
                       ipso: {object: 3320, instance: 0, resource: 5700}
                       senml: {name: "fill_level", unit: "/100"}
-                      semantic: "fill.level"
                     - name: AngleOfInclination
                       type: u8
                       unit: "°"
@@ -99,7 +98,6 @@ ports:
                     unit: "%"
                     ipso: {object: 3320, instance: 0, resource: 5700}
                     senml: {name: "fill_level", unit: "/100"}
-                    semantic: "fill.level"
       # Netvox frames are fixed at 11 bytes: Version, DeviceType, ReportType and an
       # 8-byte payload whose unused tail is "Reserved (Fixed 0x00)" - the version
       # packet's last 2 bytes, for one (R718X user manual, netvox.com.tw/um/R718X).

@@ -27,7 +27,7 @@ fields:
 
               ipso: {object: 3316, instance: 0, resource: 5700}
               senml: {name: "battery_voltage", unit: "V"}
-              semantic: "battery.voltage"
+              semantic: "battery"
 test_vectors:
   - name: vendor_reference
     description: "Vendor-published test payload, decoded by the vendor's own decoder"
