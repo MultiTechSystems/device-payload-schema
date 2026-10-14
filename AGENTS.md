@@ -232,10 +232,10 @@ implementation has a runner that reads the same YAML and the same vectors:
 
 | Implementation | Runner | Decode floor | Re-encode floor |
 |---|---|---|---|
-| Python | `tests/test_corpus_conformance.py` | every vector | 2133 |
-| Go | `go/schema/corpus_conformance_test.go` | 2727 | 2151 (plain API 2123) |
-| C# | `dotnet/PayloadSchema.Tests/CorpusConformanceTests.cs` | 2727 | 2134 |
-| Java | `bindings/java/.../CorpusConformanceTest.java` | 2727 | 2133 |
+| Python | `tests/test_corpus_conformance.py` | every vector | 2153 |
+| Go | `go/schema/corpus_conformance_test.go` | 2755 | 2171 (plain API 2143) |
+| C# | `dotnet/PayloadSchema.Tests/CorpusConformanceTests.cs` | 2755 | 2154 |
+| Java | `bindings/java/.../CorpusConformanceTest.java` | 2755 | 2153 |
 | C | `tools/c-corpus-harness.py` (builds each expressible schema through the struct API) | 575 of 575 attempted | n/a |
 
 These figures move with every schema added. `make check-floors` prints each floor beside
@@ -592,6 +592,14 @@ Three things that fell out of it, each worth knowing before touching byte order 
   `field_endian_override()` derived byte order from a `le_`/`be_` *type prefix* only, so a
   schema using the key generated a codec that disagreed with the interpreter. It now
   prefers the field's key. `tools/vector-verdicts.py` is back to 1254/1254 on both paths.
+- **`bitfield_string` had the same gap, found by the registry's XE-10 batch (2026-10-13).**
+  Its packed value was read and written in the document's order by the reference (the
+  field-list path dispatches it without the override wrapper) and the generated codec, and
+  written in it by the Java and C# encoders; Go honoured the key both ways, and C has no
+  `bitfield_string`. All five now take the field's `endian` (PS-050a, PS-090).
+  `bitfield-string-field-endian.yaml` and `-reverse.yaml` pin both directions; a round
+  trip alone could not see the reference's defect, since it read and wrote the same
+  wrong order. Decode floors 2751 -> 2755, re-encode and `plain fixed` +4 everywhere.
 
 **A `_language-conformance` fixture's COMMENTS change its shape bucket in three languages.**
 The Go, Java and C# encode harnesses classify a schema by scanning its raw YAML for a
@@ -816,10 +824,10 @@ exercised to the best-covered part of the project:
 
 | | Runner | Round-trips |
 |---|---|---|
-| Python | `tests/test_encode_round_trip.py` | 2133 |
-| Go | `go/schema/corpus_encode_test.go` | 2151 (plain 2123) |
-| Java | `bindings/java/.../CorpusEncodeRoundTripTest.java` | 2133 |
-| C# | `dotnet/.../CorpusEncodeRoundTripTests.cs` | 2134 |
+| Python | `tests/test_encode_round_trip.py` | 2153 |
+| Go | `go/schema/corpus_encode_test.go` | 2171 (plain 2143) |
+| Java | `bindings/java/.../CorpusEncodeRoundTripTest.java` | 2153 |
+| C# | `dotnet/.../CorpusEncodeRoundTripTests.cs` | 2154 |
 | C | `src/test_encoder.c`, built by `make test-c` (unit tests, not a corpus round trip) | n/a |
 
 - **A name may be an object under one tag and a scalar under another, and a tlv encoder
