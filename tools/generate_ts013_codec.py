@@ -4399,7 +4399,7 @@ function writeS(buf, pos, size, value, endian) {
                     lines.append(f'{i}  {js_name} = parseInt({js_name}, {10 if base == "decimal" else 16});')
                     val_expr = self._apply_modifiers_expr(js_name, field)
                     lines.append(f'{i}  var {js_name}_out = {val_expr};')
-                    lines.extend(f'{i}  {s}' for s in self._bind_js(field, js_name, f'{js_name}_out', False))
+                    lines.extend(f'{i}  {s}' for s in self._bind_js(field, js_name, f'{js_name}_out'))
                     if not name.startswith('_'):
                         guards, target = name_from_to_js(field, js_name)
                         for guard in guards:
@@ -4455,7 +4455,7 @@ function writeS(buf, pos, size, value, endian) {
             lines.append(f'{i}  pos += {sz};')
             val_expr = self._apply_modifiers_expr(js_name, field)
             lines.append(f'{i}  var {js_name}_out = {val_expr};')
-            lines.extend(f'{i}  {s}' for s in self._bind_js(field, js_name, f'{js_name}_out', False))
+            lines.extend(f'{i}  {s}' for s in self._bind_js(field, js_name, f'{js_name}_out'))
             if not name.startswith('_'):
                 guards, target = name_from_to_js(field, js_name)
                 for guard in guards:
@@ -4472,7 +4472,7 @@ function writeS(buf, pos, size, value, endian) {
             lines.append(f'{i}  pos += {size};')
             val_expr = self._apply_modifiers_expr(js_name, field)
             lines.append(f'{i}  var {js_name}_out = {js_name} === undefined ? undefined : {val_expr};')
-            lines.extend(f'{i}  {s}' for s in self._bind_js(field, js_name, f'{js_name}_out', False))
+            lines.extend(f'{i}  {s}' for s in self._bind_js(field, js_name, f'{js_name}_out'))
             if not name.startswith('_'):
                 guards, target = name_from_to_js(field, js_name)
                 for guard in guards:
@@ -4492,7 +4492,7 @@ function writeS(buf, pos, size, value, endian) {
             lines.append(f'{i}  pos += 1;')
             val_expr = self._apply_modifiers_expr(js_name, field)
             lines.append(f'{i}  var {js_name}_out = {val_expr};')
-            lines.extend(f'{i}  {s}' for s in self._bind_js(field, js_name, f'{js_name}_out', False))
+            lines.extend(f'{i}  {s}' for s in self._bind_js(field, js_name, f'{js_name}_out'))
             if not name.startswith('_'):
                 guards, target = name_from_to_js(field, js_name)
                 for guard in guards:
