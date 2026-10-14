@@ -3363,6 +3363,23 @@ improved. The Go, Java and C# corpus runners write per-vector reports only when
     compute: {op: pow, a: 10, b: $log_r_gas}}` after `log_r_gas` decodes `17 40 F8 00` to
     `log_r_gas` 8 and `r_gas` 100000000 (registry file not edited here).
 
+- **CR-2026-178 (PS-178 amended, PS-596; la-payload-schema main, for 0.5.7): `_meta` carries
+  `display_unit`.** Where a field declares `unit`, its `_meta.fields` entry carries
+  `display_unit`, the text exactly as declared, right after `unit`; `unit` stays the SenML name
+  where `senml.unit` is declared (now a MUST) and the field's `unit` otherwise. A field with no
+  `unit` has no `display_unit` (a `senml.unit` alone gives `unit` only). Derived from the schema
+  alone at every depth, in an object's members and a repeat's `element`, and a `$` reference in
+  `unit` is carried through `meta_reference` as `unit` is. Where it lives: Python `field_meta`,
+  Go `fieldMeta` (`go/schema/meta.go`), Java `Meta.fieldMeta`, C# `Meta.FieldMeta`; the TS013
+  codec carries no `_meta`, and C has none, so no binary-form refusal is needed.
+  - **Measured before:** all four wrote only `unit`, choosing `senml.unit` first, so the author's
+    `"°C"` was lost wherever `Cel` was declared. No corpus schema changed decode or encode output.
+  - **Fixtures:** the `expected_meta` of eight `_language-conformance` fixtures gained
+    `display_unit` (meta-device-context's temperature is `"°C"` beside `unit: Cel`); no vector
+    added, so **no floor moves**. `make gate-verdicts` rule 3 holds the four producers equal.
+  - **Cases:** `tests/cr-2026-178-cases.yaml` (the prototype's three tests as eight), read by
+    `test_cr_2026_178_cases.py`, Go `cr178_test.go`, Java `CR2026178Test`, C# `CR2026_178Tests`.
+
 ## Converting a vendor codec
 
 The converters in `tools/` (`convert_decentlab.py`, `convert_milesight.py`) do the

@@ -33,4 +33,4 @@ test_vectors:
       readings:
         type: repeat
         reports: array
-        element: {type: s16, reports: number, unit: Cel}
+        element: {type: s16, reports: number, unit: Cel, display_unit: Cel}
