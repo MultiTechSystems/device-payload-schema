@@ -1312,6 +1312,33 @@ def byte_group_errors(node, path=""):
     return errors
 
 
+_RANGE_NUMBER = r'[+-]?(?:0[xX][0-9a-fA-F]+|\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)'
+_RANGE_KEY = re.compile(r'^\s*(%s)\s*\.\.\s*(%s)\s*$' % (_RANGE_NUMBER, _RANGE_NUMBER))
+
+
+def _range_bound(text):
+    """A range bound as the number it spells: an integer stays one, exactly."""
+    text = text.strip()
+    if re.match(r'^[+-]?0[xX]', text):
+        return int(text, 16)
+    try:
+        return int(text)
+    except ValueError:
+        return float(text)
+
+
+def parse_range_case_key(text):
+    """The bounds of a range case key, "2..5" or "12.1..35.4" (PS-398), or None.
+
+    Each bound is a number - a decimal integer, a hexadecimal integer or a decimal with a
+    fraction or exponent - and may be negative. An integer bound is kept an integer.
+    """
+    m = _RANGE_KEY.match(str(text))
+    if not m:
+        return None
+    return _range_bound(m.group(1)), _range_bound(m.group(2))
+
+
 def parse_list_case_key(text):
     """The values of a quoted list case key, "[1, 2, 0x10]", or None if it is not one."""
     text = str(text).strip()
@@ -2617,6 +2644,24 @@ def tlv_reserve_errors(field_def):
     return []
 
 
+def range_key_error(key):
+    """Why a case key spelled like a range is not one, else None (PS-398, PS-151).
+
+    A key is a range where it holds `..` and is not a quoted list. Both bounds must be
+    numbers and `start <= end`. A malformed one, `"a..b"`, matched nothing and raised no
+    error, so every value fell through to the default.
+    """
+    if not isinstance(key, str) or '..' not in key or key.strip().startswith('['):
+        return None
+    bounds = parse_range_case_key(key)
+    if bounds is None:
+        return ("a range key is `start..end` with two numbers, each an integer or a "
+                "decimal, such as 2..5 or 12.1..35.4 (PS-398)")
+    if bounds[0] > bounds[1]:
+        return "a range key has start <= end (PS-151, PS-398)"
+    return None
+
+
 def case_body_errors(schema):
     """A `match` or `tlv` case body is a field list (PS-347, PS-441), `[]` for a case
     that reads nothing.
@@ -2639,6 +2684,9 @@ def case_body_errors(schema):
                         errors.append(
                             f"{where}.{construct}.cases[{key}]: a case body is a field "
                             f"list; write [] for a case that reads nothing (PS-441)")
+                    problem = range_key_error(key)
+                    if problem:
+                        errors.append(f"{where}.{construct}.cases[{key}]: {problem}")
             for key, value in node.items():
                 if key not in ('test_vectors', 'definitions'):
                     walk(value, f"{where}.{key}" if where else key)
@@ -5381,13 +5429,10 @@ class SchemaInterpreter:
         
         # Range pattern (string like "2..5")
         if isinstance(pattern, str) and '..' in pattern:
-            try:
-                parts = pattern.split('..')
-                start = int(parts[0])
-                end = int(parts[1])
-                return start <= value <= end
-            except (ValueError, IndexError):
+            bounds = parse_range_case_key(pattern)
+            if bounds is None or isinstance(value, (bool, str)):
                 return False
+            return bounds[0] <= value <= bounds[1]
         
         # Single value comparison. A mapping key read from JSON is always a string,
         # so the same schema as JSON carried "1" where the YAML carried 1, and an
@@ -5879,7 +5924,7 @@ class SchemaInterpreter:
                 if name and not name.startswith('_'):
                     result.data[name] = value
                 # Add to variables so field can be referenced by compute/formula
-                self._bind(gf, [name], value)
+                self._bind(gf, [name, gf.get('var')], value)
                 if name.startswith('_') and self._trace is not None:
                     # PS-572: as the prototype records a group member - a bool its flag,
                     # any other the number its name binds.

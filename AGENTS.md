@@ -220,7 +220,7 @@ Use the existing platinum schemas as templates: `decentlab/dl-5tm`,
 
 ## The corpus is the conformance suite
 
-The 2695 payload vectors in `schemas/devices/` (measured 2026-10-11 with
+The 2768 payload vectors in `schemas/devices/` (measured 2026-10-11 with
 `tools/check-floors.py`, after match-fractional-discriminator, the CR-2026-118 and CR-2026-124 fixtures, CR-2026-117's
 guard-absent-operand, the `match-u32-*` and names-mangling-alike fixtures, CR-2026-127's
 guard-boolean-operand, the CR-2026-121 and CR-2026-123 fixtures, CR-2026-110's,
@@ -232,10 +232,10 @@ implementation has a runner that reads the same YAML and the same vectors:
 
 | Implementation | Runner | Decode floor | Re-encode floor |
 |---|---|---|---|
-| Python | `tests/test_corpus_conformance.py` | every vector | 2175 |
-| Go | `go/schema/corpus_conformance_test.go` | 2777 | 2193 (plain API 2165) |
-| C# | `dotnet/PayloadSchema.Tests/CorpusConformanceTests.cs` | 2777 | 2176 |
-| Java | `bindings/java/.../CorpusConformanceTest.java` | 2777 | 2175 |
+| Python | `tests/test_corpus_conformance.py` | every vector | 2199 |
+| Go | `go/schema/corpus_conformance_test.go` | 2801 | 2217 (plain API 2189) |
+| C# | `dotnet/PayloadSchema.Tests/CorpusConformanceTests.cs` | 2801 | 2200 |
+| Java | `bindings/java/.../CorpusConformanceTest.java` | 2801 | 2199 |
 | C | `tools/c-corpus-harness.py` (builds each expressible schema through the struct API) | 575 of 575 attempted | n/a |
 
 These figures move with every schema added. `make check-floors` prints each floor beside
@@ -824,10 +824,10 @@ exercised to the best-covered part of the project:
 
 | | Runner | Round-trips |
 |---|---|---|
-| Python | `tests/test_encode_round_trip.py` | 2175 |
-| Go | `go/schema/corpus_encode_test.go` | 2193 (plain 2165) |
-| Java | `bindings/java/.../CorpusEncodeRoundTripTest.java` | 2175 |
-| C# | `dotnet/.../CorpusEncodeRoundTripTests.cs` | 2176 |
+| Python | `tests/test_encode_round_trip.py` | 2199 |
+| Go | `go/schema/corpus_encode_test.go` | 2217 (plain 2189) |
+| Java | `bindings/java/.../CorpusEncodeRoundTripTest.java` | 2199 |
+| C# | `dotnet/.../CorpusEncodeRoundTripTests.cs` | 2200 |
 | C | `src/test_encoder.c`, built by `make test-c` (unit tests, not a corpus round trip) | n/a |
 
 - **A name may be an object under one tag and a scalar under another, and a tlv encoder
@@ -2526,6 +2526,20 @@ improved. The Go, Java and C# corpus runners write per-vector reports only when
   C-interpreter wave. **No corpus,
   library, example or registry schema is rejected or changes decode** (registry yabby-edge
   was rewritten as one 8-byte group, 69e1023). Fixture: `byte-group-width.yaml`.
+- **A byte_group member's `var:` binds like any field's (PS-523, PS-539).** The Python
+  reference (`_decode_byte_group_members` bound `[name]` only) and the generated TS013 codec
+  (`_bind_js(..., False)`, and the bool member bound `vars.name` alone) never bound it, so a
+  `ref`, a `compute` operand or a `match` selector reading it was absent or failed with "Match
+  field $vb has no value" while the member's own name worked. Measured before on
+  `byte-group-member-var.yaml` (a group at the top level, a flagged member, a group in a tlv
+  case): Go, C# and C already bound it (C through `var_name`; `make selftest` covers it);
+  Python and the generated codec failed 9 of 11 vectors. Java alone dropped a member with a
+  `var` and no name (reserved bits a later field reads) before binding; it binds now, and that
+  case has no round-trip vector (no value to write), so it is `ByteGroupMemberVarTest` and
+  `tests/test_byte_group_member_var.py`. Encode was unaffected: the selector is derived from
+  the member (PS-551) in all five. Floors: decode +11 in Go, Java and C#; re-encode +11
+  everywhere (Python, Java 2153 -> 2164; C# 2154 -> 2165; Go 2171 -> 2182, plain 2143 -> 2154),
+  all `tlv`.
 - **CR-2026-142 (PS-555): the binary schema form carries its names.** `schema_load_binary`
   used to name each field from its IPSO object (`ipso_to_name`: 3303 was "temperature",
   anything unlisted `field_xxxx`), so a schema reported different keys from its blob than
@@ -3284,6 +3298,39 @@ improved. The Go, Java and C# corpus runners write per-vector reports only when
     vectors (the corpus has encode vectors that only Python and the codec run today); and each case
     carries its own schema, so 91 distinct run-time schemas would join `_language-conformance/`
     (or share one per CR with a port each, as the fixture does).
+
+- **Range case keys take numeric bounds (PS-398); a malformed one is a load error.** `"12.1..35.4"`
+  is inclusive over the reals, and a discriminator may be fractional (a computed field). The
+  reference read each bound through `int()`, so such a key matched nothing and raised no error
+  (a registry agent's AQI breakpoint table). Measured before on `match-fractional-range-keys.yaml`
+  (13 vectors, bounds hit exactly through `s16` `div: 100`): **all five failed the same six** -
+  Python, Go, Java, C# and the TS013 codec each parsed bounds as integers (Go `parseRangePattern`,
+  Java `rangeBound`, C# `long.TryParse`, the codec `parseInt`/`int()`), the seven integral-bound and
+  gap vectors passing by accident; the same keys over an integer discriminator failed too. Neither
+  the encoders nor `_sole_case_given` needed anything: they reach the same matchers (Java and C#
+  encoders already call `fractionInRange`), and a range key never fixes a discriminator.
+  - **Bounds:** a decimal integer, a hexadecimal integer (`0x10..0x1F`, the spec's own example, which
+    Python never matched) or a decimal with a fraction or exponent, either signed; an integer
+    bound stays an integer, so a `u64` discriminator is compared exactly where both bounds are
+    integers. One helper per language: Python `parse_range_case_key`, Go `go/schema/range_keys.go`,
+    Java `RangeKey`, C# `RangeKey.cs`, the generator's `_match_condition` and runtime
+    `encCasePattern`.
+  - **Load (PS-398, PS-151):** a case key holding `..` that is not a quoted list must be two numbers
+    with `start <= end`: `match.cases[a..b]: a range key is `start..end` with two numbers, each an
+    integer or a decimal, such as 2..5 or 12.1..35.4 (PS-398)` and `... a range key has start <=
+    end (PS-151, PS-398)`. Python `range_key_error` inside `case_body_errors` (so the interpreter,
+    the validator and the TS013 generator), Go `rangeKeyLoadError` from `checkCases`, Java
+    `RangeKey.error` from `checkCaseBodies`, C# `RangeKey.Error` from `CheckCaseBodies`. Applies to
+    `tlv` cases too. Nothing in the corpus, library, examples or registry is rejected (measured).
+  - **C:** `case_def_t.range_min/range_max` are integers, so a fractional bound is a C gap; the
+    harness cannot build it. `tools/schema_binary.py` was not changed.
+  - **Tests:** `tests/test_range_case_keys.py`, Go `range_keys_test.go`, Java `RangeKeyTest`, C#
+    `RangeKeyTests`. `test_cr_2026_020_match_parity.py` used the malformed `"one.."` as its
+    never-satisfied key and now uses `"[]"`.
+  - **Floors:** decode 2755 -> 2768 in Go, Java and C#; re-encode +13 everywhere (Python, Java 2153
+    -> 2166, C# 2154 -> 2167, Go 2171 -> 2184, plain 2143 -> 2156), `match` 160 -> 173, every vector
+    round-tripping.
+
 
 ## Converting a vendor codec
 

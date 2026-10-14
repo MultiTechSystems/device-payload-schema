@@ -96,6 +96,9 @@ func checkTypeVocabulary(raw map[string]any) error {
 			if _, ok := body.([]any); !ok {
 				return fmt.Errorf("%s.cases[%s]: a case body is a field list; write [] for a case that reads nothing (PS-441)", path, key)
 			}
+			if err := rangeKeyLoadError(path, key); err != nil { // PS-398, PS-151
+				return err
+			}
 			if err := check(body, fmt.Sprintf("%s[%s]", path, key)); err != nil {
 				return err
 			}

@@ -296,6 +296,11 @@ public class Schema {
                             + "]: a case body is a field list; write [] for a case that reads "
                             + "nothing (PS-441)");
                 }
+                String problem = entry.getKey() instanceof String key ? RangeKey.error(key) : null;
+                if (problem != null) {
+                    throw new SchemaException(construct + ".cases[" + entry.getKey() + "]: "
+                            + problem);
+                }
             }
         }
     }
@@ -2327,18 +2332,6 @@ public class Schema {
     }
 
     /**
-     * Whether a discriminator satisfies one case key, matching what the Python
-     * interpreter's {@code _match_case_pattern} accepts.
-     *
-     * <p>The string range spelling {@code "2..5"} was missing: only numbers, lists and
-     * {@code {min,max}} maps were compared, so a range key matched nothing at all and the
-     * construct decoded silently empty (CR-2026-020).
-     */
-    private long rangeBound(String text) {
-        return Long.parseLong(text.trim());
-    }
-
-    /**
      * Whether a discriminator with a fraction lies in a case key. It equals no integer, so
      * no single key and no member of a list matches it; only an inclusive range does
      * (PS-398), as the reference and the spec prototype read {@code lo..hi}.
@@ -2346,14 +2339,8 @@ public class Schema {
     static boolean fractionInRange(double value, Object caseVal) {
         if (caseVal instanceof String text) {
             if (parseListCaseKey(text) != null) return false;
-            int separator = text.indexOf("..");
-            if (separator <= 0) return false;
-            try {
-                return value >= Long.parseLong(text.substring(0, separator).trim())
-                        && value <= Long.parseLong(text.substring(separator + 2).trim());
-            } catch (NumberFormatException ignored) {
-                return false;
-            }
+            RangeKey range = RangeKey.parse(text);
+            return range != null && range.contains(value);
         }
         if (caseVal instanceof Map<?, ?> rangeMap) {
             Object min = rangeMap.get("min"), max = rangeMap.get("max");
@@ -2363,6 +2350,14 @@ public class Schema {
         return false;
     }
 
+    /**
+     * Whether a discriminator satisfies one case key, matching what the Python
+     * interpreter's {@code _match_case_pattern} accepts.
+     *
+     * <p>The string range spelling {@code "2..5"} was missing: only numbers, lists and
+     * {@code {min,max}} maps were compared, so a range key matched nothing at all and the
+     * construct decoded silently empty (CR-2026-020).
+     */
     private boolean matchesCase(long matchValue, Object caseVal) {
         if (caseVal instanceof Number number) {
             Long key = asLong(number);
@@ -2373,17 +2368,12 @@ public class Schema {
             return parseListCaseKey(text).contains(matchValue);
         }
         if (caseVal instanceof String text) {
-            int separator = text.indexOf("..");
-            if (separator > 0) {
-                try {
-                    return matchValue >= rangeBound(text.substring(0, separator))
-                            && matchValue <= rangeBound(text.substring(separator + 2));
-                } catch (NumberFormatException ignored) {
-                    return false;
-                }
+            if (text.contains("..")) {
+                RangeKey range = RangeKey.parse(text);
+                return range != null && range.contains(matchValue);
             }
             try {
-                return matchValue == rangeBound(text);
+                return matchValue == Long.parseLong(text.trim());
             } catch (NumberFormatException ignored) {
                 return false;
             }
@@ -3153,8 +3143,11 @@ public class Schema {
         for (Field member : group.getByteGroup()) {
             ctx.setOffset(start);
             String name = member.getName();
-            if (name == null || name.isEmpty()) continue;
-            ctx.produced(member, null);                             // PS-490
+            String memberVar = member.getVar();
+            boolean hasName = name != null && !name.isEmpty();
+            boolean hasVar = memberVar != null && !memberVar.isEmpty();
+            if (!hasName && !hasVar) continue;
+            if (hasName) ctx.produced(member, null);                // PS-490
             try {
                 Object value;
                 if (member.getType() == FieldType.BITS) {
@@ -3170,11 +3163,14 @@ public class Schema {
                             0, member.getType().defaultLength() * 8), member, ctx);
                 }
                 if (value == OMITTED) {
-                    ctx.bindMissed(name, member);                   // PS-523
+                    if (hasName) ctx.bindMissed(name, member);      // PS-523
+                    if (hasVar) ctx.bindMissed(memberVar, member);  // and under its var
                     continue;
                 }
                 if (value == null) continue;
-                ctx.bind(name, member, value);                      // PS-523
+                if (hasName) ctx.bind(name, member, value);         // PS-523
+                if (hasVar) ctx.bind(memberVar, member, value);     // and under its var
+                if (!hasName) continue;
                 if (name.startsWith("_")) {
                     // PS-572: as the reference records a group member - a bool its flag,
                     // any other the number its name binds.
