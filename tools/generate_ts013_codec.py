@@ -907,9 +907,10 @@ function encCasePattern(value, pattern) {             // _match_case_pattern
     return false;
   }
   if (typeof pattern === "string" && pattern.indexOf("..") >= 0) {
-    var parts = pattern.split("..");
-    var a = parseInt(parts[0], 10), b = parseInt(parts[1], 10);
-    if (isNaN(a) || isNaN(b) || !/^\s*-?\d+\s*$/.test(parts[0]) || !/^\s*-?\d+\s*$/.test(parts[1])) return false;
+    var m = /^\s*([+-]?(?:0[xX][0-9a-fA-F]+|\d+(?:\.\d+)?(?:[eE][+-]?\d+)?))\s*\.\.\s*([+-]?(?:0[xX][0-9a-fA-F]+|\d+(?:\.\d+)?(?:[eE][+-]?\d+)?))\s*$/.exec(pattern);
+    if (!m || typeof value !== "number") return false;
+    var bound = function (t) { return /^[+-]?0[xX]/.test(t) ? (t.charAt(0) === "-" ? -parseInt(t.slice(3), 16) : parseInt(t.replace(/^\+/, "").replace(/^0[xX]/, ""), 16)) : Number(t); };
+    var a = bound(m[1]), b = bound(m[2]);
     return a <= value && value <= b;
   }
   if (value === pattern) return true;
@@ -5093,12 +5094,12 @@ function writeS(buf, pos, size, value, endian) {
                     return None
                 return '(' + ' || '.join(f'{discriminator} === {v}' for v in values) + ')'
             if '..' in text:
-                low, _, high = text.partition('..')
-                try:
-                    return (f'{discriminator} >= {int(low.strip(), 0)}'
-                            f' && {discriminator} <= {int(high.strip(), 0)}')
-                except ValueError:
+                from schema_interpreter import parse_range_case_key
+                bounds = parse_range_case_key(text)
+                if bounds is None:
                     return None
+                return (f'{discriminator} >= {bounds[0]!r}'
+                        f' && {discriminator} <= {bounds[1]!r}')
             try:
                 return f'{discriminator} === {int(text, 0)}'
             except ValueError:
