@@ -124,7 +124,7 @@ MODIFIERS:    add mult div | lookup (sequence or sparse mapping; default "x${val
               | compute | guard | transform
 CONDITIONALS: match (value; "[1, 2]" list keys; field XOR length) | flagged | tlv
 TRANSFORMS:   sqrt abs pow log10 log floor ceiling clamp | {op: round, ties: even|away}
-COMPUTE OPS:  add sub mul div mod idiv
+COMPUTE OPS:  add sub mul div mod idiv pow
 GUARD OPS:    gt gte lt lte eq ne
 ENCODINGS:    sign_magnitude bcd gray (Python only)
 REFERENCES:   $field_name | var: name | $ref: '#/definitions/name'
@@ -232,10 +232,10 @@ implementation has a runner that reads the same YAML and the same vectors:
 
 | Implementation | Runner | Decode floor | Re-encode floor |
 |---|---|---|---|
-| Python | `tests/test_corpus_conformance.py` | every vector | 2199 |
-| Go | `go/schema/corpus_conformance_test.go` | 2801 | 2217 (plain API 2189) |
-| C# | `dotnet/PayloadSchema.Tests/CorpusConformanceTests.cs` | 2801 | 2200 |
-| Java | `bindings/java/.../CorpusConformanceTest.java` | 2801 | 2199 |
+| Python | `tests/test_corpus_conformance.py` | every vector | 2220 |
+| Go | `go/schema/corpus_conformance_test.go` | 2822 | 2238 (plain API 2210) |
+| C# | `dotnet/PayloadSchema.Tests/CorpusConformanceTests.cs` | 2822 | 2221 |
+| Java | `bindings/java/.../CorpusConformanceTest.java` | 2822 | 2220 |
 | C | `tools/c-corpus-harness.py` (builds each expressible schema through the struct API) | 575 of 575 attempted | n/a |
 
 These figures move with every schema added. `make check-floors` prints each floor beside
@@ -832,10 +832,10 @@ exercised to the best-covered part of the project:
 
 | | Runner | Round-trips |
 |---|---|---|
-| Python | `tests/test_encode_round_trip.py` | 2199 |
-| Go | `go/schema/corpus_encode_test.go` | 2217 (plain 2189) |
-| Java | `bindings/java/.../CorpusEncodeRoundTripTest.java` | 2199 |
-| C# | `dotnet/.../CorpusEncodeRoundTripTests.cs` | 2200 |
+| Python | `tests/test_encode_round_trip.py` | 2220 |
+| Go | `go/schema/corpus_encode_test.go` | 2238 (plain 2210) |
+| Java | `bindings/java/.../CorpusEncodeRoundTripTest.java` | 2220 |
+| C# | `dotnet/.../CorpusEncodeRoundTripTests.cs` | 2221 |
 | C | `src/test_encoder.c`, built by `make test-c` (unit tests, not a corpus round trip) | n/a |
 
 - **A name may be an object under one tag and a scalar under another, and a tlv encoder
@@ -3339,6 +3339,187 @@ improved. The Go, Java and C# corpus runners write per-vector reports only when
     -> 2166, C# 2154 -> 2167, Go 2171 -> 2184, plain 2143 -> 2156), `match` 160 -> 173, every vector
     round-tripping.
 
+- **CR-2026-175 (PS-453 and PS-015 amended, PS-588, PS-589; la-payload-schema main 9e8957a, for
+  0.5.7): a byte string that does not consume reports its span again.** A `bytes`, `hex` or
+  `ascii` field declaring `consume: 0` reads and reports its span and leaves the read position,
+  so the fields after it read the same bytes (a whole-frame `raw`, a command's bytes). Its
+  `length` may be `remaining`; PS-535 applies past the end.
+  - **Measured before:** every implementation advanced past the span, so the next field misread
+    or underflowed. Go, Java and C# held `consume` as an int defaulting to 0 and could not tell
+    `consume: 0` from none; on the shared cases Go failed 8 of 10 decodes and all 12 encodes (a
+    given echo was written as data, `00d75a00d75a`, and an omitted one was "Missing required
+    field"). The validator warned PS-453 with text describing behaviour nothing had.
+  - **Where:** `is_echo` (Python, which the TS013 generator imports), Go `isEcho` and
+    `Field.ConsumeDeclared` (`go/schema/cr175.go`), Java `Field.isEcho`/`consumeDeclared`, C#
+    `Field.IsEcho`/`ConsumeDeclared`. Each decoder's bytes/hex/ascii read restores the position;
+    each fixed element size counts an echo as 0 bytes.
+  - **Encode (PS-589):** an echo writes nothing and is not required (a tlv case claims it
+    optionally, as a literal). A value given for it is recorded beside the CR-2026-141 peeks -
+    position (the decoder's, before any pending peek bytes), field, value, and its length read
+    from the input (`remaining` reaches the frame's end) - and checked where the frame closes
+    (top level, each tlv value, each repeat element and trailer): Python `FrameBuffer.echo`,
+    `Frame.echoes`, `check_echoes` (called by `check_peeks`); the runtime's `fr.ec`,
+    `encCheckEchoes` (by `encCheckPeeks`); Go, Java and C# beside their peek records. **The
+    Implementation Record's departure is followed: the comparison is with what the field
+    decodes**, its `format`/`separator`, or PS-534's trailing-0x00 removal (and `numeral`),
+    applied first, so `00d7` given for a `hex:upper`, `:`-separated echo is rejected. Text, the
+    prototype's: `Field 'raw' is given '00d75b', but the other fields write '00d75a' over its
+    span (PS-589)`, or `... write too few bytes over its span (PS-589)`.
+  - **Validator:** PS-015 no longer counts a byte string declaring `consume: 0`, and PS-453 no
+    longer warns on one (it still warns on `u16` and the rest).
+  - **C:** `field_def_t.consume` is a bit range's and a bool's; a byte string always advances.
+    `tools/schema_binary.py` refuses `consume: 0` on one (PS-446) and the harness files it as an
+    interpreter gap.
+  - **Open:** a `$name` length naming a value the input does not carry (a computed length, as
+    jooby's `message.bytes` would need) cannot size the span on encode, so a value given for
+    such an echo is refused as `Missing required field: <name>`; omitting it encodes.
+  - **Cases:** `tests/cr-2026-175-cases.yaml` (the prototype's eight tests and fourteen more: a
+    length from an earlier field, format and separator, ascii padding, a repeat element) read
+    by `test_cr_2026_175_cases.py` (reference and generated codec, plus the validator and C
+    converter rules), Go `cr175_test.go`, Java `CR2026175Test`, C# `CR2026_175Tests`. Fixture
+    `_language-conformance/byte-string-reread.yaml`, 9 vectors, all round-tripping.
+  - **Floors:** decode 2801 -> 2810 in Go, Java and C#; re-encode +9 everywhere (Python and
+    Java 2199 -> 2208, C# 2200 -> 2209, Go 2217 -> 2226, plain 2189 -> 2198), `plain fixed`
+    185 -> 194.
+  - **Corpus and registry:** no schema in the corpus, library, examples or the private registry
+    declares `consume` on a byte string, so no decode, encode or load changes. Written into a
+    copy of registry enginko decoder-environmental (`dataPayload` before `data`, two
+    `remaining` fields at one level), its 96 vectors still pass and a decode re-encodes with
+    the echo given.
+
+
+- **CR-2026-172 (PS-119 amended, PS-584; la-payload-schema main 9e8957a, for 0.5.7): `compute`
+  `pow`, a power whose exponent may be a field.** `{op: pow, a: 10, b: $x}` computes `a` to the
+  power `b` in binary64; a result that is not a finite real number - a negative base with a
+  fractional exponent, 0 to a negative power, an overflow - leaves the field absent, as a zero
+  divisor does (PS-278), and the rest of the payload decodes. A computed field reading that
+  absent value is absent too (PS-314).
+  - **Where:** Python `_evaluate_compute` (`math.pow`; a `ValueError`, `OverflowError` or
+    `ZeroDivisionError`, or a non-finite result, gives `OMITTED`), Go `evaluateCompute`'s `pow`
+    case (`errComputeOmitted`), Java `evaluateCompute` and C# `EvaluateCompute` (`ComputeOmitted`),
+    and the TS013 generator's `compute_to_js` (`Number.isFinite` else `undefined`, which
+    `JSON.stringify` drops). The op is in `tools/schema_vocabulary.py`, `validate_schema.py`,
+    `generate_jsonschema.py` and `docs/SCHEMA-LANGUAGE-REFERENCE.md`.
+  - **Measured before:** all five rejected the op (`Unknown compute op: pow`, an error, so the
+    decode failed). Encoding is untouched: a computed field is never written.
+  - **Departure from the CR's comment, from the Implementation Record:** the Dingtek chain gives
+    10.0000002 for `41 20 00 00` (the vendor divides by 0x7fffff), not 10.0.
+  - **C:** has no `compute`; `tools/schema_binary.py` already refuses it, so `pow` is a recorded
+    C gap, not a new refusal.
+  - **Cases:** `tests/cr-2026-172-cases.yaml` (the prototype's five tests, the Dingtek chain, a
+    literal base e, a negative base with an integer exponent and a reference to an absent power),
+    read by `test_cr_2026_172_cases.py` (reference and generated codec), Go `cr172_test.go`, Java
+    `CR2026172Test`, C# `CR2026_172Tests`. Fixture `_language-conformance/compute-pow.yaml`, seven
+    vectors, all round-trip (computed fields are not written): decode +7 in Go, Java and C#
+    (2790 -> 2797); re-encode +7 everywhere (Python and Java 2188 -> 2195, C# 2189 -> 2196, Go
+    2206 -> 2213, plain 2178 -> 2185), `plain fixed` 185 -> 192.
+  - **Impact:** no corpus device schema and no registry schema uses `pow` as a compute op, so no
+    decode or encode output changed and none is rejected. Registry mcci codec-catena-generic's
+    `r_gas = Math.pow(10, logGasR)` becomes writable: adding `{name: r_gas, type: number,
+    compute: {op: pow, a: 10, b: $log_r_gas}}` after `log_r_gas` decodes `17 40 F8 00` to
+    `log_r_gas` 8 and `r_gas` 100000000 (registry file not edited here).
+
+- **CR-2026-178 (PS-178 amended, PS-596; la-payload-schema main, for 0.5.7): `_meta` carries
+  `display_unit`.** Where a field declares `unit`, its `_meta.fields` entry carries
+  `display_unit`, the text exactly as declared, right after `unit`; `unit` stays the SenML name
+  where `senml.unit` is declared (now a MUST) and the field's `unit` otherwise. A field with no
+  `unit` has no `display_unit` (a `senml.unit` alone gives `unit` only). Derived from the schema
+  alone at every depth, in an object's members and a repeat's `element`, and a `$` reference in
+  `unit` is carried through `meta_reference` as `unit` is. Where it lives: Python `field_meta`,
+  Go `fieldMeta` (`go/schema/meta.go`), Java `Meta.fieldMeta`, C# `Meta.FieldMeta`; the TS013
+  codec carries no `_meta`, and C has none, so no binary-form refusal is needed.
+  - **Measured before:** all four wrote only `unit`, choosing `senml.unit` first, so the author's
+    `"°C"` was lost wherever `Cel` was declared. No corpus schema changed decode or encode output.
+  - **Fixtures:** the `expected_meta` of eight `_language-conformance` fixtures gained
+    `display_unit` (meta-device-context's temperature is `"°C"` beside `unit: Cel`); no vector
+    added, so **no floor moves**. `make gate-verdicts` rule 3 holds the four producers equal.
+  - **Cases:** `tests/cr-2026-178-cases.yaml` (the prototype's three tests as eight), read by
+    `test_cr_2026_178_cases.py`, Go `cr178_test.go`, Java `CR2026178Test`, C# `CR2026_178Tests`.
+
+- **CR-2026-170 (PS-430, PS-582 and PS-583 new, PS-096 amended; la-payload-schema main for
+  0.5.7): padded and signed bitfield_string parts.** A part format is `decimal`, `sdecimal`,
+  `hex` or `hex:upper`, optionally followed by `:N`, a minimum width from 1 to 32: a part with
+  fewer digits is zero-filled on the left, one with more is written in full, never cut (so
+  arwin's `slice(-2)` minor of 255 reads `255` here, not the vendor's `55`). `sdecimal` reads
+  the part's bits as two's complement of its width and writes `-` before the padding (`-5` as
+  `sdecimal:2` is `-05`).
+  - **Load (PS-430), the prototype's text, unprefixed:** `bitfield_string part format must be
+    decimal, sdecimal, hex or hex:upper, with an optional :N width from 1 to 32, not 'hex:0'
+    (PS-430)` - a width of 0 or over 32, a zero-led width (`decimal:02`), another base or case
+    (`HEX`, `octal`). Python `bitfield_part_errors` in `schema_iterator_errors` (so the
+    interpreter, the validator - whose own `'decimal', 'hex' or 'hex:upper'` check is gone - and
+    the TS013 generator); Go `parsePartFormat` from `checkFieldRules`; Java `BitfieldParts.parse`
+    from `checkWave4`'s bitfield block; C# `BitfieldParts.Parse` from `SchemaParser`. Each used to
+    reject anything but the three old formats with its own text and a field prefix.
+  - **Encode (PS-096, PS-583):** a segment is parsed by its part's format - leading zeros
+    accepted, hex in either case, a `-` only on `sdecimal`, surrounding whitespace stripped,
+    nothing else (`+1` is refused) - and a value the width cannot hold is rejected, never masked:
+    `Field 'v': segment '128' does not fit a 8-bit sdecimal part, -128 to 127 (PS-583)` and
+    `Field 'v': segment 'x1' is not a sdecimal part (PS-096)`, the segment as Python's repr.
+    **Measured before:** every encoder masked an out-of-range segment into its bits (`256` in an
+    8-bit part wrote 0); Python took `int()`'s grammar (`+7`, `1_0`), Go wrote 0 for a segment
+    it could not parse, and the codec took `parseInt`'s numeric prefix (`12ab` as 12); Java and
+    C# refused an unparsable one with their own text.
+  - **One helper set per language, and the formatting is one function** so CR-2026-176's
+    template formats can reuse it: Python `parse_part_format` / `format_part_number` /
+    `format_bitfield_part` / `parse_bitfield_segment`, Go `go/schema/cr170.go`
+    (`formatPartNumber`), Java `BitfieldParts` (`formatNumber`), C# `BitfieldParts.cs`
+    (`FormatNumber`), the codec's `partFormat` / `partText` / `bitfieldPart` and the runtime's
+    `encSegmentBits` (exact at 64 bits through byte and bit arrays, no BigInt). Go, Java and C#
+    parse a segment through a big integer, so a 64-bit range check is exact.
+  - **Not changed:** a string with fewer segments than parts still fills the rest with `0`, and
+    extra segments are ignored, in all five; the prototype rejects a count mismatch.
+  - **C:** has no bitfield_string; `tools/schema_binary.py` already refuses the type by name.
+  - **Vocabulary:** no new key. `schemas/payload-schema.json` now describes the third element of
+    a part with a pattern; `docs/SCHEMA-LANGUAGE-REFERENCE.md`'s Bitfield String section gains
+    the formats.
+  - **Measured:** decode and encode output unchanged, and nothing rejected at load, for all 248
+    corpus and private-registry schemas carrying a bitfield_string (Python, every vector
+    decoded and re-encoded before and after).
+  - **Cases:** `tests/cr-2026-170-cases.yaml` (decode, encode and load lists; the prototype's
+    `TestCR2026170BitfieldStringParts` case for case, plus 64-bit, nibble and width-32 cases),
+    read by `test_cr_2026_170_cases.py` (reference, validator and generated codec), Go
+    `cr170_test.go`, Java `CR2026170Test`, C# `CR2026_170Tests`. Fixture
+    `_language-conformance/bitfield-string-padded-signed.yaml` (five ports, 14 vectors, all
+    round-tripping). **Floors:** decode 2801 -> 2815 in Go, Java and C#; re-encode +14
+    everywhere (Python and Java 2199 -> 2213, C# 2200 -> 2214, Go 2217 -> 2231, plain 2189 ->
+    2203), `plain fixed` 185 -> 199.
+
+- **CR-2026-169 (PS-581; la-payload-schema main, for 0.5.7): which port entry an encoder
+  uses.** An encoder of a schema with `ports` encodes one entry and reports the FPort it used:
+  (1) a caller's FPort chooses its entry, or `default` where none lists it, and is rejected
+  where neither exists, or where the entry is declared `uplink` **and a downlink is being
+  encoded**; (2) else the one entry declaring `downlink`; (3) else the one downlink-capable
+  entry (`downlink`, `both` or no declaration); (4) else rejected, naming the candidates.
+  `default` is never chosen without an FPort. A schema without `ports` reports the caller's
+  FPort, else the document's `fPort` (PS-458).
+  - **Departures followed (Jason):** an uplink entry is refused only for a downlink - the
+    `direction` the caller states (Python `direction=`, Go `EncodeToResultDirection`,
+    Java `encodeWithPort(..., direction)`, C# `EncodeWithPort(direction:)`) or the generated
+    `encodeDownlink`, which is always one; an encode with no direction still encodes an uplink
+    entry the caller names, for round trips. A match keyed by a looked-up field encodes the
+    code (PS-523): already true here since CR-2026-109, pinned by the worked example's case.
+  - **Where:** Python `_choose_encode_port` (called first in `_encode`; `EncodeResult.fport`),
+    Go `ChooseEncodePort` (`schema.go`; fPort 0 is none given, ports being 1-255;
+    `EncodeResult.FPort`, `Schema.DocFPort`), Java `Schema.chooseEncodePort`
+    (`EncodeResult.getFPort`), C# `SchemaEncoder.ChoosePort` (`EncodeResult.FPort`,
+    `PayloadSchemaDefinition.DocFPort`), and the generator's `encodeDownlink`, whose choice is
+    computed at generation time. Rejections are reported as errors (Go: the error return), in
+    the spec prototype's text, with no payload.
+  - **Before:** Python raised PS-459's ValueError (uncaught) with no FPort, and Go, Java and C#
+    encoded the empty top-level `fields` of a ports schema (or its `default` entry under port 0)
+    with success. The generated codec took the first declared `downlink` entry, never checked
+    that it was unique, took any non-uplink entry for a given port, and did not take the
+    document's `fPort` for a flat schema.
+  - **Message changes:** an uplink entry refused for a downlink now reads `FPort 1 is declared
+    direction:uplink and takes no downlink to encode (PS-581)` in place of PS-292's wording on
+    the encode path (tests in `test_cr_2026_010_direction.py` and `test_ts013_encode_parity.py`
+    updated); a downlink entry encoded as an uplink keeps PS-288's.
+  - **Cases:** `tests/cr-2026-169-cases.yaml` (the prototype's `TestCR2026169EncodePort` plus
+    several-declared, none-capable and both-entry cases), read by `test_cr_2026_169_cases.py`
+    (reference and generated codec), Go `cr169_test.go`, Java `CR2026169Test`, C#
+    `CR2026_169Tests`. No corpus fixture: the runners already encode with the vector's fPort, so
+    no floor moves. C has no `ports`.
 
 ## Converting a vendor codec
 

@@ -109,6 +109,7 @@ build (`make test-c` prints why). Go, Java and C# decode floors are the full cor
 | `type: number` + `ref:` | ✓ | ✓ | ✓ | ✓ | ✗ | ✓ |
 | `compute` `add` `sub` `mul` `div` | ✓ | ✓ | ✓ | ✓ | ✗ | ✓ |
 | `compute` `mod` `idiv`, floored (CR-2026-007) | ✓ | ✓ | ✓ | ✓ | ✗ | ✓ |
+| `compute` `pow`, absent where not a finite real (CR-2026-172) | ✓ | ✓ | ✓ | ✓ | ✗ | ✓ |
 | `guard` | ✓ | ✓ | ✓ | ✓ | ✗ | ✓ |
 | `match_value` | ∅ | ∅ | ∅ | ∅ | ✗ | ∅ |
 

@@ -103,6 +103,21 @@ cases:
   payload: "FC19"
   expected: '{"temperature": -50}'
 
+# The vendor's own idiom, Math.round(x * 10) / 10, written as the CR's example: the multiply
+# lands exactly on -499.5, a tie, which `up` takes toward +infinity, giving -49.9 as the
+# vendor does where rounding -49.95 directly at one decimal gives -50.
+- name: the_cr_example_through_the_vendor_idiom
+  schema: |
+    name: t
+    endian: big
+    fields:
+      - name: temperature
+        type: s16
+        div: 20
+        transform: [{mult: 10}, {op: round, ties: up}, {div: 10}]
+  payload: "FC19"
+  expected: '{"temperature": -49.9}'
+
 - name: a_non_tie_rounds_to_nearest
   schema: |
     name: t

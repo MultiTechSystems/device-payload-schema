@@ -238,6 +238,8 @@ final class Meta {
         Map<?, ?> senml = fieldDef.get("senml") instanceof Map<?, ?> s ? s : Map.of();
         Object unit = truthy(senml.get("unit")) ? senml.get("unit") : fieldDef.get("unit");
         if (unit != null) entry.put("unit", reference(unit, repeat, false, siblings));   // PS-178
+        if (fieldDef.get("unit") != null)
+            entry.put("display_unit", reference(fieldDef.get("unit"), repeat, false, siblings));   // PS-596
         if (fieldDef.get("ipso") instanceof Map<?, ?> ipso && ipso.containsKey("object")) {
             Map<String, Object> out = new LinkedHashMap<>();
             out.put("object", ipso.get("object"));

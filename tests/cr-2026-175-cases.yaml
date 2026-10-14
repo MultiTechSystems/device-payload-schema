@@ -1,0 +1,131 @@
+# CR-2026-175 (PS-453 and PS-015 amended, PS-588, PS-589; la-payload-schema main 9e8957a, for
+# 0.5.7): a `bytes`, `hex` or `ascii` field declaring `consume: 0` reads and reports its span
+# and leaves the read position, so the fields after it read the same bytes again. Its length
+# may be `remaining`. An encoder writes nothing for it and does not require it; a value given
+# for it is compared with what the field decodes from the bytes the other fields write over
+# its span - its `format` and `separator`, or PS-534's trailing 0x00 removal, applied first -
+# and a value that differs is rejected, naming the field.
+#
+# Two lists, read by the reference and the generated codec (tests/test_cr_2026_175_cases.py),
+# Go (go/schema/cr175_test.go), Java (CR2026175Test.java) and C# (CR2026_175Tests.cs). C has
+# no non-consuming byte string, and tools/schema_binary.py refuses one (PS-446).
+#
+#   decode: `schema` (YAML text), `payload` (hex) and either `expected` (JSON text of the
+#           whole decoded data) or `error` (text one of the errors contains).
+#   cases:  `schema`, `input` (JSON text) and either `payload` (hex) or `error`.
+#
+# The errors are the spec prototype's text (TestCR2026175NonConsumingByteStrings).
+
+decode:
+
+- name: the_cr_example
+  schema: "name: t\nendian: big\nfields:\n  - {name: raw, type: bytes, length: remaining, consume: 0, format: hex}\n  - {name: temperature, type: s16, div: 10}\n  - {name: humidity, type: u8}\n"
+  payload: "00d75a"
+  expected: '{"raw": "00d75a", "temperature": 21.5, "humidity": 90}'
+
+- name: an_echo_beside_a_field_that_consumes_the_remainder
+  schema: "name: t\nendian: big\nfields:\n  - {name: raw, type: bytes, length: remaining, consume: 0}\n  - {name: rest, type: bytes, length: remaining}\n"
+  payload: "0102"
+  expected: '{"raw": "0102", "rest": "0102"}'
+
+- name: hex_re_reads
+  schema: "name: t\nendian: big\nfields:\n  - {name: cmd, type: hex, length: 2, consume: 0}\n  - {name: a, type: u8}\n  - {name: b, type: u8}\n"
+  payload: "0102"
+  expected: '{"cmd": "0102", "a": 1, "b": 2}'
+
+- name: ascii_re_reads
+  schema: "name: t\nendian: big\nfields:\n  - {name: cmd, type: ascii, length: 2, consume: 0}\n  - {name: a, type: u8}\n  - {name: b, type: u8}\n"
+  payload: "4142"
+  expected: '{"cmd": "AB", "a": 65, "b": 66}'
+
+- name: a_span_in_the_middle_of_the_frame
+  schema: "name: t\nendian: big\nfields:\n  - {name: a, type: u8}\n  - {name: cmd, type: hex, length: 2, consume: 0}\n  - {name: b, type: u16}\n"
+  payload: "010203"
+  expected: '{"a": 1, "cmd": "0203", "b": 515}'
+
+- name: a_length_named_by_an_earlier_field
+  schema: "name: t\nendian: big\nfields:\n  - {name: n, type: u8}\n  - {name: body, type: bytes, length: $n, consume: 0}\n  - {name: v, type: u16}\n"
+  payload: "020a0b"
+  expected: '{"n": 2, "body": "0a0b", "v": 2571}'
+
+- name: a_format_and_separator_apply
+  schema: "name: t\nendian: big\nfields:\n  - {name: raw, type: bytes, length: remaining, consume: 0, format: 'hex:upper', separator: ':'}\n  - {name: v, type: u16}\n"
+  payload: "00d7"
+  expected: '{"raw": "00:D7", "v": 215}'
+
+- name: ascii_trailing_nul_removed
+  schema: "name: t\nendian: big\nfields:\n  - {name: tag, type: ascii, length: 3, consume: 0}\n  - {name: a, type: u8}\n  - {name: b, type: u8}\n  - {name: c, type: u8}\n"
+  payload: "414200"
+  expected: '{"tag": "AB", "a": 65, "b": 66, "c": 0}'
+
+- name: consume_one_still_advances
+  schema: "name: t\nendian: big\nfields:\n  - {name: cmd, type: hex, length: 1, consume: 1}\n  - {name: a, type: u8}\n"
+  payload: "0102"
+  expected: '{"cmd": "01", "a": 2}'
+
+- name: a_span_past_the_end_is_an_underflow
+  schema: "name: t\nendian: big\nfields:\n  - {name: raw, type: bytes, length: 4, consume: 0}\n"
+  payload: "01"
+  error: "Field 'raw': Buffer underflow: need 4 bytes at offset 0, but only 1 remaining (PS-535)"
+
+cases:
+
+- name: encoding_writes_nothing_and_does_not_require_it
+  schema: "name: t\nendian: big\nfields:\n  - {name: raw, type: bytes, length: remaining, consume: 0, format: hex}\n  - {name: temperature, type: s16, div: 10}\n  - {name: humidity, type: u8}\n"
+  input: '{"temperature": 21.5, "humidity": 90}'
+  payload: "00d75a"
+
+- name: a_given_value_that_agrees
+  schema: "name: t\nendian: big\nfields:\n  - {name: raw, type: bytes, length: remaining, consume: 0, format: hex}\n  - {name: temperature, type: s16, div: 10}\n  - {name: humidity, type: u8}\n"
+  input: '{"raw": "00d75a", "temperature": 21.5, "humidity": 90}'
+  payload: "00d75a"
+
+- name: a_given_value_that_differs_is_rejected
+  schema: "name: t\nendian: big\nfields:\n  - {name: raw, type: bytes, length: remaining, consume: 0, format: hex}\n  - {name: temperature, type: s16, div: 10}\n  - {name: humidity, type: u8}\n"
+  input: '{"raw": "00d75b", "temperature": 21.5, "humidity": 90}'
+  error: "Field 'raw' is given '00d75b', but the other fields write '00d75a' over its span (PS-589)"
+
+- name: the_format_is_applied_before_comparing
+  schema: "name: t\nendian: big\nfields:\n  - {name: raw, type: bytes, length: remaining, consume: 0, format: 'hex:upper', separator: ':'}\n  - {name: v, type: u16}\n"
+  input: '{"raw": "00:D7", "v": 215}'
+  payload: "00d7"
+
+- name: an_unformatted_value_differs_from_the_formatted_one
+  schema: "name: t\nendian: big\nfields:\n  - {name: raw, type: bytes, length: remaining, consume: 0, format: 'hex:upper', separator: ':'}\n  - {name: v, type: u16}\n"
+  input: '{"raw": "00d7", "v": 215}'
+  error: "Field 'raw' is given '00d7', but the other fields write '00:D7' over its span (PS-589)"
+
+- name: ascii_padding_is_removed_before_comparing
+  schema: "name: t\nendian: big\nfields:\n  - {name: tag, type: ascii, length: 3, consume: 0}\n  - {name: a, type: u8}\n  - {name: b, type: u8}\n  - {name: c, type: u8}\n"
+  input: '{"tag": "AB", "a": 65, "b": 66, "c": 0}'
+  payload: "414200"
+
+- name: a_span_in_the_middle_of_the_frame
+  schema: "name: t\nendian: big\nfields:\n  - {name: a, type: u8}\n  - {name: cmd, type: hex, length: 2, consume: 0}\n  - {name: b, type: u16}\n"
+  input: '{"a": 1, "cmd": "0203", "b": 515}'
+  payload: "010203"
+
+- name: a_mid_frame_value_that_differs_is_rejected
+  schema: "name: t\nendian: big\nfields:\n  - {name: a, type: u8}\n  - {name: cmd, type: hex, length: 2, consume: 0}\n  - {name: b, type: u16}\n"
+  input: '{"a": 1, "cmd": "0204", "b": 515}'
+  error: "Field 'cmd' is given '0204', but the other fields write '0203' over its span (PS-589)"
+
+- name: a_length_named_by_an_earlier_field
+  schema: "name: t\nendian: big\nfields:\n  - {name: n, type: u8}\n  - {name: body, type: bytes, length: $n, consume: 0}\n  - {name: v, type: u16}\n"
+  input: '{"n": 2, "body": "0a0b", "v": 2571}'
+  payload: "020a0b"
+
+- name: a_span_the_frame_does_not_reach
+  schema: "name: t\nendian: big\nfields:\n  - {name: raw, type: bytes, length: 4, consume: 0}\n  - {name: a, type: u8}\n"
+  input: '{"raw": "01020304", "a": 1}'
+  error: "Field 'raw' is given '01020304', but the other fields write too few bytes over its span (PS-589)"
+
+- name: an_element_echo_is_checked_with_its_element
+  schema: "name: t\nendian: big\nfields:\n  - name: items\n    type: repeat\n    count: 2\n    fields:\n      - {name: raw, type: hex, length: 2, consume: 0}\n      - {name: v, type: u16}\n"
+  input: '{"items": [{"v": 1}, {"raw": "0002", "v": 2}]}'
+  payload: "00010002"
+
+- name: an_element_echo_that_differs_is_rejected
+  schema: "name: t\nendian: big\nfields:\n  - name: items\n    type: repeat\n    count: 2\n    fields:\n      - {name: raw, type: hex, length: 2, consume: 0}\n      - {name: v, type: u16}\n"
+  input: '{"items": [{"v": 1}, {"raw": "0003", "v": 2}]}'
+  error: "Field 'raw' is given '0003', but the other fields write '0002' over its span (PS-589)"

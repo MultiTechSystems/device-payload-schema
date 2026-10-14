@@ -843,6 +843,43 @@ function encDigitBits(text, base) {
   return bits;
 }
 
+function encPow2Text(k, less) {                       // 2^k, or 2^k - 1, in decimal
+  if (less && k === 0) return "0";
+  var n = less ? Math.ceil(k / 8) : Math.floor(k / 8) + 1, bytes = [];
+  for (var i = 0; i < n; i++) bytes.push(less ? 0xFF : 0);
+  if (less) { if (k % 8) bytes[0] = (1 << (k % 8)) - 1; } else bytes[0] = 1 << (k % 8);
+  return decimalOf(bytes);
+}
+
+function encSegmentBits(segment, width, fmt, name) {  // parse_bitfield_segment
+  // PS-096, PS-431, PS-583: leading zeros accepted, hex without regard to case, a `-` only
+  // on sdecimal; a value the part's width cannot hold is rejected, never masked. The
+  // part's bits, least significant first, exact at any width.
+  var base = partFormat(fmt).base, text = String(segment).replace(/^\s+|\s+$/g, "");
+  var re = base === "sdecimal" ? /^-?[0-9]+$/ : base === "decimal" ? /^[0-9]+$/ : /^[0-9A-Fa-f]+$/;
+  if (!re.test(text)) encFail("Field '" + name + "': segment " + encPyRepr(String(segment)) + " is not a " + base + " part (PS-096)");
+  var neg = text.charAt(0) === "-", bits = encDigitBits(neg ? text.slice(1) : text, base.indexOf("hex") === 0 ? 16 : 10);
+  var len = 0, b;
+  for (b = 0; b < bits.length; b++) if (bits[b]) len = b + 1;
+  var fits;
+  if (base !== "sdecimal") fits = len <= width;
+  else if (!neg) fits = len <= width - 1;
+  else fits = len <= width - 1 || (len === width && bits.slice(0, width - 1).indexOf(1) < 0);
+  if (!fits) {
+    var range = base === "sdecimal"
+      ? "-" + encPow2Text(width - 1, false) + " to " + encPow2Text(width - 1, true)
+      : "0 to " + encPow2Text(width, true);
+    encFail("Field '" + name + "': segment " + encPyRepr(String(segment)) + " does not fit a " + width + "-bit " + base + " part, " + range + " (PS-583)");
+  }
+  var out = [];
+  for (b = 0; b < width; b++) out.push(bits[b] ? 1 : 0);
+  if (neg && len) {                                     // two's complement within the width
+    for (b = 0; b < width; b++) out[b] ^= 1;
+    for (b = 0; b < width; b++) { out[b] ^= 1; if (out[b]) break; }
+  }
+  return out;
+}
+
 function encBitfieldString(out, f, value, ctx) {      // _encode_bitfield_string
   var parts = f.parts || [], delim = f.delimiter === undefined ? "." : f.delimiter;
   var prefix = f.prefix || "", length = f.length === undefined ? 2 : f.length;
@@ -854,18 +891,9 @@ function encBitfieldString(out, f, value, ctx) {      // _encode_bitfield_string
     if (p.length < 2) continue;
     var fmt = p.length > 2 ? p[2] : "decimal";
     var seg = i < segs.length ? segs[i] : "0";
-    var hexFmt = fmt === "hex" || fmt === "hex:upper";
-    var v = hexFmt ? parseInt(seg, 16) : parseInt(seg, 10);
-    if (isNaN(v)) encFail("invalid literal for bitfield_string segment: " + JSON.stringify(seg));
-    if (Math.abs(v) > 9007199254740991) {
-      // Past 2^53 a Number has already lost the low bits, so place the digits exactly.
-      var bits = encDigitBits(seg, hexFmt ? 16 : 10);
-      if (!bits) encFail("invalid literal for bitfield_string segment: " + JSON.stringify(seg));
-      var start = Number(p[0]), width = Number(p[1]);
-      for (var b = 0; b < width && b < bits.length; b++) if (bits[b]) packed[start + b] = 1;
-      continue;
-    }
-    packed = encPlace(packed, v, Number(p[0]), Number(p[1]));
+    var start = Number(p[0]), width = Number(p[1]);
+    var bits = encSegmentBits(seg, width, fmt, f.name);
+    for (var b = 0; b < width; b++) if (bits[b]) packed[start + b] = 1;
   }
   // PS-050a: the field's own byte order, as it is decoded; this wrote the document's.
   encPacked(out, packed, length, f.endian === "little" || f.endian === "big" ? f.endian : ctx.endian);
@@ -1500,7 +1528,7 @@ function encCaseClaims(fields, optional) {             // _case_claims
     if ("match" in f && !f.type) { out = out.concat(encMatchClaims(f.match)); return; }
     if (!f.name || String(f.name).charAt(0) === "_") return;
     // A literal or computed field claims its name, never required (no-silent-empty).
-    if (encIsLiteral(f) || ENC_COMPUTED.indexOf(f.type) >= 0) { out.push([f, true]); return; }
+    if (encIsLiteral(f) || ENC_COMPUTED.indexOf(f.type) >= 0 || encIsEcho(f)) { out.push([f, true]); return; }
     // PS-551 (CR-2026-141): a peek the fields after it fix need not be given.
     out.push([f, !!optional || f.optional === true || covered.indexOf(f) >= 0]);
   });
@@ -1717,6 +1745,7 @@ function encEmit(fr, bytes, carried) {
   }
   for (var c = 0; c < bytes.length; c++) encCover(fr, offset + c, encCov(bytes, c));
   (bytes.pk || []).forEach(function (pk) { fr.pk.push(encShifted(pk, offset)); });
+  (bytes.ec || []).forEach(function (ec) { fr.ec.push(encEchoShifted(ec, offset)); });
   var merged = [];
   for (var i = 0; i < bytes.length; i++) merged.push(i < shared ? (bytes[i] | fr.pend[i]) : bytes[i]);
   fr.pend.splice(0, shared);
@@ -1799,6 +1828,73 @@ function encPeekDisagreement(peeks, frame) {          // peek_disagreement
   return "A field writes bits a peek before it set otherwise (PS-551)";
 }
 
+/* PS-588 (CR-2026-175): a bytes, hex or ascii field declaring `consume: 0` (is_echo). */
+function encIsEcho(f) {
+  return (f.type === "bytes" || f.type === "hex" || f.type === "ascii") && f.consume === 0;
+}
+
+/* PS-589: each one given a value is listed in `ec` as {p, f, given, n} (Frame.echoes): n
+ * its byte count from the input, null for `remaining`, which reaches the frame's end. */
+function encEchoShifted(ec, by) { return { p: ec.p + by, f: ec.f, given: ec.given, n: ec.n }; }
+
+function encEchoLength(f, data) {                     // echo_length
+  var raw = f.length === undefined ? 1 : f.length;
+  if (typeof raw === "string") {
+    var text = raw.trim();
+    if (text.toLowerCase() === "remaining") return null;
+    if (!/^-?\d+$/.test(text)) {
+      var ref = text.charAt(0) === "$" ? text.slice(1) : text, v = data[ref];
+      if (typeof v !== "number" || v < 0 || v !== Math.floor(v)) encFail(encMissing(ref));
+      return v;
+    }
+    raw = parseInt(text, 10);
+  }
+  return raw < 0 ? null : raw;
+}
+
+function encEchoValue(f, span) {                      // echo_value
+  var i, out = "";
+  if (f.type === "ascii") {
+    for (i = 0; i < span.length; i++) out += String.fromCharCode(span[i]);
+    out = out.replace(/\u0000+$/, "");
+    if (f.numeral) {
+      var re = f.numeral === "hex" ? /^[0-9A-Fa-f]+$/ : /^[+-]?[0-9]+$/;
+      if (!re.test(out)) return null;
+      return parseInt(out, f.numeral === "hex" ? 16 : 10);
+    }
+    return out;
+  }
+  var fmt = f.type === "bytes" ? (f.format || "hex") : "hex";
+  if (fmt === "array") return span.slice();
+  if (fmt === "base64") return toBase64(span, 0, span.length);
+  var sep = f.type === "bytes" && f.separator !== undefined ? String(f.separator) : "";
+  for (i = 0; i < span.length; i++) {
+    var d = ("0" + span[i].toString(16)).slice(-2);
+    out += (i ? sep : "") + (fmt === "hex:upper" ? d.toUpperCase() : d);
+  }
+  return out;
+}
+
+function encEchoText(v) {                             // echo_text
+  if (Array.isArray(v)) return "'[" + v.map(function (x) { return encEchoText(x).replace(/^'|'$/g, ""); }).join(", ") + "]'";
+  if (typeof v === "boolean") return v ? "true" : "false";
+  if (typeof v === "number") return String(v);
+  return "'" + String(v) + "'";
+}
+
+function encCheckEchoes(arr) {                        // check_echoes
+  (arr.ec || []).forEach(function (ec) {
+    var n = ec.n === null ? Math.max(0, arr.length - ec.p) : ec.n, written;
+    if (ec.p + n > arr.length) written = "too few bytes";
+    else {
+      var found = encEchoValue(ec.f, Array.prototype.slice.call(arr, ec.p, ec.p + n));
+      if (found !== null && JSON.stringify(found) === JSON.stringify(ec.given)) return;
+      written = found === null ? "too few bytes" : encEchoText(found);
+    }
+    encFail("Field '" + ec.f.name + "' is given " + encEchoText(ec.given) + ", but the other fields write " + written + " over its span (PS-589)");
+  });
+}
+
 function encCheckPeeks(arr) {                         // check_peeks
   (arr.pk || []).forEach(function (pk) {
     if (pk.raw === null) {
@@ -1812,6 +1908,7 @@ function encCheckPeeks(arr) {                         // check_peeks
     var found = encPeekFound(arr, pk, true);
     if (found !== pk.raw) encFail(encPeekDisagreement([pk], arr));
   });
+  encCheckEchoes(arr);                                 // PS-589 (CR-2026-175)
 }
 
 /* PS-551: what the input omits but the rest of it fixes (_derive_inputs and helpers). */
@@ -2091,7 +2188,7 @@ function encListIn(out, fields, data, ctx, top, entry) {
   data = encDerive(fields, data, ctx);
   // CR-2026-136: a frame laid out as a decoder reads it (FrameBuffer). A bit range or
   // bool that does not consume leaves its bytes pending, and the next field's are ORed in.
-  var fr = { out: [], pend: [], cov: {}, pk: [] };
+  var fr = { out: [], pend: [], cov: {}, pk: [], ec: [] };
   // PS-564 (TailLevel): bytes an item adds go to the checks earlier items registered.
   var tl = { checks: [], size: null, mark: 0 };
   function tlClose() {
@@ -2122,6 +2219,10 @@ function encListIn(out, fields, data, ctx, top, entry) {
     out.pk = out.pk || [];
     fr.pk.forEach(function (pk) { out.pk.push(encShifted(pk, base)); });
   }
+  if (fr.ec.length) {
+    out.ec = out.ec || [];
+    fr.ec.forEach(function (ec) { out.ec.push(encEchoShifted(ec, base)); });
+  }
   return fr.pend.length;     // the bytes at the end still pending (Frame.pending)
 
   function encOne(item, out) {
@@ -2150,6 +2251,12 @@ function encListIn(out, fields, data, ctx, top, entry) {
       var n = typeof f.length === "string" ? 0 : Math.max(0, parseInt(f.length === undefined ? 1 : f.length, 10));
       // CR-2026-141 (padding): a skip's zeros fix no peek's bits and contradict none.
       for (var i = 0; i < n; i++) { out.unc = out.unc || {}; out.unc[out.length] = 0; out.push(0); }
+      return;
+    }
+    if (encIsEcho(f)) {
+      // PS-589 (CR-2026-175): it re-reads bytes the other fields write, so it writes none
+      // and is not required; a value given for it is checked where the frame closes.
+      if (name && encHas(data, name)) fr.ec.push({ p: fr.out.length, f: f, given: data[name], n: encEchoLength(f, data) });
       return;
     }
     if (encIsLiteral(f)) return;
@@ -2607,6 +2714,9 @@ def compute_to_js(compute: Dict[str, Any]) -> str:
         # infinity. Operands truncate first (PS-284), matching the interpreters.
         return (f'({b_js} !== 0 ? Math.floor(Math.trunc({a_js}) / Math.trunc({b_js})) '
                 f': undefined)')
+    elif op == 'pow':
+        # PS-584: a result that is not a finite real number (NaN, an infinity) is absent.
+        return (f'((r) => Number.isFinite(r) ? r : undefined)(Math.pow({a_js}, {b_js}))')
     return '0'
 
 
@@ -3247,14 +3357,43 @@ function bitBytes(bytes, off, width) {
   return out;
 }
 
-/* One part of a bitfield_string, rendered in `fmt` (PS-430). */
+/* A part format's base and minimum width (PS-430): decimal, sdecimal, hex or hex:upper,
+ * with an optional `:N` from 1 to 32. The generator refuses any other at load. */
+function partFormat(fmt) {
+  var m = /^(decimal|sdecimal|hex:upper|hex)(?::([1-9][0-9]?))?$/.exec(String(fmt));
+  if (!m || (m[2] && Number(m[2]) > 32)) throw new Error("bitfield_string part format " + fmt + " (PS-430)");
+  return {base: m[1], width: m[2] ? Number(m[2]) : 0};
+}
+
+/* A magnitude (bytes, most significant first) in a part format's base: hex lower or upper
+ * case, else decimal; `-` first where `neg`; zero-filled on the left to `width` digits and
+ * never cut (PS-430, PS-582). The one formatter, for CR-2026-176's templates too. */
+function partText(neg, mag, base, width) {
+  var digits;
+  if (base === 'hex' || base === 'hex:upper') {
+    digits = '';
+    for (var k = 0; k < mag.length; k++) digits += (mag[k] < 16 ? '0' : '') + mag[k].toString(16);
+    digits = digits.replace(/^0+/, '') || '0';
+    if (base === 'hex:upper') digits = digits.toUpperCase();
+  } else {
+    digits = decimalOf(mag);
+  }
+  while (digits.length < width) digits = '0' + digits;
+  return (neg ? '-' : '') + digits;
+}
+
+/* One part of a bitfield_string, rendered in `fmt` (PS-430); `sdecimal` reads its bits as
+ * two's complement of the part's width (PS-582). */
 function bitfieldPart(bytes, off, width, fmt) {
-  var out = bitBytes(bytes, off, width);
-  if (fmt === 'decimal') return decimalOf(out);
-  var hex = '';
-  for (var k = 0; k < out.length; k++) hex += (out[k] < 16 ? '0' : '') + out[k].toString(16);
-  hex = hex.replace(/^0+/, '') || '0';
-  return fmt === 'hex:upper' ? hex.toUpperCase() : hex;
+  var f = partFormat(fmt), out = bitBytes(bytes, off, width), neg = false, k;
+  if (f.base === 'sdecimal' && width > 0 && (out[0] >> ((width - 1) % 8)) & 1) {
+    neg = true;
+    var spare = out.length * 8 - width;
+    for (k = 0; k < out.length; k++) out[k] = (~out[k]) & 0xFF;
+    out[0] &= 0xFF >> spare;
+    for (k = out.length - 1; k >= 0; k--) { out[k] = (out[k] + 1) & 0xFF; if (out[k]) break; }
+  }
+  return partText(neg, out, f.base, f.width);
 }
 
 /* A bit range of a base wider than six bytes, sign-extended from the range's width when
@@ -4387,6 +4526,11 @@ function writeS(buf, pos, size, value, endian) {
             # A declared length the payload cannot supply is an error, as in every
             # interpreter; the loops below stopped at the end and reported what was left.
             lines.append(f'{i}  need(buf, pos, {js_name}_n);')
+            # PS-588 (CR-2026-175): `consume: 0` re-reads the span; the position stays.
+            from schema_interpreter import is_echo
+            echo = is_echo(field)
+            if echo:
+                lines.append(f'{i}  var {js_name}_p0 = pos;')
             if ftype == 'ascii':
                 lines.append(f'{i}  for (var _si = 0; _si < {js_name}_n && pos < buf.length; _si++)'
                              f' {{ {js_name} += String.fromCharCode(buf[pos++]); }}')
@@ -4399,6 +4543,8 @@ function writeS(buf, pos, size, value, endian) {
                 warning = json.dumps(ASCII_HIGH_BYTE_WARNING.format(field.get('name')))
                 lines.append(f'{i}  if (/[\\u0080-\\u00ff]/.test({js_name})) wn.push({warning});')
                 lines.append(f'{i}  {js_name} = {js_name}.replace(/\\u0000+$/, "");')
+                if echo:
+                    lines.append(f'{i}  pos = {js_name}_p0;')
                 if field.get('numeral'):
                     # PS-560: the whole text is a numeral of the declared base, or an error
                     # naming the field; parseInt alone would take a prefix.
@@ -4442,6 +4588,8 @@ function writeS(buf, pos, size, value, endian) {
                 upper = '.toUpperCase()' if fmt == 'hex:upper' else ''
                 lines.append(f'{i}  for (var _si = 0; _si < {js_name}_n && pos < buf.length; _si++)'
                              f' {{ {js_name} += (_si ? {sep} : "") + ("0" + buf[pos++].toString(16)).slice(-2){upper}; }}')
+            if echo and ftype != 'ascii':
+                lines.append(f'{i}  pos = {js_name}_p0;')
             if not name.startswith('_'):
                 guards, target = name_from_to_js(field, js_name)
                 for guard in guards:
@@ -4697,6 +4845,7 @@ function writeS(buf, pos, size, value, endian) {
         return f'encReverseModifiers({val_var}, {json.dumps(field, default=str)})'
 
     def _gen_decode_bitfield_string(self, field: Dict) -> List[str]:
+        from schema_interpreter import parse_part_format
         i = self._i()
         lines = []
         name = to_js_name(field['name'])
@@ -4717,10 +4866,8 @@ function writeS(buf, pos, size, value, endian) {
             offset = int(part[0])
             width = int(part[1])
             fmt = part[2] if len(part) > 2 else 'decimal'
-            # PS-430: hex lower case, hex:upper upper case, anything else refused.
-            if fmt not in ('decimal', 'hex', 'hex:upper'):
-                raise ValueError(f"bitfield_string part format {fmt!r} is not one of "
-                                 f"decimal, hex, hex:upper (PS-430)")
+            # PS-430: decimal, sdecimal, hex or hex:upper with an optional :N width.
+            parse_part_format(fmt)
             seg_exprs.append(
                 f'bitfieldPart({name}_raw, {offset}, {width}, {json.dumps(fmt)})'
             )
@@ -5364,50 +5511,74 @@ function writeS(buf, pos, size, value, endian) {
             lines.append('function encodeDownlink(input) {')
             lines.append('  try {')
             lines.append(f'    var endian = "{self.endian}";')
-            # The port the caller names, where it has one (PS-292: never an entry that
-            # declares itself uplink-only); else the first entry declaring downlink. This
-            # used to ignore input.fPort and always encode the first downlink entry.
+            # PS-581 (CR-2026-169): the port the caller names chooses its entry, or the
+            # `default` entry where none lists it, and an entry declared uplink takes no
+            # downlink (encodeDownlink is always a downlink). Without one: the single entry
+            # declaring downlink, else the single downlink-capable entry (downlink, both or
+            # no declaration, PS-287), else the input is rejected naming the candidates. A
+            # `default` entry is never chosen without a port: it has no number to report.
             ports = self.schema['ports']
-            encodable = [pk for pk, pd in ports.items()
-                         if isinstance(pd, dict) and pd.get('direction') != 'uplink']
-            dl_ports = [pk for pk, pd in ports.items()
-                        if isinstance(pd, dict) and pd.get('direction') == 'downlink']
+            name = self.schema.get('name')
+            numbered = {int(pk): pd for pk, pd in ports.items()
+                        if str(pk) != 'default' and isinstance(pd, dict)}
+            choice = None
+            reject = None
+            for tier, wanted in (('declared downlink', ('downlink',)),
+                                 ('downlink-capable', ('downlink', 'both', None))):
+                found = sorted(pk for pk, pd in numbered.items()
+                               if pd.get('direction') in wanted)
+                if len(found) == 1:
+                    choice = found[0]
+                    break
+                if len(found) > 1:
+                    reject = (f"no FPort was given, and schema '{name}' has {len(found)} "
+                              f"{tier} port entries ({', '.join(map(str, found))}); "
+                              f"give the FPort (PS-581)")
+                    break
+            if choice is None and reject is None:
+                reject = (f"no FPort was given, and schema '{name}' has no port entry "
+                          f"that takes a downlink (PS-581)")
             lines.append('    var port = input.fPort;')
             lines.append('    var r;')
+            lines.append('    if (port === undefined || port === null) {')
+            if choice is not None:
+                lines.append(f'      port = {choice};')
+            else:
+                lines.append(f'      return {{ bytes: [], fPort: 1, warnings: [], errors: '
+                             f'[{json.dumps(reject)}] }};')
+            lines.append('    }')
             first = True
-            for pk in encodable:
-                if not str(pk).isdigit():
-                    continue
+            for pk, pd in sorted(numbered.items()):
                 kw = 'if' if first else '} else if'
                 first = False
                 lines.append(f'    {kw} (port === {pk}) {{')
-                lines.append(f'      r = encodePort{pk}(input.data, endian);')
-            uplink_only = [pk for pk, pd in ports.items()
-                           if isinstance(pd, dict) and pd.get('direction') == 'uplink'
-                           and str(pk).isdigit()]
-            for pk in uplink_only:
-                kw = 'if' if first else '} else if'
-                first = False
-                lines.append(f'    {kw} (port === {pk}) {{')
-                lines.append(f'      return {{ bytes: [], fPort: {pk}, warnings: [], errors: '
-                             f'["fPort {pk} declares direction uplink, so it is not encoded as a '
-                             f'downlink (PS-292)"] }};')
-            if 'default' in encodable:
-                # PS-024: an unlisted port encodes through the `default` entry.
-                kw = 'if' if first else '} else if'
-                first = False
-                lines.append(f'    {kw} (typeof port === "number") {{')
-                lines.append('      r = encodePortdefault(input.data, endian);')
+                if pd.get('direction') == 'uplink':
+                    msg = (f'FPort {pk} is declared direction:uplink and takes no '
+                           f'downlink to encode (PS-581)')
+                    lines.append(f'      return {{ bytes: [], fPort: {pk}, warnings: [], '
+                                 f'errors: [{json.dumps(msg)}] }};')
+                else:
+                    lines.append(f'      r = encodePort{pk}(input.data, endian);')
+            fallback = ports.get('default')
             kw = 'if' if first else '} else if'
-            if dl_ports:
-                lines.append(f'    {kw} (port === undefined || port === null) {{')
-                lines.append(f'      port = {dl_ports[0]};')
-                lines.append(f'      r = encodePort{dl_ports[0]}(input.data, endian);')
+            if isinstance(fallback, dict):
+                # PS-024: an unlisted port encodes through the `default` entry.
+                lines.append(f'    {kw} (typeof port === "number") {{')
+                if fallback.get('direction') == 'uplink':
+                    msg = ('FPort " + port + " is declared direction:uplink and takes no '
+                           'downlink to encode (PS-581)')
+                    lines.append(f'      return {{ bytes: [], fPort: port, warnings: [], '
+                                 f'errors: ["{msg}"] }};')
+                else:
+                    lines.append('      r = encodePortdefault(input.data, endian);')
                 lines.append('    } else {')
             else:
-                lines.append(f'    {kw} (true) {{' if first else '    } else {')
-            lines.append('      return { bytes: [], fPort: port || 1, warnings: [], errors: '
-                         '["No encodable entry for fPort " + port] };')
+                lines.append(f'    {kw} (true) {{' if not first else '    if (true) {')
+            known = ', '.join(str(k) for k in sorted(numbered)) or 'nothing'
+            msg = (f"matches no port entry and schema '{name}' declares no default; "
+                   f"it defines {known} (PS-581)")
+            lines.append(f'      return {{ bytes: [], fPort: port, warnings: [], errors: '
+                         f'["FPort " + port + {json.dumps(" " + msg)}] }};')
             lines.append('    }')
             lines.append('    return { bytes: r.bytes, fPort: port, warnings: r.warnings, errors: [] };')
             lines.append('  } catch (e) {')
@@ -5420,6 +5591,9 @@ function writeS(buf, pos, size, value, endian) {
             # as the `ports` branch enforces an entry's (PS-288, PS-292); the message is
             # the reference interpreter's. No declaration accepts both (PS-287).
             declared_dir = self.schema.get('direction')
+            # PS-581: the FPort reported is the caller's, else the document's (PS-458).
+            doc = self.schema.get('fPort', self.schema.get('fport'))
+            doc_fport = f'{doc} || ' if isinstance(doc, int) and not isinstance(doc, bool) else ''
 
             def guard(direction, encode=False):
                 if declared_dir is None or declared_dir in ('both', direction):
@@ -5428,7 +5602,7 @@ function writeS(buf, pos, size, value, endian) {
                     f"schema '{self.schema.get('name')}' is declared "
                     f"direction:{declared_dir}; message direction is {direction}")
                 if encode:
-                    lines.append(f'  if (true) {{ return {{ bytes: [], fPort: input.fPort || 1, '
+                    lines.append(f'  if (true) {{ return {{ bytes: [], fPort: input.fPort || {doc_fport}1, '
                                  f'warnings: [], errors: [{message}] }}; }}')
                 else:
                     lines.append(f'  if (true) {{ return {{ data: {{}}, warnings: [], '
@@ -5490,9 +5664,9 @@ function writeS(buf, pos, size, value, endian) {
                 guard('downlink', encode=True)
                 lines.append('  try {')
                 lines.append(f'    var r = encodePayload(input.data, "{self.endian}");')
-                lines.append('    return { bytes: r.bytes, fPort: input.fPort || 1, warnings: r.warnings, errors: [] };')
+                lines.append(f'    return {{ bytes: r.bytes, fPort: input.fPort || {doc_fport}1, warnings: r.warnings, errors: [] }};')
                 lines.append('  } catch (e) {')
-                lines.append('    return { bytes: [], fPort: input.fPort || 1, warnings: [], errors: [e.message] };')
+                lines.append(f'    return {{ bytes: [], fPort: input.fPort || {doc_fport}1, warnings: [], errors: [e.message] }};')
                 lines.append('  }')
                 lines.append('}')
 

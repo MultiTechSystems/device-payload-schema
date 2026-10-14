@@ -48,7 +48,7 @@ public class CR2026096Test {
         List<String> keys = new ArrayList<>(out.keySet());
         assertEquals("_meta", keys.get(keys.size() - 1));
         assertEquals(Map.of("schema", "flat",
-                        "fields", Map.of("a", Map.of("type", "u8", "reports", "integer", "unit", "V"),
+                        "fields", Map.of("a", Map.of("type", "u8", "reports", "integer", "unit", "V", "display_unit", "V"),
                                 "b", Map.of("type", "u8", "reports", "integer"))),
                 out.get("_meta"));
     }
@@ -214,10 +214,10 @@ public class CR2026096Test {
         Schema schema = Schema.fromYaml(agreement("type: s16, unit: Cel, description: two"));
         Map<String, Object> meta = (Map<String, Object>) schema.interpret(new byte[] {2, (byte) 0xFF, (byte) 0x9C},
                 none()).get("_meta");
-        assertEquals(Map.of("r", Map.of("type", "s16", "reports", "integer", "unit", "Cel", "description", "two")),
+        assertEquals(Map.of("r", Map.of("type", "s16", "reports", "integer", "unit", "Cel", "display_unit", "Cel", "description", "two")),
                 meta.get("fields"));
         meta = (Map<String, Object>) schema.interpret(new byte[] {1, 5}, none()).get("_meta");
-        assertEquals(Map.of("r", Map.of("type", "u8", "reports", "integer", "unit", "Cel")), meta.get("fields"));
+        assertEquals(Map.of("r", Map.of("type", "u8", "reports", "integer", "unit", "Cel", "display_unit", "Cel")), meta.get("fields"));
     }
 
     @Test

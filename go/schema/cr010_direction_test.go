@@ -198,7 +198,7 @@ ports:
 }
 
 func TestEncodeDirection(t *testing.T) {
-	// PS-292: the mirror of the decode check, so a frame is not built for an entry that
+	// PS-292, worded by PS-581: the mirror of the decode check, so a frame is not built for an entry that
 	// disclaims the direction it would travel.
 	s := cr010Parse(t, cr010Schema)
 
@@ -206,7 +206,7 @@ func TestEncodeDirection(t *testing.T) {
 	if err == nil {
 		t.Fatalf("expected an error, got payload = %v", payload)
 	}
-	want := "fPort 1 is declared direction:uplink; message direction is downlink"
+	want := "FPort 1 is declared direction:uplink and takes no downlink to encode (PS-581)"
 	if err.Error() != want {
 		t.Errorf("error = %q, want %q", err.Error(), want)
 	}

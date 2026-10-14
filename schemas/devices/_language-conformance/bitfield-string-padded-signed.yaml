@@ -1,0 +1,126 @@
+# Padded and signed parts of a string assembled from bits (PS-430, PS-582, CR-2026-170).
+# `:N` is a minimum width: a part with fewer digits is zero-filled on the left, one with more
+# is written in full and never cut. `sdecimal` reads its bits as two's complement of the
+# part's width and writes a `-` before any padding, so `-5` at width 2 is "-05".
+#
+# Each port is one rule, and every vector is canonical, so it round-trips. A segment the
+# width cannot hold, and every rejected format, are in tests/cr-2026-170-cases.yaml, since
+# no vector kind expects a failure.
+name: probe_bitfield_string_padded_signed
+endian: big
+ports:
+  1:
+    fields:
+      - name: mac_tail
+        type: bitfield_string
+        length: 2
+        delimiter: ":"
+        parts:
+          - [8, 8, "hex:2"]
+          - [0, 8, "hex:2"]
+  2:
+    fields:
+      - name: firmware
+        type: bitfield_string
+        length: 2
+        prefix: "V"
+        delimiter: "."
+        parts:
+          - [8, 8, "decimal:2"]
+          - [0, 8, "decimal:3"]
+  3:
+    fields:
+      - name: offsets
+        type: bitfield_string
+        length: 2
+        delimiter: ","
+        parts:
+          - [8, 8, sdecimal]
+          - [0, 8, sdecimal]
+  4:
+    fields:
+      - name: trim
+        type: bitfield_string
+        length: 1
+        delimiter: "/"
+        parts:
+          - [4, 4, "sdecimal:2"]
+          - [0, 4, "hex:upper:2"]
+  5:
+    fields:
+      - name: serial
+        type: bitfield_string
+        length: 2
+        parts:
+          - [0, 16, "hex:2"]
+test_vectors:
+  - name: hex_padded
+    source: generated
+    fPort: 1
+    payload: "0A3F"
+    expected: {mac_tail: "0a:3f"}
+  - name: hex_padded_zero
+    source: generated
+    fPort: 1
+    payload: "0000"
+    expected: {mac_tail: "00:00"}
+  - name: hex_padded_full
+    source: generated
+    fPort: 1
+    payload: "FFE1"
+    expected: {mac_tail: "ff:e1"}
+  - name: decimal_padded
+    source: generated
+    fPort: 2
+    payload: "0102"
+    expected: {firmware: "V01.002"}
+  - name: decimal_padded_tens
+    source: generated
+    fPort: 2
+    payload: "0C22"
+    expected: {firmware: "V12.034"}
+  - name: decimal_width_never_cuts
+    source: generated
+    fPort: 2
+    payload: "FFFF"
+    expected: {firmware: "V255.255"}
+  - name: signed_pair
+    source: generated
+    fPort: 3
+    payload: "FB03"
+    expected: {offsets: "-5,3"}
+  - name: signed_extremes
+    source: generated
+    fPort: 3
+    payload: "807F"
+    expected: {offsets: "-128,127"}
+  - name: signed_minus_one_and_zero
+    source: generated
+    fPort: 3
+    payload: "FF00"
+    expected: {offsets: "-1,0"}
+  - name: signed_padded_negative
+    source: generated
+    fPort: 4
+    payload: "FA"
+    expected: {trim: "-01/0A"}
+  - name: signed_padded_positive
+    source: generated
+    fPort: 4
+    payload: "7F"
+    expected: {trim: "07/0F"}
+  - name: signed_padded_minimum
+    source: generated
+    fPort: 4
+    payload: "80"
+    expected: {trim: "-08/00"}
+  - name: width_never_cuts
+    source: generated
+    fPort: 5
+    payload: "1234"
+    expected: {serial: "1234"}
+  - name: width_pads_a_short_value
+    source: generated
+    fPort: 5
+    payload: "0001"
+    expected: {serial: "01"}

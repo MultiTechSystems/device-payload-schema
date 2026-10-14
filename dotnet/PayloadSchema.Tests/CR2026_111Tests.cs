@@ -159,7 +159,7 @@ public class CR2026_111Tests
         Assert.Equal(new[] { "type", "reports", "element", "identity" }, entry.Keys);
         Assert.Equal("repeat", entry["type"]);
         var element = Assert.IsType<Dictionary<string, object?>>(entry["element"]);
-        Assert.Equal(new[] { "type", "reports", "unit" }, element.Keys);
+        Assert.Equal(new[] { "type", "reports", "unit", "display_unit" }, element.Keys);
         Assert.Equal("u16", element["type"]);
         Assert.Equal("Cel", element["unit"]);
         var identity = Assert.IsType<Dictionary<string, object?>>(entry["identity"]);
