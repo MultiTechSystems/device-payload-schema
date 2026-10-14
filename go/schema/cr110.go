@@ -454,7 +454,7 @@ func caseClaims(fields []Field, optional bool, out []caseClaim) []caseClaim {
 			out = append(out, caseClaim{f, true})
 			continue
 		}
-		if isLiteralField(f) || isComputedField(f) {
+		if isLiteralField(f) || isComputedField(f) || isEcho(f) {
 			// A literal or computed field writes no bytes, but only this case reports it,
 			// so it claims its name, never required: a literal where the input gives its
 			// value (a literal-only entry), a computed field so that the case is chosen

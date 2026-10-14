@@ -316,6 +316,13 @@ def field_errors(field: Dict, schema_endian: str = 'big') -> List[str]:
                    f"the C interpreter holds {C_MAX_NAME_BYTES} bytes of a name "
                    "(SCHEMA_MAX_NAME_LEN), and a name is never truncated", "PS-555")
 
+    if (field.get('type') in ('bytes', 'hex', 'ascii') and 'consume' in field
+            and field.get('consume') == 0 and not isinstance(field.get('consume'), bool)):
+        # CR-2026-175: a byte string that re-reads its span (PS-588). The C interpreter
+        # advances past every byte string, so the fields after it would read other bytes.
+        refuse("`consume: 0` on a byte string",
+               "the C interpreter has no non-consuming byte string (PS-588)")
+
     if 'match' in field and not field.get('type'):
         refuse("`match`", "this format has no inline match record")
     ftype = str(field.get('type', ''))

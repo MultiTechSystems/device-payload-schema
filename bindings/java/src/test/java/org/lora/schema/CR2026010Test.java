@@ -3,6 +3,7 @@ package org.lora.schema;
 import org.junit.jupiter.api.Test;
 
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -189,15 +190,16 @@ public class CR2026010Test {
 
     @Test
     public void encodingForAPortThatDisclaimsTheDirectionIsAnError() {
-        // PS-292: emitting the bytes would put a malformed frame on the air.
+        // PS-292, worded by PS-581: emitting the bytes would put a malformed frame on the
+        // air. The refusal is reported through the result, as every encode failure is.
         Map<String, Object> data = new LinkedHashMap<>();
         data.put("temperature", 23.5);
-        SchemaException.DecodeException caught = assertThrows(
-            SchemaException.DecodeException.class,
-            () -> Schema.fromYaml(PORTED).encodeWithPort(data, 1, Schema.DIRECTION_DOWNLINK));
+        EncodeResult result = Schema.fromYaml(PORTED).encodeWithPort(data, 1, Schema.DIRECTION_DOWNLINK);
+        assertFalse(result.isSuccess());
+        assertEquals(0, result.getPayload().length);
         assertEquals(
-            "fPort 1 is declared direction:uplink; message direction is downlink",
-            caught.getMessage());
+            List.of("FPort 1 is declared direction:uplink and takes no downlink to encode (PS-581)"),
+            result.getErrors());
     }
 
     @Test

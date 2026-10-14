@@ -1,0 +1,137 @@
+# CR-2026-171: `ties: up` on a round stage rounds an exact tie toward +infinity (PS-390), as
+# JavaScript's Math.round does, so a negative tie goes toward zero: -2.5 is -2, -3.5 is -3.
+# `even` and `away` are unchanged; any other `ties` is rejected at load.
+#
+# One case list read by the reference (tests/test_cr_2026_171_ties_up.py, which also runs the
+# TS013 generator's codec under node), Go (go/schema/cr171_test.go), Java (CR2026171Test.java)
+# and C# (CR2026_171Tests.cs). A case gives `schema` (YAML text) and either `error` - a text
+# every loader's message contains - or `payload` (hex) and `expected` (JSON text), the decode.
+# Encoding is untouched: a round stage is not inverted (PS-552).
+
+cases:
+
+- name: tie_table_even
+  schema: |
+    name: t
+    endian: big
+    fields:
+      - {name: a, type: s16, div: 2, transform: [{op: round, ties: even}]}
+      - {name: b, type: s16, div: 2, transform: [{op: round, ties: even}]}
+      - {name: c, type: s16, div: 2, transform: [{op: round, ties: even}]}
+      - {name: d, type: s16, div: 2, transform: [{op: round, ties: even}]}
+  payload: "0005 0007 FFFB FFF9"
+  expected: '{"a": 2, "b": 4, "c": -2, "d": -4}'
+
+- name: decimal_tie_even
+  schema: |
+    name: t
+    endian: big
+    fields:
+      - {name: p, type: s16, div: 1000, transform: [{op: round, decimals: 2, ties: even}]}
+      - {name: n, type: s16, div: 1000, transform: [{op: round, decimals: 2, ties: even}]}
+  payload: "007D FF83"
+  expected: '{"p": 0.12, "n": -0.12}'
+
+- name: tie_table_away
+  schema: |
+    name: t
+    endian: big
+    fields:
+      - {name: a, type: s16, div: 2, transform: [{op: round, ties: away}]}
+      - {name: b, type: s16, div: 2, transform: [{op: round, ties: away}]}
+      - {name: c, type: s16, div: 2, transform: [{op: round, ties: away}]}
+      - {name: d, type: s16, div: 2, transform: [{op: round, ties: away}]}
+  payload: "0005 0007 FFFB FFF9"
+  expected: '{"a": 3, "b": 4, "c": -3, "d": -4}'
+
+- name: decimal_tie_away
+  schema: |
+    name: t
+    endian: big
+    fields:
+      - {name: p, type: s16, div: 1000, transform: [{op: round, decimals: 2, ties: away}]}
+      - {name: n, type: s16, div: 1000, transform: [{op: round, decimals: 2, ties: away}]}
+  payload: "007D FF83"
+  expected: '{"p": 0.13, "n": -0.13}'
+
+- name: tie_table_up
+  schema: |
+    name: t
+    endian: big
+    fields:
+      - {name: a, type: s16, div: 2, transform: [{op: round, ties: up}]}
+      - {name: b, type: s16, div: 2, transform: [{op: round, ties: up}]}
+      - {name: c, type: s16, div: 2, transform: [{op: round, ties: up}]}
+      - {name: d, type: s16, div: 2, transform: [{op: round, ties: up}]}
+  payload: "0005 0007 FFFB FFF9"
+  expected: '{"a": 3, "b": 4, "c": -2, "d": -3}'
+
+- name: decimal_tie_up
+  schema: |
+    name: t
+    endian: big
+    fields:
+      - {name: p, type: s16, div: 1000, transform: [{op: round, decimals: 2, ties: up}]}
+      - {name: n, type: s16, div: 1000, transform: [{op: round, decimals: 2, ties: up}]}
+  payload: "007D FF83"
+  expected: '{"p": 0.13, "n": -0.12}'
+
+# The CR's own example, raw -999 over `div: 20`, is -49.95, which binary64 stores a little
+# below the tie (-49.9500000000000028), and PS-390 rounds the value itself, so it gives -50.0
+# under every rule. The tie here is exact: -0.25.
+- name: an_exact_tie_at_one_decimal
+  schema: |
+    name: t
+    endian: big
+    fields:
+      - name: temperature
+        type: s16
+        div: 4
+        transform: [{op: round, decimals: 1, ties: up}]
+  payload: "FFFF"
+  expected: '{"temperature": -0.2}'
+
+- name: the_cr_example_is_not_a_binary_tie
+  schema: |
+    name: t
+    endian: big
+    fields:
+      - name: temperature
+        type: s16
+        div: 20
+        transform: [{op: round, decimals: 1, ties: up}]
+  payload: "FC19"
+  expected: '{"temperature": -50}'
+
+# The vendor's own idiom, Math.round(x * 10) / 10, written as the CR's example: the multiply
+# lands exactly on -499.5, a tie, which `up` takes toward +infinity, giving -49.9 as the
+# vendor does where rounding -49.95 directly at one decimal gives -50.
+- name: the_cr_example_through_the_vendor_idiom
+  schema: |
+    name: t
+    endian: big
+    fields:
+      - name: temperature
+        type: s16
+        div: 20
+        transform: [{mult: 10}, {op: round, ties: up}, {div: 10}]
+  payload: "FC19"
+  expected: '{"temperature": -49.9}'
+
+- name: a_non_tie_rounds_to_nearest
+  schema: |
+    name: t
+    endian: big
+    fields:
+      - {name: neg, type: s16, div: 10, transform: [{op: round, ties: up}]}
+      - {name: pos, type: s16, div: 10, transform: [{op: round, ties: up}]}
+      - {name: negative_zero, type: s16, div: 10, transform: [{op: round, ties: up}]}
+  payload: "FFE6 0018 FFFF"
+  expected: '{"neg": -3, "pos": 2, "negative_zero": 0}'
+
+- name: an_unknown_tie_rule_is_rejected
+  schema: |
+    name: t
+    fields:
+      - {name: v, type: u8, transform: [{op: round, ties: down}]}
+  error: "PS-390"

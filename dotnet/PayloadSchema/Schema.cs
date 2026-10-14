@@ -61,7 +61,7 @@ public class TransformStage
     public bool Log10 { get; set; }
     public bool Log { get; set; }
     public double? Pow { get; set; }
-    /// <summary>`even` (the default) or `away` from zero, for {op: round} (PS-390).</summary>
+    /// <summary>`even` (the default), `away` from zero or `up` toward +infinity, for {op: round} (PS-390).</summary>
     public string? Ties { get; set; }
     /// <summary>Bound stages (PS-115). C# had none and passed the value through.</summary>
     public double? Floor { get; set; }
@@ -257,6 +257,15 @@ public class SchemaField
     // Bool
     public int Bit { get; set; }
     public int Consume { get; set; }
+    /// <summary>Whether <c>consume</c> was written, so <c>consume: 0</c> differs from no
+    /// <c>consume</c> at all (CR-2026-175).</summary>
+    public bool ConsumeDeclared { get; set; }
+
+    /// <summary>A <c>bytes</c>, <c>hex</c> or <c>ascii</c> field declaring <c>consume: 0</c>
+    /// (PS-588): it reports its span and leaves the read position, and an encoder writes
+    /// nothing for it (PS-589).</summary>
+    public bool IsEcho => ConsumeDeclared && Consume == 0
+        && (Type == FieldType.Bytes || Type == FieldType.Hex || Type == FieldType.Ascii);
 
     // Enum
     public string? Base { get; set; }
@@ -361,6 +370,8 @@ public class PayloadSchemaDefinition
     public string? Direction { get; set; }
     public List<SchemaField> Fields { get; set; } = new();
     public Dictionary<string, PortDef>? Ports { get; set; }
+    /// <summary>The document's top-level fPort (PS-458), 0 where it declares none.</summary>
+    public int DocFPort { get; set; }
     public Dictionary<string, DefinitionDef>? Definitions { get; set; }
     /// <summary>Names declared only inside some repeat's elements (PS-368).</summary>
     internal HashSet<string> RepeatOnlyNames { get; set; } = new();

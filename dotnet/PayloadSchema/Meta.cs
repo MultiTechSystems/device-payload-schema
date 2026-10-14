@@ -401,6 +401,8 @@ public static partial class Meta
         var unit = Truthy(senmlUnit) ? senmlUnit : Value(field, "unit");      // PS-178
         if (unit != null)
             entry["unit"] = Reference(unit, repeat, siblings: siblings);
+        if (Value(field, "unit") is { } displayUnit)
+            entry["display_unit"] = Reference(displayUnit, repeat, siblings: siblings);   // PS-596
         if (Get(field, "ipso") is YamlMappingNode ipso && Has(ipso, "object"))
             entry["ipso"] = new Dictionary<string, object?>
             {

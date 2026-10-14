@@ -44,7 +44,7 @@ REJECTED_STAGES = [
     ({"round": 1}, "{round: n}"),
     ({"op": "floor"}, "unknown operation"),
     ({"op": "ceil"}, "unknown operation"),
-    ({"op": "round", "ties": "up"}, "ties"),
+    ({"op": "round", "ties": "down"}, "ties"),
     ({"sub": 3}, "no operation"),
     # `{}` holds no operation at all, which CR-2026-073 made its own rule (PS-452);
     # tests/test_cr_2026_071_073.py has it.
@@ -64,7 +64,7 @@ def test_a_stage_outside_the_table_is_refused_by_the_generator(stage, why):
         TS013Generator(one({"name": "v", "type": "u8", "transform": [stage]})).generate()
 
 
-@pytest.mark.parametrize("ties,want", [("even", [78.12, -2]), ("away", [78.13, -3])])
+@pytest.mark.parametrize("ties,want", [("even", [78.12, -2]), ("away", [78.13, -3]), ("up", [78.13, -2])])
 def test_ties_on_both_paths(ties, want):
     schema = {"name": "probe", "fields": [
         {"name": "h", "type": "u8", "transform": [
