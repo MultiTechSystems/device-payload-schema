@@ -1,0 +1,58 @@
+# A `var:` on a member of a packed group binds like any field's: the name and the var
+# both reach later references (PS-523, PS-539). The members' own names always worked;
+# the var was never bound, so a number field, a computed operand or a selector reading
+# it was absent or failed.
+#
+# Port 1: a group of two bit ranges at the top level; a reference, a sum and a selector
+# all read the vars. Port 2: a presence-mask group member with a var. Port 3: a group
+# of two bit ranges in a tag-keyed entry. One assertion per vector, because a runner
+# stops at the first mismatch and would hide the others.
+name: probe_member_var
+endian: big
+ports:
+  1:
+    fields:
+      - byte_group:
+          - {name: a, type: "u8[4:7]", var: va}
+          - {name: b, type: "u8[0:3]", var: vb}
+      - {name: c, type: number, ref: $va}
+      - {name: d, type: number, ref: $vb}
+      - {name: e, type: number, ref: $a}
+      - {name: s, type: number, compute: {op: add, a: $va, b: $vb}}
+      - name: sel
+        match:
+          field: $vb
+          cases:
+            2: [{name: two, type: u8}]
+          default: []
+  2:
+    fields:
+      - {name: mask, type: u8}
+      - flagged:
+          field: mask
+          groups:
+            - {bit: 0, fields: [{name: x, type: u8, var: vx}]}
+      - {name: y, type: number, ref: $vx}
+  3:
+    fields:
+      - tlv:
+          tag_size: 1
+          cases:
+            1:
+              - byte_group:
+                  - {name: a, type: "u8[4:7]", var: va}
+                  - {name: b, type: "u8[0:3]", var: vb}
+              - {name: c, type: number, ref: $va}
+              - {name: s, type: number, compute: {op: add, a: $va, b: $vb}}
+test_vectors:
+  - {name: var_to_ref_high, payload: "12 05", fPort: 1, source: generated, expected: {c: 1}}
+  - {name: var_to_ref_low, payload: "12 05", fPort: 1, source: generated, expected: {d: 2}}
+  - {name: name_to_ref, payload: "12 05", fPort: 1, source: generated, expected: {e: 1}}
+  - {name: var_to_compute, payload: "12 05", fPort: 1, source: generated, expected: {s: 3}}
+  - {name: var_to_selector, payload: "12 05", fPort: 1, source: generated, expected: {two: 5}}
+  - {name: var_to_selector_default, payload: "13", fPort: 1, source: generated, expected: {two: null}}
+  - {name: var_to_selector_default_ref, payload: "13", fPort: 1, source: generated, expected: {d: 3}}
+  - {name: mask_member_var, payload: "01 09", fPort: 2, source: generated, expected: {y: 9}}
+  - {name: mask_member_absent, payload: "00", fPort: 2, source: generated, expected: {y: null}}
+  - {name: entry_var_to_ref, payload: "01 12", fPort: 3, source: generated, expected: {c: 1}}
+  - {name: entry_var_to_compute, payload: "01 12", fPort: 3, source: generated, expected: {s: 3}}

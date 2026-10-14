@@ -1077,7 +1077,7 @@ public static class SchemaDecoder
         return v;
     }
 
-    static double RoundHalfAwayDecimal(double value, int decimals)
+    static double RoundHalfAwayDecimal(double value, int decimals, bool up = false)
     {
         if (double.IsNaN(value) || double.IsInfinity(value)) return value;
         if (decimals < 0) decimals = 0;
@@ -1090,7 +1090,7 @@ public static class SchemaDecoder
         if (tie)
         {
             var scale = Math.Pow(10, decimals);
-            rounded = (Math.Floor(abs * scale) + 1) / scale;
+            rounded = (Math.Floor(abs * scale) + (up && value < 0 ? 0 : 1)) / scale;
         }
         else
         {
@@ -1116,8 +1116,8 @@ public static class SchemaDecoder
                 //
                 // Formatting to a fixed number of decimals is correctly rounded on the
                 // stored value and breaks ties to even, which is both jobs at once.
-                numVal = stage.Ties == "away"
-                    ? RoundHalfAwayDecimal(numVal, stage.Decimals)
+                numVal = stage.Ties is "away" or "up"
+                    ? RoundHalfAwayDecimal(numVal, stage.Decimals, stage.Ties == "up")
                     : RoundHalfEvenDecimal(numVal, stage.Decimals);
                 continue;
             }

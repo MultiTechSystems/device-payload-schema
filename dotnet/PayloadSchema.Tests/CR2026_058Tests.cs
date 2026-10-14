@@ -18,7 +18,7 @@ public class CR2026_058Tests
     [Theory]
     [InlineData("- {name: v, type: u8, transform: [{round: 1}]}\n")]
     [InlineData("- {name: v, type: u8, transform: [{op: floor}]}\n")]
-    [InlineData("- {name: v, type: u8, transform: [{op: round, ties: up}]}\n")]
+    [InlineData("- {name: v, type: u8, transform: [{op: round, ties: down}]}\n")]
     [InlineData("- {name: v, type: u8, transform: [{sub: 3}]}\n")]
     [InlineData("- {name: v, type: bytes, length: 2, format: base64, separator: ':'}\n")]
     [InlineData("- {name: v, type: bytes, length: 2, format: 'hex:lower'}\n")]

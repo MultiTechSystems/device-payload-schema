@@ -17,19 +17,21 @@ fields:
         - bit: 0
           fields:
             - name: stem_size
+              description: "Stem size"
               type: u16
               div: 1000
               unit: "mm"
         - bit: 1
           fields:
             - name: battery_voltage
+              description: "Battery voltage"
               type: u16
               div: 1000
               unit: "V"
 
               ipso: {object: 3316, instance: 0, resource: 5700}
               senml: {name: "battery_voltage", unit: "V"}
-              semantic: "battery.voltage"
+              semantic: "battery"
 test_vectors:
   - name: min_payload_vendor_1
     description: "Vendor-published test payload, decoded by the vendor's own decoder"

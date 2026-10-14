@@ -134,6 +134,7 @@ fields:
             type: s8
             unit: "°C"
             senml: {unit: Cel}
+            semantic: "air.temperature"
           - name: raw_measurement
             type: s8
 
@@ -204,6 +205,7 @@ fields:
             type: s8
             unit: "°C"
             senml: {unit: Cel}
+            semantic: "air.temperature"
 
         # ULTRASONIC LEVEL (0x10)
         0x10:

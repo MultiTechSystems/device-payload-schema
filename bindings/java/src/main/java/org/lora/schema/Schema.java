@@ -806,8 +806,9 @@ public class Schema {
                 throw new SchemaException(at + "names an unknown operation (PS-390)");
             }
             Object ties = stage.get("ties");
-            if (ties != null && !"even".equals(ties) && !"away".equals(ties)) {
-                throw new SchemaException(at + "round `ties` must be even or away (PS-390)");
+            if (ties != null && !"even".equals(ties) && !"away".equals(ties)
+                    && !"up".equals(ties)) {
+                throw new SchemaException(at + "round `ties` must be even, away or up (PS-390)");
             }
         }
     }
@@ -3143,8 +3144,11 @@ public class Schema {
         for (Field member : group.getByteGroup()) {
             ctx.setOffset(start);
             String name = member.getName();
-            if (name == null || name.isEmpty()) continue;
-            ctx.produced(member, null);                             // PS-490
+            String memberVar = member.getVar();
+            boolean hasName = name != null && !name.isEmpty();
+            boolean hasVar = memberVar != null && !memberVar.isEmpty();
+            if (!hasName && !hasVar) continue;
+            if (hasName) ctx.produced(member, null);                // PS-490
             try {
                 Object value;
                 if (member.getType() == FieldType.BITS) {
@@ -3160,11 +3164,14 @@ public class Schema {
                             0, member.getType().defaultLength() * 8), member, ctx);
                 }
                 if (value == OMITTED) {
-                    ctx.bindMissed(name, member);                   // PS-523
+                    if (hasName) ctx.bindMissed(name, member);      // PS-523
+                    if (hasVar) ctx.bindMissed(memberVar, member);  // and under its var
                     continue;
                 }
                 if (value == null) continue;
-                ctx.bind(name, member, value);                      // PS-523
+                if (hasName) ctx.bind(name, member, value);         // PS-523
+                if (hasVar) ctx.bind(memberVar, member, value);     // and under its var
+                if (!hasName) continue;
                 if (name.startsWith("_")) {
                     // PS-572: as the reference records a group member - a bool its flag,
                     // any other the number its name binds.
@@ -3379,8 +3386,15 @@ public class Schema {
                 // away` rounds a tie away from zero (PS-390). BigDecimal(double) is the
                 // exact binary value, so a tie is recognised only where there is one.
                 if (Double.isNaN(value) || Double.isInfinite(value)) continue;
-                java.math.RoundingMode mode = "away".equals(stage.getTies())
-                        ? java.math.RoundingMode.HALF_UP : java.math.RoundingMode.HALF_EVEN;
+                // `up` is toward +infinity: HALF_UP for a non-negative value, HALF_DOWN
+                // (toward zero) for a negative one.
+                String ties = stage.getTies();
+                java.math.RoundingMode mode = "away".equals(ties)
+                        ? java.math.RoundingMode.HALF_UP
+                        : "up".equals(ties)
+                        ? (value < 0 ? java.math.RoundingMode.HALF_DOWN
+                                     : java.math.RoundingMode.HALF_UP)
+                        : java.math.RoundingMode.HALF_EVEN;
                 value = new java.math.BigDecimal(value).setScale(decimals, mode).doubleValue();
                 continue;
             }

@@ -119,7 +119,7 @@ fields:
             unit: "°C"
             ipso: {object: 3303, instance: 0, resource: 5700}
             senml: {name: "temperature", unit: "Cel"}
-            semantic: "temperature"
+            semantic: "air.temperature"
             type: s16
             div: 10
         # TEMPERATURE THRESHOLD ALARM (@since v2.1)
@@ -128,7 +128,7 @@ fields:
             unit: "°C"
             ipso: {object: 3303, instance: 0, resource: 5700}
             senml: {name: "temperature", unit: "Cel"}
-            semantic: "temperature"
+            semantic: "air.temperature"
             type: s16
             div: 10
           - name: temperature_alarm
@@ -141,7 +141,7 @@ fields:
             unit: "°C"
             ipso: {object: 3303, instance: 0, resource: 5700}
             senml: {name: "temperature", unit: "Cel"}
-            semantic: "temperature"
+            semantic: "air.temperature"
             type: s16
             div: 10
           - name: temperature_mutation

@@ -1581,6 +1581,10 @@ def transform_stage_errors(stages, where):
             continue
         if 'op' not in stage and any(k in stage for k in TRANSFORM_OP_PARAMETERS):
             errors.append(f"{at}: `decimals` and `ties` belong to an `op:` stage (PS-452)")
+        elif stage.get('op') == 'round' and stage.get('ties', 'even') not in (
+                'even', 'away', 'up'):
+            errors.append(f"{at}: a round stage's `ties` is `even`, `away` or `up`, "
+                          f"not {stage['ties']!r} (PS-390)")
     return errors
 
 
@@ -2080,14 +2084,17 @@ def enum_label(entry):
 def round_decimal(value, decimals=0, ties='even'):
     """Round to `decimals` places on the value itself (PS-390).
 
-    `ties` is `even` (the default) or `away`, from zero. Decimal(float) is the exact
+    `ties` is `even` (the default), `away` from zero, or `up` toward +infinity (a negative
+    tie rounds toward zero, as JavaScript's Math.round does). Decimal(float) is the exact
     binary value, so a value stored just below a tie rounds down as it should, and an
     exact tie such as 78.125 is recognised as one - rounding value * 10**d instead would
-    invent ties. `away` exists for vendor decoders that use JavaScript's toFixed.
+    invent ties. `away` exists for vendor decoders that use JavaScript's toFixed, `up` for Math.round.
     """
-    from decimal import Decimal, ROUND_HALF_EVEN, ROUND_HALF_UP, localcontext
-    if ties not in ('even', 'away'):
-        raise ValueError(f"round `ties` must be 'even' or 'away', got {ties!r} (PS-390)")
+    from decimal import (Decimal, ROUND_HALF_DOWN, ROUND_HALF_EVEN, ROUND_HALF_UP,
+                         localcontext)
+    if ties not in ('even', 'away', 'up'):
+        raise ValueError(
+            f"round `ties` must be 'even', 'away' or 'up', got {ties!r} (PS-390)")
     if isinstance(decimals, bool) or not isinstance(decimals, int) or decimals < 0:
         raise ValueError(
             f"round `decimals` must be a non-negative integer, got {decimals!r} (PS-390)")
@@ -2095,8 +2102,13 @@ def round_decimal(value, decimals=0, ties='even'):
         return value
     if isinstance(value, float) and (math.isnan(value) or math.isinf(value)):
         return value
-    mode = ROUND_HALF_EVEN if ties == 'even' else ROUND_HALF_UP
     exact = Decimal(value)
+    if ties == 'even':
+        mode = ROUND_HALF_EVEN
+    elif ties == 'up' and exact < 0:
+        mode = ROUND_HALF_DOWN     # a negative tie goes toward +infinity: toward zero
+    else:
+        mode = ROUND_HALF_UP
     # quantize needs every digit of the result, and the default context holds 28: an f32
     # near its maximum, 3.4e38, to 6 places is 45 digits, so it raised InvalidOperation
     # and failed the decode where every other implementation reported the value.
@@ -5933,7 +5945,7 @@ class SchemaInterpreter:
                 if name and not name.startswith('_'):
                     result.data[name] = value
                 # Add to variables so field can be referenced by compute/formula
-                self._bind(gf, [name], value)
+                self._bind(gf, [name, gf.get('var')], value)
                 if name.startswith('_') and self._trace is not None:
                     # PS-572: as the prototype records a group member - a bool its flag,
                     # any other the number its name binds.

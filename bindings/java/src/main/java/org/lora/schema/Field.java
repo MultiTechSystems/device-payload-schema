@@ -435,7 +435,7 @@ public class Field {
         private Boolean log10;
         private Boolean log;
         private Double pow;
-        /** {@code even} (the default) or {@code away} from zero, for {@code op: round} (PS-390). */
+        /** {@code even} (the default), {@code away} from zero or {@code up} toward +infinity, for {@code op: round} (PS-390). */
         private String ties;
         /** Bound stages (PS-115). This binding had none and passed the value through. */
         private Double floor;

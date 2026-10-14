@@ -232,10 +232,10 @@ implementation has a runner that reads the same YAML and the same vectors:
 
 | Implementation | Runner | Decode floor | Re-encode floor |
 |---|---|---|---|
-| Python | `tests/test_corpus_conformance.py` | every vector | 2195 |
-| Go | `go/schema/corpus_conformance_test.go` | 2797 | 2213 (plain API 2185) |
-| C# | `dotnet/PayloadSchema.Tests/CorpusConformanceTests.cs` | 2797 | 2196 |
-| Java | `bindings/java/.../CorpusConformanceTest.java` | 2797 | 2195 |
+| Python | `tests/test_corpus_conformance.py` | every vector | 2206 |
+| Go | `go/schema/corpus_conformance_test.go` | 2808 | 2224 (plain API 2196) |
+| C# | `dotnet/PayloadSchema.Tests/CorpusConformanceTests.cs` | 2808 | 2207 |
+| Java | `bindings/java/.../CorpusConformanceTest.java` | 2808 | 2206 |
 | C | `tools/c-corpus-harness.py` (builds each expressible schema through the struct API) | 575 of 575 attempted | n/a |
 
 These figures move with every schema added. `make check-floors` prints each floor beside
@@ -824,10 +824,10 @@ exercised to the best-covered part of the project:
 
 | | Runner | Round-trips |
 |---|---|---|
-| Python | `tests/test_encode_round_trip.py` | 2195 |
-| Go | `go/schema/corpus_encode_test.go` | 2213 (plain 2185) |
-| Java | `bindings/java/.../CorpusEncodeRoundTripTest.java` | 2195 |
-| C# | `dotnet/.../CorpusEncodeRoundTripTests.cs` | 2196 |
+| Python | `tests/test_encode_round_trip.py` | 2206 |
+| Go | `go/schema/corpus_encode_test.go` | 2224 (plain 2196) |
+| Java | `bindings/java/.../CorpusEncodeRoundTripTest.java` | 2206 |
+| C# | `dotnet/.../CorpusEncodeRoundTripTests.cs` | 2207 |
 | C | `src/test_encoder.c`, built by `make test-c` (unit tests, not a corpus round trip) | n/a |
 
 - **A name may be an object under one tag and a scalar under another, and a tlv encoder
@@ -2526,6 +2526,20 @@ improved. The Go, Java and C# corpus runners write per-vector reports only when
   C-interpreter wave. **No corpus,
   library, example or registry schema is rejected or changes decode** (registry yabby-edge
   was rewritten as one 8-byte group, 69e1023). Fixture: `byte-group-width.yaml`.
+- **A byte_group member's `var:` binds like any field's (PS-523, PS-539).** The Python
+  reference (`_decode_byte_group_members` bound `[name]` only) and the generated TS013 codec
+  (`_bind_js(..., False)`, and the bool member bound `vars.name` alone) never bound it, so a
+  `ref`, a `compute` operand or a `match` selector reading it was absent or failed with "Match
+  field $vb has no value" while the member's own name worked. Measured before on
+  `byte-group-member-var.yaml` (a group at the top level, a flagged member, a group in a tlv
+  case): Go, C# and C already bound it (C through `var_name`; `make selftest` covers it);
+  Python and the generated codec failed 9 of 11 vectors. Java alone dropped a member with a
+  `var` and no name (reserved bits a later field reads) before binding; it binds now, and that
+  case has no round-trip vector (no value to write), so it is `ByteGroupMemberVarTest` and
+  `tests/test_byte_group_member_var.py`. Encode was unaffected: the selector is derived from
+  the member (PS-551) in all five. Floors: decode +11 in Go, Java and C#; re-encode +11
+  everywhere (Python, Java 2153 -> 2164; C# 2154 -> 2165; Go 2171 -> 2182, plain 2143 -> 2154),
+  all `tlv`.
 - **CR-2026-142 (PS-555): the binary schema form carries its names.** `schema_load_binary`
   used to name each field from its IPSO object (`ipso_to_name`: 3303 was "temperature",
   anything unlisted `field_xxxx`), so a schema reported different keys from its blob than
@@ -3910,3 +3924,29 @@ Known weaknesses, so you neither trip over them nor assume they are intentional:
   codec's over the corpus. The generated codec is chiefly a way to test and verify a
   schema: the deployment target is the interpreted schema, which replaces a device's JS
   codec rather than generating another one.
+
+- **CR-2026-171 (PS-390 amended; la-payload-schema main 9e8957a, for 0.5.7): `ties: up`.** A
+  `round` stage's `ties` is `even` (default), `away` or `up`; `up` rounds an exact tie toward
+  +infinity, as JavaScript's `Math.round` and `Math.floor(x + 0.5)` do, so -2.5 is -2 and -3.5 is
+  -3 (`away` gives -3 and -4, `even` -2 and -4). Any other value is rejected at load. Encoding is
+  untouched (a round stage is not inverted; PS-552).
+  - **Where:** Python `round_decimal` (`ROUND_HALF_UP`, or `ROUND_HALF_DOWN` for a negative exact
+    value) and a new load-time check in `transform_stage_errors` - Python used to fail only when
+    the stage was applied, so a schema with `ties: down` passed the validator and the generator
+    refused it separately; Go `roundHalfAwayDecimal(value, decimals, up)`; Java `applyTransform`
+    (`HALF_DOWN` for a negative value); C# `RoundHalfAwayDecimal(..., up)`; the TS13 generator's
+    `roundHalfUp` over `roundDecimal`, which now takes the rule by name (`'even'|'away'|'up'`).
+    Go, Java and C# already rejected an unknown `ties` at load. C: `schema_binary.py` refuses
+    every `transform`, so `ties` is a recorded C gap.
+  - **The CR's own example does not hold on exact values.** Raw -999 over `div: 20` is -49.95,
+    which binary64 stores at -49.9500000000000028, just beyond the tie; PS-390 rounds the stored
+    value (2.355 is not a tie either), so every rule gives -50.0. The spec prototype passes it
+    because it rounds `Decimal(repr(value))`, the shortest text, which this repository does not
+    do. The cases use exact ties (`div: 2`, `div: 4`, `div: 1000` for -0.125) and pin the CR's
+    example as `-50` (`the_cr_example_is_not_a_binary_tie`). Vendor JS rounds `x * 10`, where the
+    multiply does land on the tie; a schema wanting that needs `mult: 10` before the round stage.
+  - **Cases:** `tests/cr-2026-171-cases.yaml`, read by `test_cr_2026_171_ties_up.py` (reference,
+    validator, TS13 generator and the generated codec under node), Go `cr171_test.go`, Java
+    `CR2026171Test`, C# `CR2026_171Tests`. Fixture `_language-conformance/round-ties-up.yaml`
+    (one vector, negative and positive ties beside `away` and `even`): decode floors 2790 -> 2791
+    in Go, Java and C#; the vector cannot re-encode, so no re-encode floor moves.

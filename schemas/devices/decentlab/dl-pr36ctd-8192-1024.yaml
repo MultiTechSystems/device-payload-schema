@@ -17,12 +17,15 @@ fields:
         - bit: 0
           fields:
             - name: pressure
+              description: "Pressure"
               type: u16
               transform:
                 - div: 8192
                 - add: -4
               unit: "bar"
+              semantic: "air.pressure"
             - name: temperature_electronics
+              description: "Temperature (electronics)"
               type: u16
               transform:
                 - div: 256
@@ -30,6 +33,7 @@ fields:
               unit: "°C"
               senml: {unit: Cel}
             - name: temperature_pt1000
+              description: "Temperature (PT1000)"
               type: u16
               transform:
                 - div: 256
@@ -37,6 +41,7 @@ fields:
               unit: "°C"
               senml: {unit: Cel}
             - name: electrical_conductivity
+              description: "Electrical conductivity"
               type: u16
               transform:
                 - div: 1024
@@ -45,9 +50,11 @@ fields:
         - bit: 1
           fields:
             - name: battery_voltage
+              description: "Battery voltage"
               type: u16
               div: 1000
               unit: "V"
+              semantic: "battery"
 test_vectors:
   - name: vendor_reference_1
     description: "Vendor-published test payload, decoded by the vendor's own decoder"

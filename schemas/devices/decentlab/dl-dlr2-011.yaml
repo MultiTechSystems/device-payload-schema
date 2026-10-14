@@ -17,21 +17,24 @@ fields:
         - bit: 0
           fields:
             - name: ch0_input
+              description: "CH0: Input"
               type: u16
         - bit: 1
           fields:
             - name: ch1_input
+              description: "CH1: Input"
               type: u16
         - bit: 2
           fields:
             - name: battery_voltage
+              description: "Battery voltage"
               type: u16
               div: 1000
               unit: "V"
 
               ipso: {object: 3316, instance: 0, resource: 5700}
               senml: {name: "battery_voltage", unit: "V"}
-              semantic: "battery.voltage"
+              semantic: "battery"
 test_vectors:
   - name: min_payload_vendor_1
     description: "Vendor-published test payload, decoded by the vendor's own decoder"

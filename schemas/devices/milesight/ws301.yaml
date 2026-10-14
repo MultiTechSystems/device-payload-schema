@@ -18,12 +18,12 @@ fields:
             unit: "%"
             ipso: {object: 3320, instance: 0, resource: 5700}
             senml: {name: "battery", unit: "/100"}
-            semantic: "battery"
             type: u8
         # DOOR / WINDOW STATE
         "[3, 0]":
           - name: door
             type: u8
+            semantic: "action.contactState"
             lookup: ["close", "open"]
         "[4, 0]":
           - name: install
