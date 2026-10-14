@@ -1389,7 +1389,7 @@ function encForward(v, f) {
       if ("mult" in st) v = v * Number(st.mult);
       if ("div" in st) { if (Number(st.div) === 0) { v = NaN; return; } v = v / Number(st.div); }
       if ("add" in st) v = v + Number(st.add);
-    } else if (st.op === "round") v = roundDecimal(v, st.decimals || 0, st.ties === "away");
+    } else if (st.op === "round") v = roundDecimal(v, st.decimals || 0, st.ties || "even");
   });
   return v;
 }
@@ -2607,6 +2607,9 @@ def compute_to_js(compute: Dict[str, Any]) -> str:
         # infinity. Operands truncate first (PS-284), matching the interpreters.
         return (f'({b_js} !== 0 ? Math.floor(Math.trunc({a_js}) / Math.trunc({b_js})) '
                 f': undefined)')
+    elif op == 'pow':
+        # PS-584: a result that is not a finite real number (NaN, an infinity) is absent.
+        return (f'((r) => Number.isFinite(r) ? r : undefined)(Math.pow({a_js}, {b_js}))')
     return '0'
 
 
@@ -2743,9 +2746,11 @@ def transform_to_js(transform_ops: List[Dict[str, Any]], input_expr: str) -> str
                     f"transform stage names an unknown operation {op['op']!r} (PS-390)")
             decimals = op.get('decimals', 0)
             ties = op.get('ties', 'even')
-            if ties not in ('even', 'away'):
-                raise ValueError(f"round `ties` must be 'even' or 'away', got {ties!r} (PS-390)")
-            helper = 'roundHalfEven' if ties == 'even' else 'roundHalfAway'
+            if ties not in ('even', 'away', 'up'):
+                raise ValueError(
+                    f"round `ties` must be 'even', 'away' or 'up', got {ties!r} (PS-390)")
+            helper = {'even': 'roundHalfEven', 'away': 'roundHalfAway',
+                      'up': 'roundHalfUp'}[ties]
             result = f'{helper}({result}, {int(decimals)})'
         elif 'round' in op:
             raise ValueError(
@@ -3125,16 +3130,22 @@ function omitAbsent(v) {
 // correctly rounded on the exact stored value, so it is used for the ordinary case
 // and a genuine tie is detected from the long expansion.
 function roundHalfEven(v, decimals) {
-  return roundDecimal(v, decimals, false);
+  return roundDecimal(v, decimals, 'even');
 }
 
 /* `ties: away` (PS-390): a tie rounds away from zero, as JavaScript's toFixed does in
  * the vendor decoders this reproduces. Every other value rounds as roundHalfEven. */
 function roundHalfAway(v, decimals) {
-  return roundDecimal(v, decimals, true);
+  return roundDecimal(v, decimals, 'away');
 }
 
-function roundDecimal(v, decimals, away) {
+/* `ties: up` (PS-390): a tie rounds toward +infinity, as Math.round does, so a negative
+ * tie goes toward zero. Every other value rounds as roundHalfEven. */
+function roundHalfUp(v, decimals) {
+  return roundDecimal(v, decimals, 'up');
+}
+
+function roundDecimal(v, decimals, ties) {
   if (typeof v !== 'number' || !isFinite(v)) return v;
   var d = Math.min(Math.max(decimals || 0, 0), 90);
   var neg = v < 0;
@@ -3148,7 +3159,8 @@ function roundDecimal(v, decimals, away) {
   if (frac.charAt(d) === '5' && /^0*$/.test(frac.slice(d + 1))) {
     var f = Math.pow(10, d);
     var lower = Math.floor(a * f);
-    out = ((!away && lower % 2 === 0) ? lower : lower + 1) / f;
+    var keep = ties === 'up' ? neg : (ties !== 'away' && lower % 2 === 0);
+    out = (keep ? lower : lower + 1) / f;
   } else {
     out = Number(a.toFixed(d));
   }
