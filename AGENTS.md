@@ -824,10 +824,10 @@ exercised to the best-covered part of the project:
 
 | | Runner | Round-trips |
 |---|---|---|
-| Python | `tests/test_encode_round_trip.py` | 2199 |
-| Go | `go/schema/corpus_encode_test.go` | 2217 (plain 2189) |
-| Java | `bindings/java/.../CorpusEncodeRoundTripTest.java` | 2199 |
-| C# | `dotnet/.../CorpusEncodeRoundTripTests.cs` | 2200 |
+| Python | `tests/test_encode_round_trip.py` | 2208 |
+| Go | `go/schema/corpus_encode_test.go` | 2226 (plain 2198) |
+| Java | `bindings/java/.../CorpusEncodeRoundTripTest.java` | 2208 |
+| C# | `dotnet/.../CorpusEncodeRoundTripTests.cs` | 2209 |
 | C | `src/test_encoder.c`, built by `make test-c` (unit tests, not a corpus round trip) | n/a |
 
 - **A name may be an object under one tag and a scalar under another, and a tlv encoder
