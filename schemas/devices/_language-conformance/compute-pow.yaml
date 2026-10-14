@@ -1,0 +1,74 @@
+# A computed power whose exponent is a field (CR-2026-172, PS-119, PS-584).
+#
+# A result that is not a finite real number - a negative base with a fractional exponent,
+# 0 to a negative power, an overflow - leaves the field absent, as a zero divisor does
+# (PS-278), and the fields after it decode as usual. A null expectation asserts absence
+# (PS-043).
+#
+# One assertion per vector, deliberately: a runner stops at a vector's first mismatch.
+# The absent-result vectors cannot round-trip, since nothing in the output holds the
+# value that made the field absent.
+name: probe_compute_pow
+endian: big
+fields:
+- name: e
+  type: s8
+- name: wide
+  type: s16
+- name: after
+  type: u8
+- name: ten_to_e
+  type: number
+  compute: {op: pow, a: 10, b: $e}
+- name: root_of_e
+  type: number
+  compute: {op: pow, a: $e, b: 0.5}
+- name: zero_to_e
+  type: number
+  compute: {op: pow, a: 0, b: $e}
+- name: ten_to_wide
+  type: number
+  compute: {op: pow, a: 10, b: $wide}
+test_vectors:
+- name: positive_exponent
+  payload: "02 0000 07"
+  source: generated
+  expected:
+    ten_to_e: 100
+    after: 7
+- name: negative_exponent
+  payload: "FE 0000 07"
+  source: generated
+  expected:
+    ten_to_e: 0.01
+    after: 7
+- name: negative_base_fractional_exponent_is_absent
+  payload: "FE 0000 07"
+  source: generated
+  expected:
+    root_of_e: null
+    after: 7
+- name: zero_to_negative_power_is_absent
+  payload: "FE 0000 07"
+  source: generated
+  expected:
+    zero_to_e: null
+    after: 7
+- name: zero_to_positive_power_is_zero
+  payload: "02 0000 07"
+  source: generated
+  expected:
+    zero_to_e: 0
+    after: 7
+- name: overflow_is_absent
+  payload: "00 0190 07"
+  source: generated
+  expected:
+    ten_to_wide: null
+    after: 7
+- name: large_result_is_reported
+  payload: "00 0010 07"
+  source: generated
+  expected:
+    ten_to_wide: 10000000000000000
+    after: 7

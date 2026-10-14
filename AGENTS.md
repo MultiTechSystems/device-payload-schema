@@ -124,7 +124,7 @@ MODIFIERS:    add mult div | lookup (sequence or sparse mapping; default "x${val
               | compute | guard | transform
 CONDITIONALS: match (value; "[1, 2]" list keys; field XOR length) | flagged | tlv
 TRANSFORMS:   sqrt abs pow log10 log floor ceiling clamp | {op: round, ties: even|away}
-COMPUTE OPS:  add sub mul div mod idiv
+COMPUTE OPS:  add sub mul div mod idiv pow
 GUARD OPS:    gt gte lt lte eq ne
 ENCODINGS:    sign_magnitude bcd gray (Python only)
 REFERENCES:   $field_name | var: name | $ref: '#/definitions/name'
@@ -232,10 +232,10 @@ implementation has a runner that reads the same YAML and the same vectors:
 
 | Implementation | Runner | Decode floor | Re-encode floor |
 |---|---|---|---|
-| Python | `tests/test_corpus_conformance.py` | every vector | 2199 |
-| Go | `go/schema/corpus_conformance_test.go` | 2801 | 2217 (plain API 2189) |
-| C# | `dotnet/PayloadSchema.Tests/CorpusConformanceTests.cs` | 2801 | 2200 |
-| Java | `bindings/java/.../CorpusConformanceTest.java` | 2801 | 2199 |
+| Python | `tests/test_corpus_conformance.py` | every vector | 2206 |
+| Go | `go/schema/corpus_conformance_test.go` | 2808 | 2224 (plain API 2196) |
+| C# | `dotnet/PayloadSchema.Tests/CorpusConformanceTests.cs` | 2808 | 2207 |
+| Java | `bindings/java/.../CorpusConformanceTest.java` | 2808 | 2206 |
 | C | `tools/c-corpus-harness.py` (builds each expressible schema through the struct API) | 575 of 575 attempted | n/a |
 
 These figures move with every schema added. `make check-floors` prints each floor beside
@@ -824,10 +824,10 @@ exercised to the best-covered part of the project:
 
 | | Runner | Round-trips |
 |---|---|---|
-| Python | `tests/test_encode_round_trip.py` | 2199 |
-| Go | `go/schema/corpus_encode_test.go` | 2217 (plain 2189) |
-| Java | `bindings/java/.../CorpusEncodeRoundTripTest.java` | 2199 |
-| C# | `dotnet/.../CorpusEncodeRoundTripTests.cs` | 2200 |
+| Python | `tests/test_encode_round_trip.py` | 2206 |
+| Go | `go/schema/corpus_encode_test.go` | 2224 (plain 2196) |
+| Java | `bindings/java/.../CorpusEncodeRoundTripTest.java` | 2206 |
+| C# | `dotnet/.../CorpusEncodeRoundTripTests.cs` | 2207 |
 | C | `src/test_encoder.c`, built by `make test-c` (unit tests, not a corpus round trip) | n/a |
 
 - **A name may be an object under one tag and a scalar under another, and a tlv encoder
@@ -3331,6 +3331,37 @@ improved. The Go, Java and C# corpus runners write per-vector reports only when
     -> 2166, C# 2154 -> 2167, Go 2171 -> 2184, plain 2143 -> 2156), `match` 160 -> 173, every vector
     round-tripping.
 
+
+- **CR-2026-172 (PS-119 amended, PS-584; la-payload-schema main 9e8957a, for 0.5.7): `compute`
+  `pow`, a power whose exponent may be a field.** `{op: pow, a: 10, b: $x}` computes `a` to the
+  power `b` in binary64; a result that is not a finite real number - a negative base with a
+  fractional exponent, 0 to a negative power, an overflow - leaves the field absent, as a zero
+  divisor does (PS-278), and the rest of the payload decodes. A computed field reading that
+  absent value is absent too (PS-314).
+  - **Where:** Python `_evaluate_compute` (`math.pow`; a `ValueError`, `OverflowError` or
+    `ZeroDivisionError`, or a non-finite result, gives `OMITTED`), Go `evaluateCompute`'s `pow`
+    case (`errComputeOmitted`), Java `evaluateCompute` and C# `EvaluateCompute` (`ComputeOmitted`),
+    and the TS013 generator's `compute_to_js` (`Number.isFinite` else `undefined`, which
+    `JSON.stringify` drops). The op is in `tools/schema_vocabulary.py`, `validate_schema.py`,
+    `generate_jsonschema.py` and `docs/SCHEMA-LANGUAGE-REFERENCE.md`.
+  - **Measured before:** all five rejected the op (`Unknown compute op: pow`, an error, so the
+    decode failed). Encoding is untouched: a computed field is never written.
+  - **Departure from the CR's comment, from the Implementation Record:** the Dingtek chain gives
+    10.0000002 for `41 20 00 00` (the vendor divides by 0x7fffff), not 10.0.
+  - **C:** has no `compute`; `tools/schema_binary.py` already refuses it, so `pow` is a recorded
+    C gap, not a new refusal.
+  - **Cases:** `tests/cr-2026-172-cases.yaml` (the prototype's five tests, the Dingtek chain, a
+    literal base e, a negative base with an integer exponent and a reference to an absent power),
+    read by `test_cr_2026_172_cases.py` (reference and generated codec), Go `cr172_test.go`, Java
+    `CR2026172Test`, C# `CR2026_172Tests`. Fixture `_language-conformance/compute-pow.yaml`, seven
+    vectors, all round-trip (computed fields are not written): decode +7 in Go, Java and C#
+    (2790 -> 2797); re-encode +7 everywhere (Python and Java 2188 -> 2195, C# 2189 -> 2196, Go
+    2206 -> 2213, plain 2178 -> 2185), `plain fixed` 185 -> 192.
+  - **Impact:** no corpus device schema and no registry schema uses `pow` as a compute op, so no
+    decode or encode output changed and none is rejected. Registry mcci codec-catena-generic's
+    `r_gas = Math.pow(10, logGasR)` becomes writable: adding `{name: r_gas, type: number,
+    compute: {op: pow, a: 10, b: $log_r_gas}}` after `log_r_gas` decodes `17 40 F8 00` to
+    `log_r_gas` 8 and `r_gas` 100000000 (registry file not edited here).
 
 ## Converting a vendor codec
 

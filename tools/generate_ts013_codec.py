@@ -2607,6 +2607,9 @@ def compute_to_js(compute: Dict[str, Any]) -> str:
         # infinity. Operands truncate first (PS-284), matching the interpreters.
         return (f'({b_js} !== 0 ? Math.floor(Math.trunc({a_js}) / Math.trunc({b_js})) '
                 f': undefined)')
+    elif op == 'pow':
+        # PS-584: a result that is not a finite real number (NaN, an infinity) is absent.
+        return (f'((r) => Number.isFinite(r) ? r : undefined)(Math.pow({a_js}, {b_js}))')
     return '0'
 
 

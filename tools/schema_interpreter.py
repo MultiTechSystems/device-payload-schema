@@ -5595,7 +5595,7 @@ class SchemaInterpreter:
         """
         Evaluate a cross-field binary computation.
         
-        compute_def: {op: 'add'|'sub'|'mul'|'div'|'mod'|'idiv', a: '$field'|literal, b: '$field'|literal}
+        compute_def: {op: 'add'|'sub'|'mul'|'div'|'mod'|'idiv'|'pow', a: '$field'|literal, b: '$field'|literal}
         """
         op = compute_def.get('op', 'add')
         a_spec = compute_def.get('a', 0)
@@ -5643,6 +5643,15 @@ class SchemaInterpreter:
                 return OMITTED
             # PS-276 floored: Python's `//` rounds toward negative infinity.
             return float(int(a) // int(b))
+        elif op == 'pow':
+            # PS-584: binary64 a**b; a result that is not a finite real number (a
+            # negative base with a fractional exponent, 0 to a negative power, an
+            # overflow) omits the field, as a zero divisor does.
+            try:
+                result = math.pow(a, b)
+            except (ValueError, OverflowError, ZeroDivisionError):
+                return OMITTED
+            return result if math.isfinite(result) else OMITTED
         else:
             raise ValueError(f"Unknown compute op: {op}")
     
