@@ -55,7 +55,7 @@ func TestMetaPresentWithoutAnnotations(t *testing.T) {
 	want := map[string]any{
 		"schema": "flat",
 		"fields": map[string]any{
-			"a": map[string]any{"type": "u8", "reports": "integer", "unit": "V"},
+			"a": map[string]any{"type": "u8", "reports": "integer", "unit": "V", "display_unit": "V"},
 			"b": map[string]any{"type": "u8", "reports": "integer"},
 		},
 	}
@@ -276,7 +276,7 @@ fields:
 		"schema": "x",
 		"fields": map[string]any{
 			"kind": map[string]any{"type": "u8", "reports": "integer"},
-			"r":    map[string]any{"type": "s16", "reports": "integer", "unit": "Cel", "description": "two"},
+			"r":    map[string]any{"type": "s16", "reports": "integer", "unit": "Cel", "display_unit": "Cel", "description": "two"},
 			"idx":  map[string]any{"type": "u8", "reports": "integer"},
 			"ch_3": map[string]any{"type": "u8", "reports": "integer"},
 		},

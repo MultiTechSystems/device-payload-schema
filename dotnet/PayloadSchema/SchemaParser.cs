@@ -448,8 +448,8 @@ public static partial class SchemaParser
         {
             if (Scalar(op) != "round")
                 throw new InvalidOperationException($"{at} names an unknown operation {Scalar(op)} (PS-390)");
-            if (stage.TryGetValue("ties", out var ties) && Scalar(ties) is not ("even" or "away"))
-                throw new InvalidOperationException(at + ": round `ties` must be even or away (PS-390)");
+            if (stage.TryGetValue("ties", out var ties) && Scalar(ties) is not ("even" or "away" or "up"))
+                throw new InvalidOperationException(at + ": round `ties` must be even, away or up (PS-390)");
         }
         else if (keys.Any(TransformOpParameters.Contains))
             throw new InvalidOperationException(at + ": `decimals` and `ties` belong to an `op:` stage (PS-452)");
@@ -854,7 +854,7 @@ public static partial class SchemaParser
 
         // Bool
         if (fm.TryGetValue("bit", out var bitNode)) f.Bit = Int(bitNode);
-        if (fm.TryGetValue("consume", out var cons)) f.Consume = Int(cons);
+        if (fm.TryGetValue("consume", out var cons)) { f.Consume = Int(cons); f.ConsumeDeclared = true; }
 
         // Enum
         if (fm.TryGetValue("base", out var baseNode)) f.Base = Scalar(baseNode);

@@ -281,13 +281,16 @@ class Frame(bytes):
     pending, so the field after the construct shares them, as a decoder reads it: vobo's
     digital inputs peek a word inside a flagged block that the field after it reads."""
 
-    def __new__(cls, data=b'', pending=0, covered=None, peeks=None):
+    def __new__(cls, data=b'', pending=0, covered=None, peeks=None, echoes=None):
         frame = super().__new__(cls, data)
         frame.pending = pending
         # CR-2026-141 (PS-551): per byte, the bits some field wrote (None: all of them),
         # and each bit range or bool placed, for the check where the frame closes.
         frame.covered = covered
         frame.peeks = peeks or []
+        # CR-2026-175 (PS-589): each non-consuming byte string given a value, as
+        # (position, field, given, length or None for `remaining`).
+        frame.echoes = echoes or []
         return frame
 
 
@@ -314,7 +317,92 @@ def prefixed_frame(prefix: bytes, body) -> 'Frame':
     shift = len(prefix)
     return Frame(bytes(prefix) + bytes(body), getattr(body, 'pending', 0),
                  b'\xff' * shift + frame_covered(body),
-                 [(p[0] + shift,) + tuple(p[1:]) for p in frame_peeks(body)])
+                 [(p[0] + shift,) + tuple(p[1:]) for p in frame_peeks(body)],
+                 [(e[0] + shift,) + tuple(e[1:]) for e in frame_echoes(body)])
+
+
+#: The byte strings a `consume: 0` re-reads (PS-588, CR-2026-175).
+NON_CONSUMING_TYPES = ('bytes', 'hex', 'ascii')
+
+
+def is_echo(field_def) -> bool:
+    """A `bytes`, `hex` or `ascii` field declaring `consume: 0` (PS-588): it reads and
+    reports its span and leaves the read position, so later fields read the bytes again."""
+    return (isinstance(field_def, dict) and field_def.get('type') in NON_CONSUMING_TYPES
+            and 'consume' in field_def and field_def.get('consume') == 0
+            and not isinstance(field_def.get('consume'), bool))
+
+
+def frame_echoes(data) -> list:
+    """The non-consuming byte strings given a value in `data` (Frame.echoes)."""
+    return list(getattr(data, 'echoes', None) or [])
+
+
+def echo_length(field_def, data) -> Optional[int]:
+    """The byte count of a non-consuming byte string, read from the input it is encoded
+    with: None for `remaining`, which reaches the end of the frame it is checked in."""
+    raw = field_def.get('length', 1)
+    if isinstance(raw, str):
+        text = raw.strip()
+        if text.lower() == 'remaining':
+            return None
+        if not re.fullmatch(r'-?\d+', text):
+            ref = text[1:] if text.startswith('$') else text
+            value = data.get(ref)
+            if isinstance(value, bool) or not isinstance(value, (int, float)) \
+                    or value < 0 or int(value) != value:
+                raise ValueError(missing_field_message(ref))
+            return int(value)
+        raw = int(text)
+    return None if raw < 0 else int(raw)
+
+
+def echo_value(field_def, span: bytes) -> Any:
+    """What a non-consuming byte string decodes from `span`: its `format` and
+    `separator`, or PS-534's trailing 0x00 removal, applied as a decoder applies them."""
+    ftype = field_def.get('type')
+    if ftype == 'bytes':
+        return format_bytes(field_def, span)
+    if ftype == 'hex':
+        return span.hex()
+    value = decode_ascii(field_def.get('name'), span, [])
+    if field_def.get('numeral'):
+        value = decode_numeral(field_def.get('name'), value, field_def['numeral'])
+    return value
+
+
+def echo_text(value) -> str:
+    """A value as a PS-589 message writes it: text in single quotes, a number as
+    JavaScript's String(number), a list of octets as `[1, 2]` in quotes."""
+    if isinstance(value, list):
+        return "'[" + ", ".join(echo_text(v).strip("'") for v in value) + "]'"
+    if isinstance(value, bool):
+        return 'true' if value else 'false'
+    if isinstance(value, (int, float)):
+        return format_lookup_value(value)
+    return "'" + str(value) + "'"
+
+
+def check_echoes(frame) -> None:
+    """PS-589 (CR-2026-175), where a frame closes: a value given for a non-consuming byte
+    string equals what the field decodes from the bytes the other fields wrote over its
+    span, or the input is rejected naming the field."""
+    data = bytes(frame)
+    for position, field_def, given, length in frame_echoes(frame):
+        if length is None:
+            length = max(0, len(data) - position)
+        if position + length > len(data):
+            written = 'too few bytes'
+        else:
+            try:
+                found = echo_value(field_def, data[position:position + length])
+            except ValueError:
+                found = None
+            if found is not None and normalize_output(found) == normalize_output(given):
+                continue
+            written = echo_text(found) if found is not None else 'too few bytes'
+        raise ValueError(f"Field '{field_def.get('name')}' is given {echo_text(given)}, but "
+                         f"the other fields write {written} over its span (PS-589)")
 
 
 def peek_disagreement(peeks, frame: bytes) -> str:
@@ -334,7 +422,13 @@ def peek_disagreement(peeks, frame: bytes) -> str:
 def check_peeks(frame) -> None:
     """PS-551 (CR-2026-141), where a frame closes: every bit range and bool reads back what
     it was given, and an absent one - derived, writing no bits - has every bit written by
-    another field, or it is missing."""
+    another field, or it is missing. Then PS-589's check of each non-consuming byte string
+    given a value (check_echoes)."""
+    _check_bit_peeks(frame)
+    check_echoes(frame)
+
+
+def _check_bit_peeks(frame) -> None:
     covered = frame_covered(frame)
     for position, size, byteorder, start, width, raw, name in frame_peeks(frame):
         mask = ((1 << width) - 1) << start
@@ -368,6 +462,16 @@ class FrameBuffer:
         # range or bool placed (see Frame).
         self.covered = bytearray()
         self.peeks = []
+        self.echoes = []        # CR-2026-175 (PS-589): see Frame.echoes
+
+    def echo(self, field_def, data) -> None:
+        """PS-589: a non-consuming byte string writes nothing and is not required; a value
+        given for it is checked where the frame closes. It reads from the position a
+        decoder is at, which is the start of any bytes still pending."""
+        name = field_def.get('name')
+        if name and data.get(name) is not None:
+            self.echoes.append((len(self.buf), field_def, data[name],
+                                echo_length(field_def, data)))
 
     def cover(self, position: int, mask: bytes) -> None:
         if len(self.covered) < position + len(mask):
@@ -380,6 +484,7 @@ class FrameBuffer:
         offset = len(self.buf)
         covered = frame_covered(data)
         peeks = frame_peeks(data)
+        self.echoes.extend((e[0] + offset,) + tuple(e[1:]) for e in frame_echoes(data))
         data = bytes(data)
         if self.pending and data and any(
                 self.pending[i] & ~data[i] & covered[i]
@@ -434,7 +539,7 @@ class FrameBuffer:
         size = len(self.buf) + len(self.pending)
         covered = bytes(self.covered[:size]).ljust(size, b'\0')
         return Frame(bytes(self.buf + self.pending), len(self.pending), covered,
-                     list(self.peeks))
+                     list(self.peeks), list(self.echoes))
 
 
 def is_peek_field(field_def) -> bool:
@@ -957,8 +1062,8 @@ def fixed_element_size(fields):
         base = INTEGER_TYPE_INFO.get(ftype)
         if ftype in _FIXED_TYPE_SIZES or base:
             total += _FIXED_TYPE_SIZES.get(ftype) or base[0]
-        elif ftype in COMPUTED_TYPES or is_literal(field):
-            continue
+        elif ftype in COMPUTED_TYPES or is_literal(field) or is_echo(field):
+            continue                    # an echo re-reads, advancing nothing (PS-588)
         elif '[' in ftype or ftype == 'bool':
             consume = field.get('consume', 0)
             if not isinstance(consume, int):
@@ -1581,6 +1686,10 @@ def transform_stage_errors(stages, where):
             continue
         if 'op' not in stage and any(k in stage for k in TRANSFORM_OP_PARAMETERS):
             errors.append(f"{at}: `decimals` and `ties` belong to an `op:` stage (PS-452)")
+        elif stage.get('op') == 'round' and stage.get('ties', 'even') not in (
+                'even', 'away', 'up'):
+            errors.append(f"{at}: a round stage's `ties` is `even`, `away` or `up`, "
+                          f"not {stage['ties']!r} (PS-390)")
     return errors
 
 
@@ -2080,14 +2189,17 @@ def enum_label(entry):
 def round_decimal(value, decimals=0, ties='even'):
     """Round to `decimals` places on the value itself (PS-390).
 
-    `ties` is `even` (the default) or `away`, from zero. Decimal(float) is the exact
+    `ties` is `even` (the default), `away` from zero, or `up` toward +infinity (a negative
+    tie rounds toward zero, as JavaScript's Math.round does). Decimal(float) is the exact
     binary value, so a value stored just below a tie rounds down as it should, and an
     exact tie such as 78.125 is recognised as one - rounding value * 10**d instead would
-    invent ties. `away` exists for vendor decoders that use JavaScript's toFixed.
+    invent ties. `away` exists for vendor decoders that use JavaScript's toFixed, `up` for Math.round.
     """
-    from decimal import Decimal, ROUND_HALF_EVEN, ROUND_HALF_UP, localcontext
-    if ties not in ('even', 'away'):
-        raise ValueError(f"round `ties` must be 'even' or 'away', got {ties!r} (PS-390)")
+    from decimal import (Decimal, ROUND_HALF_DOWN, ROUND_HALF_EVEN, ROUND_HALF_UP,
+                         localcontext)
+    if ties not in ('even', 'away', 'up'):
+        raise ValueError(
+            f"round `ties` must be 'even', 'away' or 'up', got {ties!r} (PS-390)")
     if isinstance(decimals, bool) or not isinstance(decimals, int) or decimals < 0:
         raise ValueError(
             f"round `decimals` must be a non-negative integer, got {decimals!r} (PS-390)")
@@ -2095,8 +2207,13 @@ def round_decimal(value, decimals=0, ties='even'):
         return value
     if isinstance(value, float) and (math.isnan(value) or math.isinf(value)):
         return value
-    mode = ROUND_HALF_EVEN if ties == 'even' else ROUND_HALF_UP
     exact = Decimal(value)
+    if ties == 'even':
+        mode = ROUND_HALF_EVEN
+    elif ties == 'up' and exact < 0:
+        mode = ROUND_HALF_DOWN     # a negative tie goes toward +infinity: toward zero
+    else:
+        mode = ROUND_HALF_UP
     # quantize needs every digit of the result, and the default context holds 28: an f32
     # near its maximum, 3.4e38, to 6 places is 45 digits, so it raised InvalidOperation
     # and failed the decode where every other implementation reported the value.
@@ -3970,6 +4087,9 @@ def field_meta(field_def, repeat=None, siblings=None):
     unit = senml.get('unit') or field_def.get('unit')          # PS-178, no conversion
     if unit is not None:
         entry['unit'] = meta_reference(unit, repeat, siblings=siblings)
+    if field_def.get('unit') is not None:
+        # PS-596: the author's text as declared, whether or not senml.unit replaced it above
+        entry['display_unit'] = meta_reference(field_def['unit'], repeat, siblings=siblings)
     ipso = field_def.get('ipso')
     if isinstance(ipso, dict) and 'object' in ipso:
         entry['ipso'] = {'object': ipso['object'],
@@ -4798,7 +4918,9 @@ class SchemaInterpreter:
             length = resolve_length(field_def, buf, pos, variables=self._variables)
             if pos + length > len(buf):
                 raise BufferUnderflow.need(length, pos, len(buf))
-            return format_bytes(field_def, buf[pos:pos + length]), pos + length
+            # PS-588 (CR-2026-175): `consume: 0` re-reads the span; the position stays.
+            return (format_bytes(field_def, buf[pos:pos + length]),
+                    pos if is_echo(field_def) else pos + length)
         
         if field_type == 'string':
             if 'value' in field_def:
@@ -4830,7 +4952,7 @@ class SchemaInterpreter:
                                  self._nested_warnings)
             if field_def.get('numeral'):
                 value = decode_numeral(field_def.get('name'), value, field_def['numeral'])
-            return value, pos + length
+            return value, pos if is_echo(field_def) else pos + length          # PS-588
         
         # `hex:upper` is a `bytes` format (PS-079), not a type (CR-2026-037), so it
         # falls through to the unknown-type error below.
@@ -4842,7 +4964,7 @@ class SchemaInterpreter:
             # emitted uppercase, so it disagreed with the specification, with the
             # Go and Java interpreters, and with every vendor decoder. Uppercase
             # is `type: bytes` with `format: hex:upper`.
-            return buf[pos:pos + length].hex(), pos + length
+            return buf[pos:pos + length].hex(), pos if is_echo(field_def) else pos + length
         
         if field_type == 'base64':
             import base64 as b64
@@ -5669,7 +5791,7 @@ class SchemaInterpreter:
         """
         Evaluate a cross-field binary computation.
         
-        compute_def: {op: 'add'|'sub'|'mul'|'div'|'mod'|'idiv', a: '$field'|literal, b: '$field'|literal}
+        compute_def: {op: 'add'|'sub'|'mul'|'div'|'mod'|'idiv'|'pow', a: '$field'|literal, b: '$field'|literal}
         """
         op = compute_def.get('op', 'add')
         a_spec = compute_def.get('a', 0)
@@ -5717,6 +5839,15 @@ class SchemaInterpreter:
                 return OMITTED
             # PS-276 floored: Python's `//` rounds toward negative infinity.
             return float(int(a) // int(b))
+        elif op == 'pow':
+            # PS-584: binary64 a**b; a result that is not a finite real number (a
+            # negative base with a fractional exponent, 0 to a negative power, an
+            # overflow) omits the field, as a zero divisor does.
+            try:
+                result = math.pow(a, b)
+            except (ValueError, OverflowError, ZeroDivisionError):
+                return OMITTED
+            return result if math.isfinite(result) else OMITTED
         else:
             raise ValueError(f"Unknown compute op: {op}")
     
@@ -7141,6 +7272,16 @@ class SchemaInterpreter:
                 length = 0 if isinstance(length, str) else max(0, int(length))
                 output.extend(padding(length))         # CR-2026-141: no value
                 continue
+
+            # PS-589 (CR-2026-175): a byte string that does not consume re-reads bytes the
+            # other fields write, so it writes none and is not required; a value given for
+            # it is checked where the frame closes.
+            if is_echo(field_def):
+                try:
+                    output.echo(field_def, data)
+                except ValueError as e:
+                    result.errors.append(error_text(f"Error encoding {name}: ", e))
+                continue
             
             # PS-359: a literal came from no bytes and writes none, and its key is not
             # required of the input. This warned "Missing field" for it.
@@ -8358,6 +8499,9 @@ class SchemaInterpreter:
                 length = 0 if isinstance(length, str) else max(0, int(length))
                 out.extend(padding(length))             # CR-2026-141: no value
                 continue
+            if is_echo(f):
+                out.echo(f, data)               # PS-589 (CR-2026-175): writes nothing
+                continue
             if is_literal(f):
                 continue            # PS-359: a literal writes no bytes
             if 'value' in f:
@@ -8592,7 +8736,7 @@ class SchemaInterpreter:
             name = f.get('name')
             if not name or str(name).startswith('_'):
                 continue
-            if is_literal(f) or f.get('type') in COMPUTED_TYPES:
+            if is_literal(f) or f.get('type') in COMPUTED_TYPES or is_echo(f):
                 # A literal or computed field writes no bytes, but only this case reports
                 # it, so it claims its name, never required: a literal where the input
                 # gives its value (wt303's `device_request`, a literal-only entry), a

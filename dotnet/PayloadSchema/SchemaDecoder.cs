@@ -623,7 +623,9 @@ public static class SchemaDecoder
 
             case FieldType.Ascii:
             {
+                int start = ctx.Offset;
                 var data = ctx.Read(length);
+                if (field.IsEcho) ctx.Offset = start;              // PS-588 (CR-2026-175)
                 value = Helpers.DecodeAscii(field.Name, data, ctx.Warnings);
                 if (field.Numeral != null)
                     value = Numeral.Decode(field.Name, (string)value, field.Numeral);   // PS-560
@@ -658,7 +660,9 @@ public static class SchemaDecoder
 
             case FieldType.Hex:
             {
+                int start = ctx.Offset;
                 var data = ctx.Read(length);
+                if (field.IsEcho) ctx.Offset = start;              // PS-588 (CR-2026-175)
                 value = Convert.ToHexString(data).ToLowerInvariant();
                 break;
             }
@@ -671,7 +675,11 @@ public static class SchemaDecoder
 
             case FieldType.Bytes:
             {
+                // PS-588 (CR-2026-175): `consume: 0` reports the span and leaves the read
+                // position, so the fields after it read the same bytes again.
+                int start = ctx.Offset;
                 var data = ctx.Read(length);
+                if (field.IsEcho) ctx.Offset = start;
                 value = Helpers.FormatBytes(data.ToArray(), field.Format, field.Separator);
                 break;
             }
@@ -1032,6 +1040,8 @@ public static class SchemaDecoder
                 case FieldType.Bits or FieldType.Bool:
                     total += f.Consume;
                     continue;
+                case FieldType.Bytes or FieldType.Ascii or FieldType.Hex when f.IsEcho:
+                    continue;                                       // PS-588: reads no bytes
                 case FieldType.Bytes or FieldType.Ascii or FieldType.Hex or FieldType.Base64 or FieldType.Skip:
                     if (f.Length <= 0) return 0;
                     total += f.Length;
@@ -1071,7 +1081,7 @@ public static class SchemaDecoder
         return v;
     }
 
-    static double RoundHalfAwayDecimal(double value, int decimals)
+    static double RoundHalfAwayDecimal(double value, int decimals, bool up = false)
     {
         if (double.IsNaN(value) || double.IsInfinity(value)) return value;
         if (decimals < 0) decimals = 0;
@@ -1084,7 +1094,7 @@ public static class SchemaDecoder
         if (tie)
         {
             var scale = Math.Pow(10, decimals);
-            rounded = (Math.Floor(abs * scale) + 1) / scale;
+            rounded = (Math.Floor(abs * scale) + (up && value < 0 ? 0 : 1)) / scale;
         }
         else
         {
@@ -1110,8 +1120,8 @@ public static class SchemaDecoder
                 //
                 // Formatting to a fixed number of decimals is correctly rounded on the
                 // stored value and breaks ties to even, which is both jobs at once.
-                numVal = stage.Ties == "away"
-                    ? RoundHalfAwayDecimal(numVal, stage.Decimals)
+                numVal = stage.Ties is "away" or "up"
+                    ? RoundHalfAwayDecimal(numVal, stage.Decimals, stage.Ties == "up")
                     : RoundHalfEvenDecimal(numVal, stage.Decimals);
                 continue;
             }
@@ -1259,6 +1269,8 @@ public static class SchemaDecoder
             "mod" => b == 0 ? ComputeOmitted : (double)FloorMod((long)a, (long)b),
             // PS-276 floored: rounds toward negative infinity, not toward zero.
             "idiv" => b == 0 ? ComputeOmitted : (double)FloorDiv((long)a, (long)b),
+            // PS-584: a result that is not a finite real number omits the field.
+            "pow" => double.IsFinite(Math.Pow(a, b)) ? Math.Pow(a, b) : ComputeOmitted,
             _ => throw new InvalidOperationException($"Unknown compute op: {cd.Op}")
         };
     }

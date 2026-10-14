@@ -477,8 +477,8 @@ func checkTransformStages(transform any, at string) error {
 		if op != "round" {
 			return fmt.Errorf("%s: transform stage names an unknown operation %v (PS-390)", where, op)
 		}
-		if ties, ok := stage["ties"]; ok && ties != "even" && ties != "away" {
-			return fmt.Errorf("%s: round `ties` must be even or away, got %v (PS-390)", where, ties)
+		if ties, ok := stage["ties"]; ok && ties != "even" && ties != "away" && ties != "up" {
+			return fmt.Errorf("%s: round `ties` must be even, away or up, got %v (PS-390)", where, ties)
 		}
 	}
 	return nil
