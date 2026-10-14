@@ -284,9 +284,13 @@ class Frame(bytes):
     pending, so the field after the construct shares them, as a decoder reads it: vobo's
     digital inputs peek a word inside a flagged block that the field after it reads."""
 
-    def __new__(cls, data=b'', pending=0, covered=None, peeks=None, echoes=None):
+    def __new__(cls, data=b'', pending=0, covered=None, peeks=None, checksums=None,
+                echoes=None):
         frame = super().__new__(cls, data)
         frame.pending = pending
+        # PS-587 (CR-2026-174): each checksum written as a placeholder, (position, field,
+        # byteorder), computed where the whole frame is known (`fill_checksums`).
+        frame.checksums = checksums or []
         # CR-2026-141 (PS-551): per byte, the bits some field wrote (None: all of them),
         # and each bit range or bool placed, for the check where the frame closes.
         frame.covered = covered
@@ -321,7 +325,35 @@ def prefixed_frame(prefix: bytes, body) -> 'Frame':
     return Frame(bytes(prefix) + bytes(body), getattr(body, 'pending', 0),
                  b'\xff' * shift + frame_covered(body),
                  [(p[0] + shift,) + tuple(p[1:]) for p in frame_peeks(body)],
-                 [(e[0] + shift,) + tuple(e[1:]) for e in frame_echoes(body)])
+                 [(c[0] + shift,) + tuple(c[1:]) for c in frame_checksums(body)],
+                 echoes=[(e[0] + shift,) + tuple(e[1:]) for e in frame_echoes(body)])
+
+
+def frame_checksums(data) -> list:
+    """The checksum placeholders in `data`, (position, field, byteorder) (CR-2026-174)."""
+    return list(getattr(data, 'checksums', None) or [])
+
+
+def fill_checksums(frame: bytes, placed: list, written: Optional[list] = None) -> bytes:
+    """PS-587 (CR-2026-174): compute each checksum over the bytes of the finished frame
+    from its `from` to the byte before it, earliest first, so an outer checksum covers an
+    inner one's value. A range starting past the field is rejected."""
+    out = bytearray(frame)
+    for position, field_def, order in sorted(placed, key=lambda c: c[0]):
+        spec = field_def['checksum']
+        start = int(spec.get('from', 0))
+        if start > position:
+            raise FieldError(checksum_unwritten_message(field_def.get('name')))
+        value = compute_checksum(spec['algo'], bytes(out[start:position]),
+                                 int(spec.get('seed', 0)))
+        size = CHECKSUM_WIDTHS[field_def['type']] // 8
+        out[position:position + size] = value.to_bytes(size, order)
+        if written is not None:
+            for i, f in enumerate(written):
+                if f is field_def:
+                    del written[i]
+                    break
+    return bytes(out)
 
 
 #: The byte strings a `consume: 0` re-reads (PS-588, CR-2026-175).
@@ -465,6 +497,7 @@ class FrameBuffer:
         # range or bool placed (see Frame).
         self.covered = bytearray()
         self.peeks = []
+        self.checksums = []         # PS-587 (CR-2026-174), as Frame
         self.echoes = []        # CR-2026-175 (PS-589): see Frame.echoes
 
     def echo(self, field_def, data) -> None:
@@ -487,6 +520,7 @@ class FrameBuffer:
         offset = len(self.buf)
         covered = frame_covered(data)
         peeks = frame_peeks(data)
+        checksums = frame_checksums(data)
         self.echoes.extend((e[0] + offset,) + tuple(e[1:]) for e in frame_echoes(data))
         data = bytes(data)
         if self.pending and data and any(
@@ -496,6 +530,7 @@ class FrameBuffer:
             raise ValueError(peek_disagreement(self.peeks, bytes(self.buf) + data))
         self.cover(offset, covered)
         self.peeks.extend((p[0] + offset,) + tuple(p[1:]) for p in peeks)
+        self.checksums.extend((c[0] + offset,) + tuple(c[1:]) for c in checksums)
         if self.pending and data:
             shared = min(len(self.pending), len(data))
             data = bytes(b | self.pending[i] if i < shared else b
@@ -542,7 +577,7 @@ class FrameBuffer:
         size = len(self.buf) + len(self.pending)
         covered = bytes(self.covered[:size]).ljust(size, b'\0')
         return Frame(bytes(self.buf + self.pending), len(self.pending), covered,
-                     list(self.peeks), list(self.echoes))
+                     list(self.peeks), list(self.checksums), list(self.echoes))
 
 
 def is_peek_field(field_def) -> bool:
@@ -2305,7 +2340,12 @@ def reraise_text(text: str) -> ValueError:
         exc = BufferUnderflow(text)
         exc.named = True
         return exc
+    if _NAMED_CHECKSUM.match(text):
+        return FieldError(text)             # PS-585, PS-586: verbatim (CR-2026-174)
     return ValueError(text)
+
+
+_NAMED_CHECKSUM = re.compile(r"^Field '.*\(PS-58[56]\)$", re.S)
 
 
 ASCII_HIGH_BYTE_WARNING = "Field '{}': a byte above 0x7F in an ascii value (PS-073, PS-538)"
@@ -3327,6 +3367,120 @@ def numeral_errors(node, _top=True):
     return errors
 
 
+#: PS-585 (CR-2026-174): each checksum algorithm and the bits its result needs.
+CHECKSUM_ALGOS = {'sum8': 8, 'xor8': 8, 'crc8/smbus': 8, 'crc16/kermit': 16}
+CHECKSUM_KEYS = ('algo', 'seed', 'from', 'on_mismatch')
+#: The unsigned integer types a checksum may be declared on, by width in bits.
+CHECKSUM_WIDTHS = {'u8': 8, 'u16': 16, 'u24': 24, 'u32': 32, 'u64': 64,
+                   'uint8': 8, 'uint16': 16, 'uint24': 24, 'uint32': 32, 'uint64': 64}
+
+
+def compute_checksum(algo: str, data: bytes, seed: int = 0) -> int:
+    """PS-585 (CR-2026-174): the four checksum algorithms. The CRCs are the catalogue
+    entries: over b'123456789', crc8/smbus is 0xF4 and crc16/kermit 0x2189."""
+    if algo == 'sum8':
+        return (seed + sum(data)) & 0xFF
+    if algo == 'xor8':
+        value = seed
+        for b in data:
+            value ^= b
+        return value
+    if algo == 'crc8/smbus':            # poly 0x07, init 0, not reflected, no final XOR
+        crc = 0
+        for b in data:
+            crc ^= b
+            for _ in range(8):
+                crc = ((crc << 1) ^ 0x07) & 0xFF if crc & 0x80 else (crc << 1) & 0xFF
+        return crc
+    if algo == 'crc16/kermit':          # poly 0x1021 reflected (0x8408), init 0, no final XOR
+        crc = 0
+        for b in data:
+            crc ^= b
+            for _ in range(8):
+                crc = (crc >> 1) ^ 0x8408 if crc & 1 else crc >> 1
+        return crc
+    raise ValueError(f"Unknown checksum algorithm {algo!r} (PS-585)")
+
+
+def checksum_field_errors(field: Dict[str, Any]) -> List[str]:
+    """PS-585 (CR-2026-174) for one field declaring `checksum`, in the spec prototype's
+    order and text (key_vocabulary.check_checksum): a mapping of known keys, on an unsigned
+    integer wide enough for its algorithm; `seed` a byte, on sum8 and xor8 only; `from` a
+    byte offset; `on_mismatch` error or warn. The first failure only, as the prototype."""
+    name = field.get('name', '<unnamed>')
+    spec = field['checksum']
+    if not isinstance(spec, dict):
+        return [f"The checksum of '{name}' is a mapping, such as {{algo: xor8}} (PS-585)"]
+    for key in spec:
+        if key not in CHECKSUM_KEYS and key != 'description' \
+                and not str(key).startswith('x-'):
+            return [f"`{key}` is not a key of the checksum of '{name}' (PS-448)"]
+    width = CHECKSUM_WIDTHS.get(field.get('type'))
+    if width is None:
+        return [f"Field '{name}': a checksum is declared on an unsigned integer type "
+                f"(u8 to u64), not {field.get('type')!r} (PS-585)"]
+    algo = spec.get('algo')
+    if algo not in CHECKSUM_ALGOS:
+        return [f"The checksum of '{name}': `algo` is one of "
+                f"{', '.join(sorted(CHECKSUM_ALGOS))}, not {algo!r} (PS-585)"]
+    if width < CHECKSUM_ALGOS[algo]:
+        return [f"Field '{name}': {field['type']} cannot hold a {algo} result (PS-585)"]
+    if 'seed' in spec and algo not in ('sum8', 'xor8'):
+        return [f"The checksum of '{name}': `seed` applies to sum8 and xor8, not {algo} "
+                f"(PS-585)"]
+    seed = spec.get('seed', 0)
+    if not isinstance(seed, int) or isinstance(seed, bool) or not 0 <= seed <= 255:
+        return [f"The checksum of '{name}': `seed` is a byte, 0 to 255 (PS-585)"]
+    start = spec.get('from', 0)
+    if not isinstance(start, int) or isinstance(start, bool) or start < 0:
+        return [f"The checksum of '{name}': `from` is a byte offset, 0 or more (PS-585)"]
+    if spec.get('on_mismatch', 'error') not in ('error', 'warn'):
+        return [f"The checksum of '{name}': `on_mismatch` is `error` or `warn` (PS-586)"]
+    return []
+
+
+def checksum_errors(node, _top=True):
+    """PS-585 (CR-2026-174) over the whole schema, test vectors skipped."""
+    errors = []
+    if isinstance(node, list):
+        for item in node:
+            errors.extend(checksum_errors(item, False))
+    elif isinstance(node, dict):
+        if 'checksum' in node and ('type' in node or 'name' in node):
+            errors.extend(checksum_field_errors(node))
+        for key, value in node.items():
+            if _top and key == 'test_vectors':
+                continue
+            if isinstance(value, (list, dict)):
+                errors.extend(checksum_errors(value, False))
+    return errors
+
+
+def checksum_mismatch(field_def: Dict[str, Any], buf: bytes, start_pos: int,
+                      carried: int) -> Optional[str]:
+    """PS-586: the declared checksum over `buf[from:start_pos]` against the value read.
+    Returns the mismatch message, or None where they agree. A range starting after the
+    field is an error (PS-585)."""
+    spec = field_def['checksum']
+    name = field_def.get('name')
+    start = int(spec.get('from', 0))
+    if start > start_pos:
+        raise FieldError(f"Field '{name}': the checksum range starts at byte {start}, after "
+                         f"the field at byte {start_pos} (PS-585)")
+    computed = compute_checksum(spec['algo'], bytes(buf[start:start_pos]),
+                                int(spec.get('seed', 0)))
+    if computed == carried:
+        return None
+    return (f"Field '{name}': {spec['algo']} over bytes {start} to {start_pos - 1} is "
+            f"0x{computed:X}, but the frame carries 0x{carried:X} (PS-586)")
+
+
+def checksum_unwritten_message(name) -> str:
+    """PS-587: a checksum whose covered range is not fully written when it is reached."""
+    return (f"Field '{name}': the bytes its checksum covers are not all written when it "
+            f"is reached (PS-587)")
+
+
 def schema_iterator_errors(schema):
     """iterator_errors over the top-level and port field lists, and every tlv's reserve.
 
@@ -3336,6 +3490,7 @@ def schema_iterator_errors(schema):
     errors = field_name_errors(schema)
     errors.extend(withdrawn_errors(schema))                          # CR-2026-159
     errors.extend(numeral_errors(schema))                            # PS-560
+    errors.extend(checksum_errors(schema))                           # PS-585
     errors.extend(bitfield_part_errors(schema))                      # PS-430
     errors.extend(lookup_type_errors(schema))                        # PS-571
     errors.extend(iterator_errors(schema.get('fields')))
@@ -4896,6 +5051,14 @@ class SchemaInterpreter:
         if field_type in type_info:
             size, signed = type_info[field_type]
             value, new_pos = self._read_int(buf, pos, size, signed)
+            if 'checksum' in field_def:
+                # PS-586 (CR-2026-174): the check value against the bytes it covers.
+                mismatch = checksum_mismatch(field_def, buf, pos, value)
+                if mismatch:
+                    if field_def['checksum'].get('on_mismatch', 'error') == 'warn':
+                        self._nested_warnings.append(mismatch)
+                    else:
+                        raise FieldError(mismatch)
             # Apply encoding if specified (sign_magnitude, bcd, gray)
             encoding = field_def.get('encoding')
             if encoding:
@@ -7193,6 +7356,7 @@ class SchemaInterpreter:
             return result
 
         output = FrameBuffer()          # CR-2026-136: laid out as the decoder reads it
+        self._checksum_open = []        # PS-587: checksums placed and not yet computed
 
         fields = self._resolve_fields(fPort)
         # The fields this message is encoded from: a reference is looked for among them
@@ -7347,6 +7511,14 @@ class SchemaInterpreter:
             # required of the input. This warned "Missing field" for it.
             if is_literal(field_def):
                 continue
+            # PS-587 (CR-2026-174): a checksum is computed over the bytes written, never
+            # taken from the input; its value is filled in when the frame is finished.
+            if 'checksum' in field_def:
+                try:
+                    output.extend(self._checksum_placeholder(field_def, output))
+                except Exception as e:
+                    result.errors.append(error_text(f"Error encoding {name}: ", e))
+                continue
             # PS-360: `value` on a field that reads bytes is the constant to write,
             # whatever the input supplies. The input's value was written instead.
             if 'value' in field_def:
@@ -7447,6 +7619,17 @@ class SchemaInterpreter:
                     result.errors.append(remaining_mismatch_message(
                         check['match'], check['tail'], selected, check['chosen']))
                     break
+        if not result.errors:
+            # PS-587 (CR-2026-174): each checksum over the finished frame. One a construct
+            # encoded apart from the frame - a tlv entry, a repeat element - did not reach
+            # it, since the bytes before it were not written when it was.
+            try:
+                frame = fill_checksums(frame, frame_checksums(frame), self._checksum_open)
+                if self._checksum_open:
+                    raise FieldError(checksum_unwritten_message(
+                        self._checksum_open[0].get('name')))
+            except ValueError as e:
+                result.errors.append(str(e))
         if not result.errors and not frame:
             # PS-442: the last line against a construct that wrote nothing and said so
             # to no one - a match with no case chosen, a tlv entry no case claimed.
@@ -8564,6 +8747,9 @@ class SchemaInterpreter:
                 continue
             if is_literal(f):
                 continue            # PS-359: a literal writes no bytes
+            if 'checksum' in f:
+                out.extend(self._checksum_placeholder(f, out))       # PS-587
+                continue
             if 'value' in f:
                 # PS-360: the constant is written whatever the input says.
                 out.extend(self._encode_field(f, f['value']))
@@ -8599,6 +8785,23 @@ class SchemaInterpreter:
             out.extend(self._encode_field(f, value))
         tails.close()
         return out.frame()
+
+    def _checksum_placeholder(self, field_def: Dict[str, Any], out: 'FrameBuffer') -> 'Frame':
+        """PS-587 (CR-2026-174): the checksum's bytes, zero until the frame is finished
+        (`fill_checksums`). Bits a peek left pending would be ORed into it, so its range
+        is not fully written: rejected, as the spec prototype rejects a pending overlay."""
+        # Inside a tlv entry or a repeat element or trailer, the bytes are encoded apart
+        # from the frame, so the bytes before them are not written when it is reached.
+        if out.pending or getattr(self, '_ps564_depth', 1):
+            raise FieldError(checksum_unwritten_message(field_def.get('name')))
+        size = CHECKSUM_WIDTHS[field_def['type']] // 8
+        endian = field_def.get('endian')
+        little = (endian == 'little') if endian else self.endian == Endian.LITTLE
+        if not hasattr(self, '_checksum_open'):
+            self._checksum_open = []
+        self._checksum_open.append(field_def)
+        return Frame(bytes(size), 0, None, [],
+                     [(0, field_def, 'little' if little else 'big')])
 
     @tail_unchecked
     def _encode_repeat_elements(self, field_def: Dict[str, Any], data: Dict[str, Any],
@@ -8795,6 +8998,10 @@ class SchemaInterpreter:
                 continue
             name = f.get('name')
             if not name or str(name).startswith('_'):
+                continue
+            if 'checksum' in f:
+                # PS-587: computed, never taken from the input, so never required.
+                out.append((f, True))
                 continue
             if is_literal(f) or f.get('type') in COMPUTED_TYPES or is_echo(f):
                 # A literal or computed field writes no bytes, but only this case reports
