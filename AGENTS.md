@@ -280,9 +280,17 @@ expected value:
   and called the disagreement a CR. Measured 2026-09-24 for `bytes` of length 2 over
   `0a0b`: Python, Go, Java, C# and the generated TS013 codec all give `"0a0b"`. Vectors
   write a hex string, and `values_match` still accepts hex or a list of octets against
-  a byte sequence. What remains open is `bytes` `format:` and `separator:` — described in the
-  spec with no PS tag, read by Go, Java and C#, **ignored by the Python reference and the
-  TS013 generator** (`a1b2c3` stays `a1b2c3` under `separator: ":"`).
+  a byte sequence. `bytes` `format:` (`hex`, `hex:upper`, `base64`, `array`) and `separator:` (hex formats only, PS-391)
+  are read by all five YAML paths: Python (`format_bytes`, CR-2026-058), the TS013 generator and its
+  encoder runtime, Go, Java and C#. Measured 2026-10-14 on `bytes-format.yaml` and
+  `bytes-format-forms.yaml` (`length: $n` and `remaining`, an empty value, a multi-character joiner,
+  padded and unpadded base64): every path decodes them identically and the ten vectors of the second
+  round-trip in Python. Encode accepts a formatted string back (PS-081), with or without the declared
+  separator, as a bytes value or a list of octets. This note used to say Python and the generator
+  ignored both keys; that stopped being true with CR-2026-058. C has no `format`/`separator`, and
+  `tools/schema_binary.py` refuses both by name (PS-446). Encode is lenient where the spec prototype is:
+  a short or long value is padded or cut to `length`, and a malformed base64 string or an octet above
+  255 is not rejected (open, not a PS requirement).
 - **`type: array` never existed.** `repeat` with `until: end` expresses exactly the
   same thing and already worked in all four. Another "missing feature" that was not
   missing — try the current language first.
