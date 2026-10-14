@@ -17,7 +17,7 @@ func TestCR058RejectedAtLoad(t *testing.T) {
 	cases := map[string]string{
 		"round key":     "  - {name: v, type: u8, transform: [{round: 1}]}\n",
 		"op floor":      "  - {name: v, type: u8, transform: [{op: floor}]}\n",
-		"bad ties":      "  - {name: v, type: u8, transform: [{op: round, ties: up}]}\n",
+		"bad ties":      "  - {name: v, type: u8, transform: [{op: round, ties: down}]}\n",
 		"sub stage":     "  - {name: v, type: u8, transform: [{sub: 3}]}\n",
 		"sep on base64": "  - {name: v, type: bytes, length: 2, format: base64, separator: ':'}\n",
 		"hex:lower":     "  - {name: v, type: bytes, length: 2, format: 'hex:lower'}\n",

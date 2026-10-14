@@ -22,7 +22,7 @@ public class CR2026058Test {
         String[] cases = {
             "- {name: v, type: u8, transform: [{round: 1}]}\n",
             "- {name: v, type: u8, transform: [{op: floor}]}\n",
-            "- {name: v, type: u8, transform: [{op: round, ties: up}]}\n",
+            "- {name: v, type: u8, transform: [{op: round, ties: down}]}\n",
             "- {name: v, type: u8, transform: [{sub: 3}]}\n",
             "- {name: v, type: bytes, length: 2, format: base64, separator: ':'}\n",
             "- {name: v, type: bytes, length: 2, format: 'hex:lower'}\n",
