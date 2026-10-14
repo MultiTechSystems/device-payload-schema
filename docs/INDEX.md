@@ -123,14 +123,14 @@ Generated inventory of this repository: what lives where, what each document cov
 
 ## Device schemas
 
-360 schemas under `schemas/devices/`.
-Mean quality score 82.0% (PLATINUM 44, GOLD 49, SILVER 246, BRONZE 6, REJECTED 15). Tiers follow the specification's Section 10: Platinum 95-100%, Gold 85-94%, Silver 70-84%, Bronze 60-69%, Rejected below 60%. Gold and Platinum also have gates (PS-239) -- see `../AGENTS.md`. A high score shows self-consistency with a schema's own test vectors, not that the vectors are right.
+361 schemas under `schemas/devices/`.
+Mean quality score 82.0% (PLATINUM 44, GOLD 49, SILVER 247, BRONZE 6, REJECTED 15). Tiers follow the specification's Section 10: Platinum 95-100%, Gold 85-94%, Silver 70-84%, Bronze 60-69%, Rejected below 60%. Gold and Platinum also have gates (PS-239) -- see `../AGENTS.md`. A high score shows self-consistency with a schema's own test vectors, not that the vectors are right.
 
 ### By vendor
 
 | Vendor | Schemas | Vectors | Tiers |
 |---|---|---|---|
-| _language-conformance | 148 | 360 | GOLD 1, SILVER 143, BRONZE 4 |
+| _language-conformance | 149 | 371 | GOLD 1, SILVER 144, BRONZE 4 |
 | milesight | 84 | 1427 | PLATINUM 31, GOLD 34, SILVER 16, REJECTED 3 |
 | decentlab | 58 | 204 | PLATINUM 10, GOLD 11, SILVER 32, BRONZE 1, REJECTED 4 |
 | _library-composed | 49 | 57 | SILVER 49 |
@@ -169,6 +169,7 @@ Mean quality score 82.0% (PLATINUM 44, GOLD 49, SILVER 246, BRONZE 6, REJECTED 1
 | `_language-conformance/bitfield-string` | 1 | 1 | fields | 81% | SILVER |
 | `_language-conformance/boolean-literal` | 7 | 2 | fields | 83% | SILVER |
 | `_language-conformance/byte-group-bool` | 4 | 3 | fields | 85% | SILVER |
+| `_language-conformance/byte-group-member-var` | 15 | 11 | ports | 86% | SILVER |
 | `_language-conformance/byte-group-width` | 12 | 3 | fields | 87% | SILVER |
 | `_language-conformance/bytes-format` | 4 | 1 | fields | 81% | SILVER |
 | `_language-conformance/bytes-length-field` | 5 | 2 | fields | 83% | SILVER |

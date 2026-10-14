@@ -5924,7 +5924,7 @@ class SchemaInterpreter:
                 if name and not name.startswith('_'):
                     result.data[name] = value
                 # Add to variables so field can be referenced by compute/formula
-                self._bind(gf, [name], value)
+                self._bind(gf, [name, gf.get('var')], value)
                 if name.startswith('_') and self._trace is not None:
                     # PS-572: as the prototype records a group member - a bool its flag,
                     # any other the number its name binds.
