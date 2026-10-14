@@ -56,17 +56,21 @@ fields:
                 a: $_half_ratio_scaled
                 b: $_one_minus_half_ratio
             - name: temperature
+              description: "Temperature"
               type: number
               ref: $_resistance
               polynomial: [0.0010664, 2.3419, -244.83]
               unit: "°C"
               senml: {unit: Cel}
+              semantic: "air.temperature"
         - bit: 1
           fields:
             - name: battery_voltage
+              description: "Battery voltage"
               type: u16
               div: 1000
               unit: "V"
+              semantic: "battery"
 test_vectors:
   - name: vendor_reference_1
     description: "Vendor-published test payload, decoded by the vendor's own decoder"

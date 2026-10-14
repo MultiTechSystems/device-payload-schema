@@ -17,6 +17,7 @@ fields:
         - bit: 0
           fields:
             - name: air_temperature_radiation_shield
+              description: "Air temperature (radiation shield)"
               type: u16
               transform:
                 - mult: 0.002670328831921874
@@ -24,6 +25,7 @@ fields:
               unit: "°C"
               senml: {unit: Cel}
             - name: air_humidity_radiation_shield
+              description: "Air humidity (radiation shield)"
               type: u16
               transform:
                 - mult: 0.0015259021896696424
@@ -33,6 +35,7 @@ fields:
         - bit: 1
           fields:
             - name: surface_temperature
+              description: "Surface temperature"
               type: u16
               transform:
                 - div: 100
@@ -40,6 +43,7 @@ fields:
               unit: "°C"
               senml: {unit: Cel}
             - name: air_temperature
+              description: "Air temperature"
               type: u16
               transform:
                 - div: 100
@@ -47,6 +51,7 @@ fields:
               unit: "°C"
               senml: {unit: Cel}
             - name: air_humidity
+              description: "Air humidity"
               type: u16
               transform:
                 - div: 100
@@ -54,6 +59,7 @@ fields:
               unit: "%"
               senml: {unit: "%RH"}
             - name: dew_point
+              description: "Dew point"
               type: u16
               transform:
                 - div: 100
@@ -61,12 +67,14 @@ fields:
               unit: "°C"
               senml: {unit: Cel}
             - name: angle
+              description: "Angle"
               type: u16
               transform:
                 - add: -32768
               unit: "°"
               senml: {unit: deg}
             - name: sensor_temperature
+              description: "Sensor temperature"
               type: u16
               transform:
                 - div: 100
@@ -76,9 +84,11 @@ fields:
         - bit: 2
           fields:
             - name: battery_voltage
+              description: "Battery voltage"
               type: u16
               div: 1000
               unit: "V"
+              semantic: "battery"
 test_vectors:
   - name: vendor_reference_1
     description: "Vendor-published test payload, decoded by the vendor's own decoder"

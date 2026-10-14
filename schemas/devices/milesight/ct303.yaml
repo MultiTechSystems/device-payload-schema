@@ -91,7 +91,7 @@ fields:
             unit: "°C"
             ipso: {object: 3303, instance: 0, resource: 5700}
             senml: {name: "temperature", unit: "Cel"}
-            semantic: "temperature"
+            semantic: "air.temperature"
             type: s16
             div: 10
         # TEMPERATURE ALARM
@@ -100,7 +100,7 @@ fields:
             unit: "°C"
             ipso: {object: 3303, instance: 0, resource: 5700}
             senml: {name: "temperature", unit: "Cel"}
-            semantic: "temperature"
+            semantic: "air.temperature"
             type: s16
             div: 10
           - name: temperature_alarm
@@ -126,7 +126,6 @@ fields:
             unit: "A"
             ipso: {object: 3317, instance: 0, resource: 5700}
             senml: {name: "current_chn1", unit: "A"}
-            semantic: "current"
         "[132, 153]":
           - name: current_chn1_max
             type: u16
@@ -142,7 +141,6 @@ fields:
             unit: "A"
             ipso: {object: 3317, instance: 0, resource: 5700}
             senml: {name: "current_chn1", unit: "A"}
-            semantic: "current"
           - name: current_chn1_alarm
             type: object
             fields:
@@ -171,7 +169,6 @@ fields:
             unit: "A"
             ipso: {object: 3317, instance: 1, resource: 5700}
             senml: {name: "current_chn2", unit: "A"}
-            semantic: "current"
         "[134, 153]":
           - name: current_chn2_max
             type: u16
@@ -187,7 +184,6 @@ fields:
             unit: "A"
             ipso: {object: 3317, instance: 1, resource: 5700}
             senml: {name: "current_chn2", unit: "A"}
-            semantic: "current"
           - name: current_chn2_alarm
             type: object
             fields:
@@ -216,7 +212,6 @@ fields:
             unit: "A"
             ipso: {object: 3317, instance: 2, resource: 5700}
             senml: {name: "current_chn3", unit: "A"}
-            semantic: "current"
         "[136, 153]":
           - name: current_chn3_max
             type: u16
@@ -232,7 +227,6 @@ fields:
             unit: "A"
             ipso: {object: 3317, instance: 2, resource: 5700}
             senml: {name: "current_chn3", unit: "A"}
-            semantic: "current"
           - name: current_chn3_alarm
             type: object
             fields:

@@ -17,9 +17,11 @@ fields:
         - bit: 0
           fields:
             - name: dielectric_permittivity
+              description: "Dielectric permittivity"
               type: u16
               div: 50
             - name: volumetric_water_content
+              description: "Volumetric water content"
               type: number
               ref: $dielectric_permittivity
               polynomial: [0.0000043, -0.00055, 0.0292, -0.053]
@@ -27,6 +29,7 @@ fields:
             - name: soil_temperature_raw
               type: u16
             - name: soil_temperature
+              description: "Soil temperature"
               type: number
               ref: $soil_temperature_raw
               transform:
@@ -39,12 +42,13 @@ fields:
         - bit: 1
           fields:
             - name: battery_voltage
+              description: "Battery voltage"
               type: u16
               div: 1000
               unit: "V"
               ipso: {object: 3316, instance: 0, resource: 5700}
               senml: {name: "vbat", unit: "V"}
-              semantic: "battery.voltage"
+              semantic: "battery"
 
 test_vectors:
   - name: ttn_declared_example_1

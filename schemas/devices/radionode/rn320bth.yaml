@@ -40,6 +40,8 @@ fields:
           - name: temperature
             type: f32
             unit: "°C"
+            semantic: "air.temperature"
           - name: humidity
             type: f32
             unit: "%RH"
+            semantic: "air.relativeHumidity"

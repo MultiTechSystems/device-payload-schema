@@ -17,23 +17,28 @@ fields:
         - bit: 0
           fields:
             - name: water_potential
+              description: "Water potential"
               type: u16
               transform:
                 - div: -10
               unit: "kPa"
             - name: soil_temperature
+              description: "Soil temperature"
               type: u16
               transform:
                 - div: 10
                 - add: -3276.8
               unit: "°C"
               senml: {unit: Cel}
+              semantic: "soil.temperature"
         - bit: 1
           fields:
             - name: battery_voltage
+              description: "Battery voltage"
               type: u16
               div: 1000
               unit: "V"
+              semantic: "battery"
 test_vectors:
   - name: vendor_reference_1
     description: "Vendor-published test payload, decoded by the vendor's own decoder"

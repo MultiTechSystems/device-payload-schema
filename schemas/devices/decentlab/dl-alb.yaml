@@ -17,22 +17,23 @@ fields:
         - bit: 0
           fields:
             - name: incoming_radiation
+              description: "Incoming radiation"
               type: u16
               transform:
                 - add: -32768
                 - div: 10
               unit: "W/m²"
               senml: {name: "solar_in", unit: "W/m2"}
-              semantic: "solar.irradiance.incoming"
             - name: reflected_radiation
+              description: "Reflected radiation"
               type: u16
               transform:
                 - add: -32768
                 - div: 10
               unit: "W/m²"
               senml: {name: "solar_ref", unit: "W/m2"}
-              semantic: "solar.irradiance.reflected"
             - name: albedo
+              description: "albedo"
               type: number
               compute:
                 op: div
@@ -46,16 +47,16 @@ fields:
                     gte: 0
                 else: 0
               senml: {name: "albedo", unit: "/"}
-              semantic: "solar.albedo"
         - bit: 1
           fields:
             - name: battery_voltage
+              description: "Battery voltage"
               type: u16
               div: 1000
               unit: "V"
               ipso: {object: 3316, instance: 0, resource: 5700}
               senml: {name: "vbat", unit: "V"}
-              semantic: "battery.voltage"
+              semantic: "battery"
 
 test_vectors:
   - name: min_payload_vendor_1

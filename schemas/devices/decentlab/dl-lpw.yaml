@@ -21,6 +21,7 @@ fields:
             # cannot be read as one field. Reading only the low word also left the
             # high word unconsumed, misaligning every group after it.
             - name: potentiometer_position
+              description: "Potentiometer position"
               type: u32le16
               transform:
                 - mult: 1.1920928955078125e-05
@@ -30,9 +31,11 @@ fields:
         - bit: 1
           fields:
             - name: battery_voltage
+              description: "Battery voltage"
               type: u16
               div: 1000
               unit: "V"
+              semantic: "battery"
 
 test_vectors:
   # The word-ordered field's bytes are the vendor-documented pair from

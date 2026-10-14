@@ -18,7 +18,6 @@ fields:
             unit: "%"
             ipso: {object: 3320, instance: 0, resource: 5700}
             senml: {name: "battery", unit: "/100"}
-            semantic: "battery"
             type: u8
         # PIR
         "[3, 0]":
