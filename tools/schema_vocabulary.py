@@ -226,7 +226,7 @@ VOCABULARY: Dict[str, Dict[str, Tuple[Tuple[str, ...], str]]] = {
         "ties": (_DECODERS, "round's tie rule: even (default) or away (PS-390)"),
     },
     "compute": {
-        "op": (_DECODERS, "add sub mul div mod idiv"),
+        "op": (_DECODERS, "add sub mul div mod idiv pow"),
         "a": (_DECODERS, "first operand"),
         "b": (_DECODERS, "second operand"),
     },

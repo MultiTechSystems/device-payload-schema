@@ -1265,6 +1265,8 @@ public static class SchemaDecoder
             "mod" => b == 0 ? ComputeOmitted : (double)FloorMod((long)a, (long)b),
             // PS-276 floored: rounds toward negative infinity, not toward zero.
             "idiv" => b == 0 ? ComputeOmitted : (double)FloorDiv((long)a, (long)b),
+            // PS-584: a result that is not a finite real number omits the field.
+            "pow" => double.IsFinite(Math.Pow(a, b)) ? Math.Pow(a, b) : ComputeOmitted,
             _ => throw new InvalidOperationException($"Unknown compute op: {cd.Op}")
         };
     }

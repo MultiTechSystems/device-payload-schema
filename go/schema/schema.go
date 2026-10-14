@@ -6640,6 +6640,13 @@ func evaluateCompute(cd *ComputeDef, ctx *DecodeContext) (float64, error) {
 		}
 		// PS-276 floored: rounds toward negative infinity, not toward zero.
 		return float64(floorDiv(int64(a), int64(b))), nil
+	case "pow":
+		// PS-584: a result that is not a finite real number omits the field.
+		r := math.Pow(a, b)
+		if math.IsNaN(r) || math.IsInf(r, 0) {
+			return 0, errComputeOmitted
+		}
+		return r, nil
 	default:
 		return 0, fmt.Errorf("unknown compute op: %s", cd.Op)
 	}

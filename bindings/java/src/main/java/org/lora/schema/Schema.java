@@ -3455,6 +3455,8 @@ public class Schema {
             case "mod" -> b == 0 ? COMPUTE_OMITTED : (double) Math.floorMod((long) a, (long) b);
             // PS-276 floored, already correct.
             case "idiv" -> b == 0 ? COMPUTE_OMITTED : (double) Math.floorDiv((long) a, (long) b);
+            // PS-584: a result that is not a finite real number omits the field.
+            case "pow" -> Double.isFinite(Math.pow(a, b)) ? Math.pow(a, b) : COMPUTE_OMITTED;
             default -> throw new SchemaException.DecodeException(
                     "Unknown compute op: " + compute.getOp());
         };

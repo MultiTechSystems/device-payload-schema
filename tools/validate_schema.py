@@ -1259,8 +1259,8 @@ def validate_field_list(fields: List[Dict], path: str, errors: List[str],
                     else:
                         if 'op' not in compute:
                             errors.append(f"{path}[{i}] ({name}): compute missing 'op'")
-                        elif compute['op'] not in ('add', 'sub', 'mul', 'div', 'mod', 'idiv'):
-                            errors.append(f"{path}[{i}] ({name}): compute 'op' must be add/sub/mul/div/mod/idiv")
+                        elif compute['op'] not in ('add', 'sub', 'mul', 'div', 'mod', 'idiv', 'pow'):
+                            errors.append(f"{path}[{i}] ({name}): compute 'op' must be add/sub/mul/div/mod/idiv/pow")
                         for operand in ('a', 'b'):
                             if operand in compute:
                                 op_val = compute[operand]
