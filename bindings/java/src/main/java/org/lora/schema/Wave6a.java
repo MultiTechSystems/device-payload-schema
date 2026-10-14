@@ -758,6 +758,10 @@ final class Wave6a {
                 total += FIXED_SIZES.get(type);
             } else if (COMPUTED_TYPES.contains(type) || isLiteral(f)) {
                 continue;
+            } else if (List.of("bytes", "ascii", "hex").contains(type) && f.containsKey("consume")
+                    && f.get("consume") instanceof Number c && !(f.get("consume") instanceof Boolean)
+                    && c.doubleValue() == 0) {
+                continue;                           // PS-588: a re-read advances nothing
             } else if (type.contains("[") || "bool".equals(type)) {
                 Object consume = f.containsKey("consume") ? f.get("consume") : 0;
                 if (!isInt(consume)) return null;

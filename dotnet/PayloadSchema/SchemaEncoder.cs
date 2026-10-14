@@ -430,6 +430,14 @@ public static class SchemaEncoder
             // PS-359: a literal writes no bytes and its key is not required of the input.
             if (field.Type is FieldType.String or FieldType.Boolean && field.Value != null)
                 return Array.Empty<byte>();
+            // PS-589 (CR-2026-175): a non-consuming byte string writes nothing and is not
+            // required; a value given for it is recorded on the frame and checked where the
+            // frame closes.
+            if (field.IsEcho)
+            {
+                frame?.AddEcho(field, data);
+                return Array.Empty<byte>();
+            }
             // PS-360: `value` on a field that reads bytes is the constant to write,
             // whatever the input supplies.
             if (field.Value != null)
@@ -2110,8 +2118,9 @@ public static class SchemaEncoder
                 }
                 if (f.MatchInline != null) { sink.AddRange(MatchClaims(f.MatchInline)); continue; }
                 if (!string.IsNullOrEmpty(f.Name) && !f.Name.StartsWith("_")
-                    && (IsLiteral(f) || IsComputed(f)))
+                    && (IsLiteral(f) || IsComputed(f) || f.IsEcho))
                 {
+                    // CR-2026-175: a non-consuming byte string writes nothing either (PS-589).
                     // A literal or computed field writes no bytes, but only this case reports
                     // it, so it claims its name, never required: a literal where the input
                     // gives its value, a computed field so the case is chosen and what it is
@@ -3245,17 +3254,11 @@ public static class SchemaEncoder
                 var (offOk, bitOff) = Helpers.ToInt(part[0]);
                 var (lenOk, bitLen) = Helpers.ToInt(part[1]);
                 if (!offOk || !lenOk) continue;
-                string format = part.Count >= 3 && part[2] is string f ? f : "decimal";
-                string segment = i < segments.Length ? segments[i].Trim() : "0";
-                ulong raw;
-                // PS-431: a hex segment is read without regard to case.
-                bool parsed = format is "hex" or "hex:upper"
-                    ? ulong.TryParse(segment, System.Globalization.NumberStyles.HexNumber,
-                        System.Globalization.CultureInfo.InvariantCulture, out raw)
-                    : ulong.TryParse(segment, out raw);
-                if (!parsed)
-                    throw new InvalidOperationException($"bitfield_string field "
-                        + $"'{field.Name}': segment '{segment}' is not {format}");
+                object? format = part.Count >= 3 ? part[2] : "decimal";
+                string segment = i < segments.Length ? segments[i] : "0";
+                // PS-096, PS-431, PS-583: parsed by the part's format; a value the width
+                // cannot hold is rejected, never masked.
+                ulong raw = BitfieldParts.ParseSegment(segment, bitLen, format, field.Name);
                 ulong mask = bitLen >= 64 ? ulong.MaxValue : (1UL << bitLen) - 1;
                 packed |= (raw & mask) << bitOff;
             }
@@ -3416,6 +3419,31 @@ internal sealed class FrameBuffer
     // and each bit range or bool placed, for the check where the frame closes.
     readonly List<byte> _covered = new();
     readonly List<Peek> _peeks = new();
+    // CR-2026-175 (PS-589): each non-consuming byte string given a value, checked where
+    // the frame closes (FrameMeta.Check).
+    readonly List<Echo> _echoes = new();
+
+    /// <summary>PS-589: a non-consuming byte string writes nothing and is not required; a
+    /// value given for it is recorded at the position a decoder is at - the start of any
+    /// bytes still pending - with its length read from the input (null for
+    /// <c>remaining</c>).</summary>
+    public void AddEcho(SchemaField field, Dictionary<string, object?> data)
+    {
+        if (string.IsNullOrEmpty(field.Name)
+            || !data.TryGetValue(field.Name, out var given) || given == null) return;
+        int? length;
+        if (field.LengthRef != null)
+        {
+            if (!data.TryGetValue(field.LengthRef, out var n)
+                || Helpers.ToFloat64(n) is not (true, var d) || d < 0 || d != Math.Floor(d))
+                throw new InvalidOperationException($"Missing required field: {field.LengthRef}");
+            length = (int)d;
+        }
+        else if (field.Length < 0) length = null;
+        else length = field.Length != 0 || field.LengthDeclared
+            ? field.Length : Helpers.InferLengthFromType(field.Type);
+        _echoes.Add(new Echo(_buf.Count, field, given, length));
+    }
 
     void Cover(int position, byte[] mask)
     {
@@ -3429,7 +3457,7 @@ internal sealed class FrameBuffer
         int size = _buf.Count + _pending.Count;
         var covered = new byte[size];
         for (int i = 0; i < size && i < _covered.Count; i++) covered[i] = _covered[i];
-        return new FrameMeta(covered, new List<Peek>(_peeks));
+        return new FrameMeta(covered, new List<Peek>(_peeks), new List<Echo>(_echoes));
     }
 
     public IReadOnlyList<byte> Pending => _pending;
@@ -3465,7 +3493,10 @@ internal sealed class FrameBuffer
         for (int i = 0; i < data.Length; i++) mask[i] = FrameMeta.CoveredAt(meta, i);
         Cover(offset, mask);
         if (meta != null)
+        {
             foreach (var peek in meta.Peeks) _peeks.Add(peek with { Position = peek.Position + offset });
+            foreach (var echo in meta.Echoes) _echoes.Add(echo with { Position = echo.Position + offset });
+        }
         var merged = new byte[data.Length];
         for (int i = 0; i < data.Length; i++)
             merged[i] = i < shared ? (byte)(data[i] | _pending[i]) : data[i];
@@ -3534,6 +3565,11 @@ internal sealed class FrameBuffer
 internal sealed record Peek(int Position, int Size, bool Little, int Start, int Width,
     ulong? Raw, string Name);
 
+/// <summary>A non-consuming byte string given a value (CR-2026-175, PS-589): where a decoder
+/// reads it, its field, the value given, and its length (null for <c>remaining</c>, the end
+/// of the frame it is checked in).</summary>
+internal sealed record Echo(int Position, SchemaField Field, object? Given, int? Length);
+
 /// <summary>
 /// A frame's PS-551 metadata (CR-2026-141): per byte, the bits some field wrote, and each
 /// bit range or bool placed. The reference's Frame.covered and Frame.peeks; bytes a whole
@@ -3543,11 +3579,13 @@ internal sealed class FrameMeta
 {
     public byte[] Covered { get; }
     public List<Peek> Peeks { get; }
+    public List<Echo> Echoes { get; }
 
-    public FrameMeta(byte[] covered, List<Peek> peeks)
+    public FrameMeta(byte[] covered, List<Peek> peeks, List<Echo>? echoes = null)
     {
         Covered = covered;
         Peeks = peeks;
+        Echoes = echoes ?? new List<Echo>();
     }
 
     public static byte CoveredAt(FrameMeta? meta, int i)
@@ -3561,7 +3599,8 @@ internal sealed class FrameMeta
         for (int i = 0; i < prefix; i++) covered[i] = 0xFF;
         for (int i = 0; i < bodyLength; i++) covered[prefix + i] = CoveredAt(body, i);
         return new FrameMeta(covered,
-            body.Peeks.Select(p => p with { Position = p.Position + prefix }).ToList());
+            body.Peeks.Select(p => p with { Position = p.Position + prefix }).ToList(),
+            body.Echoes.Select(e => e with { Position = e.Position + prefix }).ToList());
     }
 
     static System.Numerics.BigInteger Read(byte[] frame, int position, int size, bool little)
@@ -3612,6 +3651,95 @@ internal sealed class FrameMeta
     public static void Check(byte[] frame, FrameMeta? meta)
     {
         if (meta == null) return;
+        CheckPeeks(frame, meta);
+        CheckEchoes(frame, meta);
+    }
+
+    /// <summary>
+    /// PS-589 (CR-2026-175), the reference's check_echoes: a value given for a
+    /// non-consuming byte string equals what the field decodes from the bytes the other
+    /// fields wrote over its span - its format and separator, or PS-534's trailing 0x00
+    /// removal, applied first - or the input is rejected, naming the field.
+    /// </summary>
+    static void CheckEchoes(byte[] frame, FrameMeta meta)
+    {
+        foreach (var e in meta.Echoes)
+        {
+            int length = e.Length ?? Math.Max(0, frame.Length - e.Position);
+            string written;
+            if (e.Position + length > frame.Length)
+                written = "too few bytes";
+            else
+            {
+                object? found;
+                try { found = EchoValue(e.Field, frame.AsSpan(e.Position, length)); }
+                catch (Exception) { found = null; }
+                if (found != null && EchoEquals(found, e.Given)) continue;
+                written = found != null ? EchoText(found) : "too few bytes";
+            }
+            throw new FieldErrorException($"Field '{e.Field.Name}' is given {EchoText(e.Given)}, "
+                + $"but the other fields write {written} over its span (PS-589)");
+        }
+    }
+
+    /// <summary>What a non-consuming byte string decodes from <paramref name="span"/>.</summary>
+    static object EchoValue(SchemaField field, ReadOnlySpan<byte> span)
+    {
+        switch (field.Type)
+        {
+            case FieldType.Bytes:
+                return Helpers.FormatBytes(span.ToArray(), field.Format, field.Separator);
+            case FieldType.Hex:
+                return Convert.ToHexString(span).ToLowerInvariant();
+            default:
+            {
+                object text = Helpers.DecodeAscii(field.Name, span, new List<string>());
+                if (field.Numeral != null)
+                    text = Numeral.Decode(field.Name, (string)text, field.Numeral);
+                return text;
+            }
+        }
+    }
+
+    static bool EchoEquals(object found, object? given)
+    {
+        if (found is string fs) return given is string gs && string.Equals(fs, gs, StringComparison.Ordinal);
+        if (found is System.Collections.IList fl)
+        {
+            if (given is not System.Collections.IList gl || gl.Count != fl.Count) return false;
+            for (int i = 0; i < fl.Count; i++)
+                if (fl[i] == null || !EchoEquals(fl[i]!, gl[i])) return false;
+            return true;
+        }
+        if (found is bool) return Equals(found, given);
+        var (fok, fd) = Helpers.ToFloat64(found);
+        var (gok, gd) = Helpers.ToFloat64(given);
+        return fok && gok && given is not bool && given is not string && fd == gd;
+    }
+
+    /// <summary>A value as a PS-589 message writes it: text in single quotes, a number as
+    /// JavaScript's String(number), a list of octets as <c>'[1, 2]'</c>.</summary>
+    static string EchoText(object? value)
+    {
+        switch (value)
+        {
+            case System.Collections.IList list:
+                var parts = new List<string>();
+                foreach (var item in list) parts.Add(EchoText(item).Trim('\''));
+                return "'[" + string.Join(", ", parts) + "]'";
+            case bool b:
+                return b ? "true" : "false";
+            case string s:
+                return "'" + s + "'";
+            case null:
+                return "'None'";
+        }
+        if (Helpers.ToFloat64(value).Item1) return SchemaEncoder.JsNumber(value);
+        return "'" + value + "'";
+    }
+
+    static void CheckPeeks(byte[] frame, FrameMeta meta)
+    {
         foreach (var p in meta.Peeks)
         {
             var mask = Mask(p.Start, p.Width);

@@ -223,10 +223,10 @@ VOCABULARY: Dict[str, Dict[str, Tuple[Tuple[str, ...], str]]] = {
         "ceiling": (_DECODERS, "stage: upper clamp (PS-115)"),
         "op": (_DECODERS, "named stage: {op: round} is the only one (PS-390)"),
         "decimals": (_DECODERS, "round's precision"),
-        "ties": (_DECODERS, "round's tie rule: even (default) or away (PS-390)"),
+        "ties": (_DECODERS, "round's tie rule: even (default), away or up (PS-390)"),
     },
     "compute": {
-        "op": (_DECODERS, "add sub mul div mod idiv"),
+        "op": (_DECODERS, "add sub mul div mod idiv pow"),
         "a": (_DECODERS, "first operand"),
         "b": (_DECODERS, "second operand"),
     },

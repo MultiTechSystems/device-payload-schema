@@ -1222,9 +1222,7 @@ def validate_field_list(fields: List[Dict], path: str, errors: List[str],
                     for pi, part in enumerate(fld['parts']):
                         if not isinstance(part, list) or len(part) < 2:
                             errors.append(f"{path}[{i}].parts[{pi}]: must be [bitOffset, bitLength] or [bitOffset, bitLength, format]")
-                        elif len(part) > 2 and part[2] not in ('hex', 'hex:upper', 'decimal'):
-                            errors.append(f"{path}[{i}].parts[{pi}]: format must be "
-                                          f"'decimal', 'hex' or 'hex:upper' (PS-430)")
+                        # A part's format (PS-430) is schema_iterator_errors' check.
                 if 'length' not in fld:
                     errors.append(f"{path}[{i}] ({name}): bitfield_string should have explicit 'length'")
                 continue
@@ -1259,8 +1257,8 @@ def validate_field_list(fields: List[Dict], path: str, errors: List[str],
                     else:
                         if 'op' not in compute:
                             errors.append(f"{path}[{i}] ({name}): compute missing 'op'")
-                        elif compute['op'] not in ('add', 'sub', 'mul', 'div', 'mod', 'idiv'):
-                            errors.append(f"{path}[{i}] ({name}): compute 'op' must be add/sub/mul/div/mod/idiv")
+                        elif compute['op'] not in ('add', 'sub', 'mul', 'div', 'mod', 'idiv', 'pow'):
+                            errors.append(f"{path}[{i}] ({name}): compute 'op' must be add/sub/mul/div/mod/idiv/pow")
                         for operand in ('a', 'b'):
                             if operand in compute:
                                 op_val = compute[operand]
@@ -1498,7 +1496,12 @@ def check_remaining_length(schema: Dict[str, Any]) -> List[str]:
             name = fld.get('name') or f"{path}[{i}]"
             ftype = str(fld.get('type', ''))
             if isinstance(length, str) and length.strip().lower() == 'remaining':
-                seen.append(name)
+                # PS-015 (CR-2026-175): a byte string declaring `consume: 0` consumes
+                # nothing (PS-588), so a whole-frame echo does not count.
+                if not (ftype in ('bytes', 'hex', 'ascii') and 'consume' in fld
+                        and fld.get('consume') == 0
+                        and not isinstance(fld.get('consume'), bool)):
+                    seen.append(name)
                 if ftype not in REMAINING_TYPES:
                     errors.append(
                         f"{name}: length: remaining is not valid on type '{ftype}'; it "
@@ -2008,9 +2011,10 @@ def check_best_practices(schema: Dict[str, Any], result: ValidationResult) -> No
                     )
 
             # PS-453: `consume: 0` advances nothing, which is the point on a bit range
-            # or a bool and a trap anywhere else - the next field reads the same bytes.
+            # or a bool, and defined on a byte string (PS-588, CR-2026-175), which then
+            # reports its span again; anywhere else the next field reads the same bytes.
             if (fld.get('consume') == 0 and isinstance(ftype, str)
-                    and '[' not in ftype and ftype != 'bool'):
+                    and '[' not in ftype and ftype not in ('bool', 'bytes', 'hex', 'ascii')):
                 result.add_warning(
                     "consume: 0 on a %s field is NOT RECOMMENDED (PS-453): the next "
                     "field reads the same bytes again" % ftype,

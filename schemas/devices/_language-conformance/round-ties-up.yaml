@@ -1,0 +1,72 @@
+# `ties: up` on a round stage rounds an exact tie toward +infinity (PS-390, CR-2026-171), as
+# JavaScript's Math.round does: a negative tie goes toward zero. Vendor decoders that round
+# with that function, such as MClimate's Vicki and Open-Boat's boat monitor, need it.
+#
+# Each field is one assertion over one tie or its neighbour. The first column of the table in
+# the clause is 2.5, 3.5, -2.5 and -3.5; `even` gives 2, 4, -2, -4 and `away` 3, 4, -3, -4.
+# Only an exact tie moves: -0.2501 is below the tie and rounds to -0.3 under every rule.
+name: probe_round_ties_up
+endian: big
+fields:
+- name: positive_tie
+  type: s16
+  div: 2
+  transform:
+  - op: round
+    ties: up
+- name: positive_odd_tie
+  type: s16
+  div: 2
+  transform:
+  - op: round
+    ties: up
+- name: negative_tie
+  type: s16
+  div: 2
+  transform:
+  - op: round
+    ties: up
+- name: negative_odd_tie
+  type: s16
+  div: 2
+  transform:
+  - op: round
+    ties: up
+- name: negative_tie_away
+  type: s16
+  div: 2
+  transform:
+  - op: round
+    ties: away
+- name: negative_tie_even
+  type: s16
+  div: 2
+  transform:
+  - op: round
+- name: decimal_tie
+  type: s16
+  div: 4
+  transform:
+  - op: round
+    decimals: 1
+    ties: up
+- name: below_the_tie
+  type: s16
+  div: 10000
+  transform:
+  - op: round
+    decimals: 1
+    ties: up
+test_vectors:
+- name: ties_toward_positive_infinity
+  source: generated
+  payload: "0005 0007 FFFB FFF9 FFFB FFFB FFFF F63B"
+  expected:
+    positive_tie: 3
+    positive_odd_tie: 4
+    negative_tie: -2
+    negative_odd_tie: -3
+    negative_tie_away: -3
+    negative_tie_even: -2
+    decimal_tie: -0.2
+    below_the_tie: -0.3
