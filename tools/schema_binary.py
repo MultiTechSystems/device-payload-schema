@@ -204,6 +204,9 @@ C_UNSUPPORTED_KEYS = {
     "nul": "the C interpreter has no nul modes on ascii (PS-534)",
     "terminator": "the C interpreter has no terminator-delimited ascii (PS-593)",
     "numeral": "the C interpreter holds ascii text, not the integer it spells (PS-560)",
+    # CR-2026-174: the C interpreter checks and computes one (field_set_checksum), but a
+    # field record has no slot for its algorithm, seed, `from` or `on_mismatch`.
+    "checksum": "this format has no checksum record (PS-585)",
     "sentinel": "the C interpreter has no sentinel (PS-427)",
     "out_of_range": "the C interpreter has no out_of_range: omit (PS-428)",
     "default": ("the C interpreter has no enum default, and no field default to write "

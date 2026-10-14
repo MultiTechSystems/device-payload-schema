@@ -144,6 +144,7 @@ public static partial class SchemaParser
         // above, as the spec prototype does, so a construct's own error keeps its text.
         CheckFieldNames(root);
         CheckSampled(root);    // PS-569 (CR-2026-156)
+        PayloadSchema.Checksum.Check(root);    // PS-585 (CR-2026-174)
         Meta.CheckLookupTypes(root);    // PS-571 (CR-2026-161)
         schema.RepeatOnlyNames = RepeatOnlyNames(root);
         // PS-491 (CR-2026-096): one reported name's declarations in one field list agree
@@ -888,6 +889,7 @@ public static partial class SchemaParser
         if (fm.TryGetValue("nul", out var nulNode)) f.Nul = Scalar(nulNode);
         if (fm.TryGetValue("terminator", out var termNode) && AsciiText.ParseInteger(termNode) is long tv)
             f.Terminator = (int)tv;
+        f.Checksum = PayloadSchema.Checksum.Parse(fm);                    // PS-585 (CR-2026-174)
         if (fm.TryGetValue("byte_group", out var bgNode))
         {
             if (bgNode is YamlSequenceNode bgSeq)

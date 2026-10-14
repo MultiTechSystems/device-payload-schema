@@ -1,0 +1,244 @@
+# CR-2026-174 (PS-585 to PS-587): a `checksum` on an unsigned integer field is verified on
+# decode, with an error or a warning on a mismatch, and computed on encode.
+#
+# Three lists, read by the reference and the generated codec
+# (tests/test_cr_2026_174_cases.py), Go (go/schema/cr174_test.go), Java (CR2026174Test.java)
+# and C# (CR2026_174Tests.cs):
+#
+#   decode: `schema` (YAML text), `payload` (hex) and either `expected` (the whole data
+#           mapping, compared exactly) or `error` (text one of the errors contains; the
+#           decode does not succeed). `warning`, where present, is text one of the warnings contains.
+#   cases:  `schema`, `input` (JSON text) and either `payload` (hex) or `error`.
+#   load:   `schema` and `error`, text one of the load errors contains.
+#
+# The errors are the spec prototype's text (PS-448's without its "did you mean" hint).
+# The vendor frames are TTN lorawan-devices 7a0cb2e examples whose check values the
+# vendors' own decoders accept (registry analysis/cr-evidence-checksum-span-joins-2026-10-14):
+# acrios acr-cv-101l (sum8), emu profii-lp (crc8/smbus), jooby analog-gasi3/gasic/imp4eu
+# (xor8 seeded 0x55) and seeed/sensecap e5 (crc16/kermit, little-endian).
+
+decode:
+
+# The catalogue check values over the ASCII bytes 123456789.
+- name: check_value_sum8
+  schema: "name: t\nfields:\n  - {name: s, type: ascii, length: 9}\n  - {name: c, type: u8, checksum: {algo: sum8}}\n"
+  payload: "313233343536373839dd"
+  expected: {s: "123456789", c: 221}
+
+- name: check_value_xor8
+  schema: "name: t\nfields:\n  - {name: s, type: ascii, length: 9}\n  - {name: c, type: u8, checksum: {algo: xor8}}\n"
+  payload: "31323334353637383931"
+  expected: {s: "123456789", c: 49}
+
+- name: check_value_crc8_smbus
+  schema: "name: t\nfields:\n  - {name: s, type: ascii, length: 9}\n  - {name: c, type: u8, checksum: {algo: crc8/smbus}}\n"
+  payload: "313233343536373839f4"
+  expected: {s: "123456789", c: 244}
+
+- name: check_value_crc16_kermit
+  schema: "name: t\nfields:\n  - {name: s, type: ascii, length: 9}\n  - {name: c, type: u16, checksum: {algo: crc16/kermit}}\n"
+  payload: "3132333435363738392189"
+  expected: {s: "123456789", c: 8585}
+
+- name: acrios_mbus_sum_from_the_c_field
+  schema: "name: t\nfields:\n  - {name: frame_index, type: u8}\n  - {name: batch_frames, type: u8}\n  - {name: start, type: u8}\n  - {name: l, type: u8}\n  - {name: l_again, type: u8}\n  - {name: start_again, type: u8}\n  - {name: body, type: hex, length: 19}\n  - {name: _cs, type: u8, checksum: {algo: sum8, from: 6}}\n  - {name: stop, type: u8}\n"
+  payload: "010168131368080573785634120a00e97e01000000350100003c16"
+  expected: {frame_index: 1, batch_frames: 1, start: 104, l: 19, l_again: 19, start_again: 104, body: "080573785634120a00e97e0100000035010000", stop: 22}
+
+- name: emu_crc8_short_frame
+  schema: "name: t\nfields:\n  - {name: body, type: hex, length: 14}\n  - {name: _crc, type: u8, checksum: {algo: crc8/smbus, on_mismatch: warn}}\n"
+  payload: "b4d77b6101b4d77b61031207000039"
+  expected: {body: "b4d77b6101b4d77b610312070000"}
+
+- name: emu_crc8_other_frame
+  schema: "name: t\nfields:\n  - {name: body, type: hex, length: 28}\n  - {name: _crc, type: u8, checksum: {algo: crc8/smbus, on_mismatch: warn}}\n"
+  payload: "30d10562f126010622f701f30500f40500f56400f66400f802000202c4"
+  expected: {body: "30d10562f126010622f701f30500f40500f56400f66400f802000202"}
+
+- name: emu_crc8_mismatch_warns_and_reports
+  schema: "name: t\nfields:\n  - {name: body, type: hex, length: 14}\n  - {name: _crc, type: u8, checksum: {algo: crc8/smbus, on_mismatch: warn}}\n"
+  payload: "b4d77b6101b4d77b61031207000038"
+  expected: {body: "b4d77b6101b4d77b610312070000"}
+  warning: "Field '_crc': crc8/smbus over bytes 0 to 13 is 0x39, but the frame carries 0x38 (PS-586)"
+
+- name: jooby_xor_seeded
+  schema: "name: t\nfields:\n  - {name: command, type: u8}\n  - {name: size, type: u8}\n  - {name: value, type: u8}\n  - {name: _lrc, type: u8, checksum: {algo: xor8, seed: 0x55}}\n"
+  payload: "0c01ffa7"
+  expected: {command: 12, size: 1, value: 255}
+
+- name: jooby_xor_seeded_several_commands
+  schema: "name: t\nfields:\n  - {name: commands, type: hex, length: 10}\n  - {name: _lrc, type: u8, checksum: {algo: xor8, seed: 0x55}}\n"
+  payload: "020100030205010c01ffa1"
+  expected: {commands: "020100030205010c01ff"}
+
+- name: jooby_mismatch_is_an_error_by_default
+  schema: "name: t\nfields:\n  - {name: _counter, type: u8}\n  - {name: volume, type: u32, div: 1000}\n  - {name: _lrc, type: u8, checksum: {algo: xor8, seed: 0x55}}\n"
+  payload: "03000130395f"
+  error: "Field '_lrc': xor8 over bytes 0 to 4 is 0x5E, but the frame carries 0x5F (PS-586)"
+
+- name: jooby_mismatch_warns_and_reports_the_rest
+  schema: "name: t\nfields:\n  - {name: _counter, type: u8}\n  - {name: volume, type: u32, div: 1000}\n  - {name: _lrc, type: u8, checksum: {algo: xor8, seed: 0x55, on_mismatch: warn}}\n"
+  payload: "03000130395f"
+  expected: {volume: 77.881}
+  warning: "Field '_lrc': xor8 over bytes 0 to 4 is 0x5E, but the frame carries 0x5F (PS-586)"
+
+- name: seeed_crc16_kermit_little_endian
+  schema: "name: t\nfields:\n  - {name: body, type: hex, length: 14}\n  - {name: _crc, type: u16, endian: little, checksum: {algo: crc16/kermit}}\n"
+  payload: "01011098530000010210a87a0000af51"
+  expected: {body: "01011098530000010210a87a0000"}
+
+- name: seeed_crc16_kermit_reported
+  schema: "name: t\nfields:\n  - {name: body, type: hex, length: 21}\n  - {name: crc, type: u16, endian: little, checksum: {algo: crc16/kermit}}\n"
+  payload: "0000000101000100070064003c00012001000000002890"
+  expected: {body: "0000000101000100070064003c0001200100000000", crc: 36904}
+
+- name: seeed_crc16_kermit_corrupt
+  schema: "name: t\nfields:\n  - {name: body, type: hex, length: 14}\n  - {name: _crc, type: u16, endian: little, checksum: {algo: crc16/kermit}}\n"
+  payload: "01011098530000010210a87a0000af50"
+  error: "Field '_crc': crc16/kermit over bytes 0 to 13 is 0x51AF, but the frame carries 0x50AF (PS-586)"
+
+- name: nested_inner_and_outer
+  schema: "name: t\nfields:\n  - {name: segment, type: u8}\n  - {name: a, type: u8}\n  - {name: _inner, type: u8, checksum: {algo: xor8, seed: 0x55, from: 1}}\n  - {name: _outer, type: u8, checksum: {algo: xor8, seed: 0x55}}\n"
+  payload: "1e07521e"
+  expected: {segment: 30, a: 7}
+
+- name: empty_range_is_the_seed
+  schema: "name: t\nfields:\n  - {name: c, type: u8, checksum: {algo: sum8, seed: 7}}\n  - {name: a, type: u8}\n"
+  payload: "0709"
+  expected: {c: 7, a: 9}
+
+- name: in_a_case_after_an_inline_discriminator
+  schema: "name: t\nfields:\n  - match:\n      length: 1\n      var: k\n      cases:\n        1:\n          - {name: a, type: u8}\n          - {name: c, type: u8, checksum: {algo: sum8}}\n"
+  payload: "010506"
+  expected: {a: 5, c: 6}
+
+- name: range_starting_after_the_field
+  schema: "name: t\nfields:\n  - {name: a, type: u8}\n  - {name: c, type: u8, checksum: {algo: sum8, from: 3}}\n"
+  payload: "0102"
+  error: "Field 'c': the checksum range starts at byte 3, after the field at byte 1 (PS-585)"
+
+cases:
+
+- name: jooby_encode_computes
+  schema: "name: t\nfields:\n  - {name: _counter, type: u8}\n  - {name: volume, type: u32, div: 1000}\n  - {name: _lrc, type: u8, checksum: {algo: xor8, seed: 0x55}}\n"
+  input: '{"_counter": 3, "volume": 12.345}'
+  payload: "03000030395f"
+
+- name: an_input_value_is_ignored
+  schema: "name: t\nfields:\n  - {name: a, type: u8}\n  - {name: sum, type: u8, checksum: {algo: sum8}}\n"
+  input: '{"a": 5, "sum": 99}'
+  payload: "0505"
+
+- name: an_internal_input_value_is_ignored
+  schema: "name: t\nfields:\n  - {name: a, type: u8}\n  - {name: _sum, type: u8, checksum: {algo: sum8}}\n"
+  input: '{"a": 5, "_sum": 99}'
+  payload: "0505"
+
+- name: from_and_a_little_endian_crc16
+  schema: "name: t\nfields:\n  - {name: hdr, type: u8}\n  - {name: a, type: u16}\n  - {name: crc, type: u16, endian: little, checksum: {algo: crc16/kermit, from: 1}}\n"
+  input: '{"hdr": 9, "a": 4660}'
+  payload: "09123486d1"
+
+- name: seeed_frame
+  schema: "name: t\nfields:\n  - {name: body, type: hex, length: 14}\n  - {name: _crc, type: u16, endian: little, checksum: {algo: crc16/kermit}}\n"
+  input: '{"body": "01011098530000010210a87a0000"}'
+  payload: "01011098530000010210a87a0000af51"
+
+- name: acrios_frame
+  schema: "name: t\nfields:\n  - {name: frame_index, type: u8}\n  - {name: batch_frames, type: u8}\n  - {name: start, type: u8}\n  - {name: l, type: u8}\n  - {name: l_again, type: u8}\n  - {name: start_again, type: u8}\n  - {name: body, type: hex, length: 19}\n  - {name: _cs, type: u8, checksum: {algo: sum8, from: 6}}\n  - {name: stop, type: u8}\n"
+  input: '{"frame_index": 1, "batch_frames": 1, "start": 104, "l": 19, "l_again": 19, "start_again": 104, "body": "080573785634120a00e97e0100000035010000", "stop": 22}'
+  payload: "010168131368080573785634120a00e97e01000000350100003c16"
+
+- name: emu_crc8_frame
+  schema: "name: t\nfields:\n  - {name: body, type: hex, length: 14}\n  - {name: _crc, type: u8, checksum: {algo: crc8/smbus}}\n"
+  input: '{"body": "b4d77b6101b4d77b610312070000"}'
+  payload: "b4d77b6101b4d77b61031207000039"
+
+- name: nested_inner_then_outer
+  schema: "name: t\nfields:\n  - {name: segment, type: u8}\n  - {name: a, type: u8}\n  - {name: _inner, type: u8, checksum: {algo: xor8, seed: 0x55, from: 1}}\n  - {name: _outer, type: u8, checksum: {algo: xor8, seed: 0x55}}\n"
+  input: '{"segment": 30, "a": 7}'
+  payload: "1e07521e"
+
+- name: in_a_case_after_an_inline_discriminator
+  schema: "name: t\nfields:\n  - match:\n      length: 1\n      var: k\n      cases:\n        1:\n          - {name: a, type: u8}\n          - {name: c, type: u8, checksum: {algo: sum8}}\n"
+  input: '{"a": 5}'
+  payload: "010506"
+
+- name: in_an_object_member
+  schema: "name: t\nfields:\n  - {name: a, type: u8}\n  - name: o\n    type: object\n    fields:\n      - {name: b, type: u8}\n      - {name: c, type: u8, checksum: {algo: sum8}}\n"
+  input: '{"a": 1, "o": {"b": 2}}'
+  payload: "010203"
+
+- name: range_starting_past_the_bytes_written
+  schema: "name: t\nfields:\n  - {name: a, type: u8}\n  - {name: c, type: u8, checksum: {algo: sum8, from: 3}}\n"
+  input: '{"a": 1}'
+  error: "Field 'c': the bytes its checksum covers are not all written when it is reached (PS-587)"
+
+- name: bits_still_pending
+  schema: "name: t\nfields:\n  - {name: p, type: \"u8[0:3]\"}\n  - {name: c, type: u8, checksum: {algo: sum8}}\n"
+  input: '{"p": 1}'
+  error: "Field 'c': the bytes its checksum covers are not all written when it is reached (PS-587)"
+
+- name: in_a_repeat_element
+  schema: "name: t\nfields:\n  - name: items\n    type: repeat\n    until: end\n    fields:\n      - {name: a, type: u8}\n      - {name: c, type: u8, checksum: {algo: sum8}}\n"
+  input: '{"items": [{"a": 1}]}'
+  error: "Field 'c': the bytes its checksum covers are not all written when it is reached (PS-587)"
+
+- name: in_a_tlv_entry
+  schema: "name: t\nfields:\n  - tlv:\n      tag_size: 1\n      cases:\n        1:\n          - {name: a, type: u8}\n          - {name: c, type: u8, checksum: {algo: sum8}}\n"
+  input: '{"a": 1}'
+  error: "Field 'c': the bytes its checksum covers are not all written when it is reached (PS-587)"
+
+load:
+
+- name: a_u8_cannot_hold_crc16
+  schema: "name: t\nfields:\n  - {name: c, type: u8, checksum: {algo: crc16/kermit}}\n"
+  error: "Field 'c': u8 cannot hold a crc16/kermit result (PS-585)"
+
+- name: a_signed_type
+  schema: "name: t\nfields:\n  - {name: c, type: s8, checksum: {algo: xor8}}\n"
+  error: "Field 'c': a checksum is declared on an unsigned integer type (u8 to u64), not 's8' (PS-585)"
+
+- name: a_float_type
+  schema: "name: t\nfields:\n  - {name: c, type: f32, checksum: {algo: xor8}}\n"
+  error: "Field 'c': a checksum is declared on an unsigned integer type (u8 to u64), not 'f32' (PS-585)"
+
+- name: a_bit_range
+  schema: "name: t\nfields:\n  - {name: c, type: \"u8[0:7]\", checksum: {algo: xor8}}\n"
+  error: "Field 'c': a checksum is declared on an unsigned integer type (u8 to u64), not 'u8[0:7]' (PS-585)"
+
+- name: a_seed_with_a_crc
+  schema: "name: t\nfields:\n  - {name: c, type: u16, checksum: {algo: crc8/smbus, seed: 1}}\n"
+  error: "The checksum of 'c': `seed` applies to sum8 and xor8, not crc8/smbus (PS-585)"
+
+- name: an_unknown_algo
+  schema: "name: t\nfields:\n  - {name: c, type: u8, checksum: {algo: md5}}\n"
+  error: "The checksum of 'c': `algo` is one of crc16/kermit, crc8/smbus, sum8, xor8, not 'md5' (PS-585)"
+
+- name: no_algo
+  schema: "name: t\nfields:\n  - {name: c, type: u8, checksum: {seed: 1}}\n"
+  error: "The checksum of 'c': `algo` is one of crc16/kermit, crc8/smbus, sum8, xor8, not "
+
+- name: an_unknown_on_mismatch
+  schema: "name: t\nfields:\n  - {name: c, type: u8, checksum: {algo: xor8, on_mismatch: ignore}}\n"
+  error: "The checksum of 'c': `on_mismatch` is `error` or `warn` (PS-586)"
+
+- name: a_negative_from
+  schema: "name: t\nfields:\n  - {name: c, type: u8, checksum: {algo: xor8, from: -1}}\n"
+  error: "The checksum of 'c': `from` is a byte offset, 0 or more (PS-585)"
+
+- name: a_seed_past_a_byte
+  schema: "name: t\nfields:\n  - {name: c, type: u8, checksum: {algo: sum8, seed: 256}}\n"
+  error: "The checksum of 'c': `seed` is a byte, 0 to 255 (PS-585)"
+
+- name: an_unknown_key
+  schema: "name: t\nfields:\n  - {name: c, type: u8, checksum: {algo: xor8, over: all}}\n"
+  error: "`over` is not a key of the checksum of 'c' (PS-448)"
+
+- name: not_a_mapping
+  schema: "name: t\nfields:\n  - {name: c, type: u8, checksum: xor8}\n"
+  error: "The checksum of 'c' is a mapping, such as {algo: xor8} (PS-585)"
+
+- name: in_a_port
+  schema: "name: t\nports:\n  2:\n    fields:\n      - {name: c, type: u8, checksum: {algo: crc16/kermit}}\n"
+  error: "Field 'c': u8 cannot hold a crc16/kermit result (PS-585)"

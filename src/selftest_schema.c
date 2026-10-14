@@ -1875,6 +1875,310 @@ static void test_a_nameless_schema_encodes_text_and_group_members_by_index(void)
 /*
  * Main test entry point
  */
+/* ============================================
+ * Checksum fields (CR-2026-174, PS-585 to PS-587)
+ * ============================================ */
+
+static field_def_t checked_u8(const char* name, const char* algo, bool has_seed, long seed,
+                              long from, const char* on_mismatch) {
+    field_def_t f = field_u8(name);
+    char err[160];
+    TCHECK(field_set_checksum(&f, algo, has_seed, seed, from, on_mismatch, err,
+                              sizeof(err)) == SCHEMA_OK);
+    return f;
+}
+
+static void test_the_checksum_catalogue_values(void) {
+    const uint8_t check[] = "123456789";
+    TCHECK(schema_checksum_compute(SCHEMA_CHECKSUM_CRC8_SMBUS, check, 9, 0) == 0xF4);
+    TCHECK(schema_checksum_compute(SCHEMA_CHECKSUM_CRC16_KERMIT, check, 9, 0) == 0x2189);
+    TCHECK(schema_checksum_compute(SCHEMA_CHECKSUM_SUM8, check, 9, 0) == 0xDD);
+    TCHECK(schema_checksum_compute(SCHEMA_CHECKSUM_XOR8, check, 9, 0) == 0x31);
+    TCHECK(schema_checksum_compute(SCHEMA_CHECKSUM_SUM8, check, 9, 0x30) == 0x0D);
+}
+
+/* checksum-fields.yaml's port 3: an xor8 seeded 0x55 over every byte before it. */
+static void build_xor8_seeded(schema_t* s) {
+    memset(s, 0, sizeof(*s));
+    s->endian = ENDIAN_BIG;
+    field_def_t f = field_u8("command");
+    schema_add_field(s, &f);
+    f = field_u8("size");
+    schema_add_field(s, &f);
+    f = field_u8("value");
+    schema_add_field(s, &f);
+    f = checked_u8("_lrc", "xor8", true, 0x55, 0, NULL);
+    schema_add_field(s, &f);
+}
+
+static void test_a_checksum_mismatch_is_an_error(void) {
+    schema_t s;
+    decode_result_t r;
+    build_xor8_seeded(&s);
+    const uint8_t good[] = {0x0c, 0x01, 0xff, 0xa7};
+    TCHECK(schema_decode(&s, good, sizeof(good), &r) == SCHEMA_OK);
+    TCHECK(r.field_count == 3 && r.checksum_warnings == 0);
+    TCHECK(r.fields[2].value.i64 == 255);
+    const uint8_t bad[] = {0x0c, 0x01, 0xff, 0xa6};
+    TCHECK(schema_decode(&s, bad, sizeof(bad), &r) == SCHEMA_ERR_CHECKSUM);
+    TCHECK(strcmp(r.error_msg, "Field '_lrc': xor8 over bytes 0 to 2 is 0xA7, but the "
+                  "frame carries 0xA6 (PS-586)") == 0);
+    /* A frame cut before the check value is the read's error, not the checksum's. */
+    TCHECK(schema_decode(&s, bad, 3, &r) == SCHEMA_ERR_BUFFER);
+}
+
+static void test_a_checksum_mismatch_can_warn(void) {
+    /* checksum-fields.yaml's port 2, with the body as two words and a u16. */
+    schema_t s;
+    decode_result_t r;
+    memset(&s, 0, sizeof(s));
+    s.endian = ENDIAN_BIG;
+    field_def_t f = field_u64("b0", ENDIAN_BIG);
+    schema_add_field(&s, &f);
+    f = field_u32("b1", ENDIAN_BIG);
+    schema_add_field(&s, &f);
+    f = field_u16("b2", ENDIAN_BIG);
+    schema_add_field(&s, &f);
+    f = checked_u8("_crc", "crc8/smbus", false, 0, 0, "warn");
+    schema_add_field(&s, &f);
+    const uint8_t frame[] = {0xb4, 0xd7, 0x7b, 0x61, 0x01, 0xb4, 0xd7, 0x7b, 0x61, 0x03,
+                             0x12, 0x07, 0x00, 0x00, 0x38};
+    TCHECK(schema_decode(&s, frame, sizeof(frame), &r) == SCHEMA_OK);
+    TCHECK(r.field_count == 3);
+    TCHECK(r.checksum_warnings == 1 && r.checksum_warning_field == 3);
+    TCHECK(r.checksum_warning_at == 14);
+    char text[160];
+    TCHECK(schema_checksum_warning(&s, &r, frame, sizeof(frame), text, sizeof(text)));
+    TCHECK(strcmp(text, "Field '_crc': crc8/smbus over bytes 0 to 13 is 0x39, but the "
+                  "frame carries 0x38 (PS-586)") == 0);
+    uint8_t fixed[sizeof(frame)];
+    memcpy(fixed, frame, sizeof(frame));
+    fixed[14] = 0x39;
+    TCHECK(schema_decode(&s, fixed, sizeof(fixed), &r) == SCHEMA_OK);
+    TCHECK(r.checksum_warnings == 0);
+    TCHECK(!schema_checksum_warning(&s, &r, fixed, sizeof(fixed), text, sizeof(text)));
+
+    /* A reported checksum carries the flag on its value too. */
+    s.fields[3].name[0] = 'c';
+    TCHECK(schema_decode(&s, frame, sizeof(frame), &r) == SCHEMA_OK);
+    TCHECK(r.field_count == 4 && r.fields[3].checksum_mismatch);
+    TCHECK(r.fields[3].value.i64 == 0x38);
+}
+
+static void test_a_checksum_is_computed_on_encode(void) {
+    schema_t s;
+    encode_inputs_t in;
+    encode_result_t out;
+    build_xor8_seeded(&s);
+    encode_inputs_init(&in);
+    encode_inputs_add_int(&in, "command", 12);
+    encode_inputs_add_int(&in, "size", 1);
+    encode_inputs_add_int(&in, "value", 255);
+    TCHECK(schema_encode(&s, &in, &out) == SCHEMA_OK);       /* never required */
+    TCHECK(out.len == 4 && out.data[3] == 0xa7);
+    encode_inputs_add_int(&in, "_lrc", 0x00);                /* never taken */
+    TCHECK(schema_encode(&s, &in, &out) == SCHEMA_OK);
+    TCHECK(out.len == 4 && out.data[3] == 0xa7);
+
+    /* checksum-fields.yaml's port 4: crc16/kermit, little-endian, reported. */
+    memset(&s, 0, sizeof(s));
+    s.endian = ENDIAN_BIG;
+    field_def_t f = field_u64("b0", ENDIAN_BIG);
+    schema_add_field(&s, &f);
+    f = field_u32("b1", ENDIAN_BIG);
+    schema_add_field(&s, &f);
+    f = field_u16("b2", ENDIAN_BIG);
+    schema_add_field(&s, &f);
+    f = field_u16("crc", ENDIAN_LITTLE);
+    char err[160];
+    TCHECK(field_set_checksum(&f, "crc16/kermit", false, 0, 0, NULL, err, sizeof(err))
+           == SCHEMA_OK);
+    schema_add_field(&s, &f);
+    encode_inputs_init(&in);
+    encode_inputs_add_int(&in, "b0", 0x0101109853000001LL);
+    encode_inputs_add_int(&in, "b1", 0x0210a87aLL);
+    encode_inputs_add_int(&in, "b2", 0);
+    TCHECK(schema_encode(&s, &in, &out) == SCHEMA_OK);
+    TCHECK(out.len == 16 && out.data[14] == 0xaf && out.data[15] == 0x51);
+    decode_result_t r;
+    TCHECK(schema_decode(&s, out.data, (size_t)out.len, &r) == SCHEMA_OK);
+    TCHECK(r.field_count == 4 && r.fields[3].value.i64 == 20911);
+}
+
+static void test_an_outer_checksum_covers_an_inner_one(void) {
+    /* checksum-fields.yaml's port 5. */
+    schema_t s;
+    memset(&s, 0, sizeof(s));
+    s.endian = ENDIAN_BIG;
+    field_def_t f = field_u8("segment");
+    schema_add_field(&s, &f);
+    f = field_u8("a");
+    schema_add_field(&s, &f);
+    f = checked_u8("_inner", "xor8", true, 0x55, 1, NULL);
+    schema_add_field(&s, &f);
+    f = checked_u8("_outer", "xor8", true, 0x55, 0, NULL);
+    schema_add_field(&s, &f);
+    encode_inputs_t in;
+    encode_result_t out;
+    encode_inputs_init(&in);
+    encode_inputs_add_int(&in, "segment", 30);
+    encode_inputs_add_int(&in, "a", 7);
+    TCHECK(schema_encode(&s, &in, &out) == SCHEMA_OK);
+    TCHECK(out.len == 4 && out.data[0] == 0x1e && out.data[1] == 0x07
+           && out.data[2] == 0x52 && out.data[3] == 0x1e);
+    decode_result_t r;
+    TCHECK(schema_decode(&s, out.data, 4, &r) == SCHEMA_OK);
+    TCHECK(r.field_count == 2);
+    const uint8_t bad[] = {0x1e, 0x07, 0x53, 0x1e};
+    TCHECK(schema_decode(&s, bad, sizeof(bad), &r) == SCHEMA_ERR_CHECKSUM);
+    TCHECK(strcmp(r.error_msg, "Field '_inner': xor8 over bytes 1 to 1 is 0x52, but the "
+                  "frame carries 0x53 (PS-586)") == 0);
+}
+
+static void test_a_checksum_range_starts_before_its_field(void) {
+    schema_t s;
+    memset(&s, 0, sizeof(s));
+    s.endian = ENDIAN_BIG;
+    field_def_t f = field_u8("a");
+    schema_add_field(&s, &f);
+    f = checked_u8("c", "xor8", false, 0, 5, NULL);
+    schema_add_field(&s, &f);
+    decode_result_t r;
+    const uint8_t frame[] = {0x01, 0x09};
+    TCHECK(schema_decode(&s, frame, sizeof(frame), &r) == SCHEMA_ERR_CHECKSUM);
+    TCHECK(strcmp(r.error_msg, "Field 'c': the checksum range starts at byte 5, after the "
+                  "field at byte 1 (PS-585)") == 0);
+    encode_inputs_t in;
+    encode_result_t out;
+    encode_inputs_init(&in);
+    encode_inputs_add_int(&in, "a", 1);
+    TCHECK(schema_encode(&s, &in, &out) == SCHEMA_ERR_CHECKSUM);
+    TCHECK(out.len == 0);
+    TCHECK(strcmp(out.error_msg, "Field 'c': the bytes its checksum covers are not all "
+                  "written when it is reached (PS-587)") == 0);
+
+    /* Bits a peek left pending would be ORed into the checksum's byte (PS-587). */
+    memset(&s, 0, sizeof(s));
+    s.endian = ENDIAN_BIG;
+    f = field_bit_range("p", 1, false, 0, 4, 0, ENDIAN_DEFAULT);
+    schema_add_field(&s, &f);
+    f = checked_u8("c", "sum8", false, 0, 0, NULL);
+    schema_add_field(&s, &f);
+    encode_inputs_init(&in);
+    encode_inputs_add_int(&in, "p", 1);
+    TCHECK(schema_encode(&s, &in, &out) == SCHEMA_ERR_CHECKSUM);
+    TCHECK(strcmp(out.error_msg, "Field 'c': the bytes its checksum covers are not all "
+                  "written when it is reached (PS-587)") == 0);
+}
+
+static void test_a_checksum_in_a_case_body(void) {
+    schema_t s;
+    /* Encode: a match case body placed above field_count, after its discriminator. */
+    memset(&s, 0, sizeof(s));
+    s.endian = ENDIAN_BIG;
+    field_def_t k = field_u8("kind");
+    field_set_var(&k, "kind");
+    schema_add_field(&s, &k);
+    field_def_t m = {0};
+    m.type = FIELD_TYPE_MATCH;
+    strncpy(m.match_var, "$kind", SCHEMA_MAX_NAME_LEN - 1);
+    for (int j = 0; j < 8; j++) m.cases[0].match_list[j] = -1;
+    m.cases[0].match_value = 1; m.cases[0].field_start = 2; m.cases[0].field_count = 2;
+    m.case_count = 1;
+    schema_add_field(&s, &m);
+    field_def_t v = field_u8("v");
+    field_def_t c = checked_u8("_c", "xor8", false, 0, 0, NULL);
+    schema_place_field(&s, 2, &v);
+    schema_place_field(&s, 3, &c);
+    encode_inputs_t in;
+    encode_result_t out;
+    encode_inputs_init(&in);
+    encode_inputs_add_int(&in, "kind", 1);
+    encode_inputs_add_int(&in, "v", 5);
+    TCHECK(schema_encode(&s, &in, &out) == SCHEMA_OK);
+    TCHECK(out.len == 3 && out.data[0] == 1 && out.data[1] == 5 && out.data[2] == 4);
+
+    /* Decode: a tlv case, whose range counts the tag before it. */
+    memset(&s, 0, sizeof(s));
+    s.endian = ENDIAN_BIG;
+    field_def_t t = field_tlv(1, 0);
+    field_add_tlv_case(&t, 7, 1, 2);
+    schema_add_field(&s, &t);
+    v = field_u8("v");
+    c = checked_u8("c", "sum8", false, 0, 0, NULL);
+    schema_place_field(&s, 1, &v);
+    schema_place_field(&s, 2, &c);
+    decode_result_t r;
+    const uint8_t good[] = {0x07, 0x05, 0x0c};
+    TCHECK(schema_decode(&s, good, sizeof(good), &r) == SCHEMA_OK);
+    TCHECK(r.field_count == 2 && r.fields[1].value.i64 == 12);
+    const uint8_t bad[] = {0x07, 0x05, 0x0d};
+    TCHECK(schema_decode(&s, bad, sizeof(bad), &r) == SCHEMA_ERR_CHECKSUM);
+    TCHECK(strcmp(r.error_msg, "Field 'c': sum8 over bytes 0 to 1 is 0xC, but the frame "
+                  "carries 0xD (PS-586)") == 0);
+}
+
+static void test_a_checksum_declaration_is_checked(void) {
+    /* PS-585, in the reference's order and words. */
+    char err[160];
+    field_def_t f = field_s8("v");
+    TCHECK(field_set_checksum(&f, "xor8", false, 0, 0, NULL, err, sizeof(err))
+           == SCHEMA_ERR_PARSE);
+    TCHECK(strcmp(err, "Field 'v': a checksum is declared on an unsigned integer type (u8 "
+                  "to u64), not 's8' (PS-585)") == 0);
+    f = field_bit_range("v", 1, false, 0, 8, 1, ENDIAN_DEFAULT);
+    TCHECK(field_set_checksum(&f, "xor8", false, 0, 0, NULL, err, sizeof(err))
+           == SCHEMA_ERR_PARSE);
+    TCHECK(strcmp(err, "Field 'v': a checksum is declared on an unsigned integer type (u8 "
+                  "to u64), not 'u8[0:7]' (PS-585)") == 0);
+    f = field_u8("v");
+    TCHECK(field_set_checksum(&f, "md5", false, 0, 0, NULL, err, sizeof(err))
+           == SCHEMA_ERR_PARSE);
+    TCHECK(strcmp(err, "The checksum of 'v': `algo` is one of crc16/kermit, crc8/smbus, "
+                  "sum8, xor8, not 'md5' (PS-585)") == 0);
+    TCHECK(field_set_checksum(&f, NULL, false, 0, 0, NULL, err, sizeof(err))
+           == SCHEMA_ERR_PARSE);
+    TCHECK(strcmp(err, "The checksum of 'v': `algo` is one of crc16/kermit, crc8/smbus, "
+                  "sum8, xor8, not None (PS-585)") == 0);
+    TCHECK(field_set_checksum(&f, "crc16/kermit", false, 0, 0, NULL, err, sizeof(err))
+           == SCHEMA_ERR_PARSE);
+    TCHECK(strcmp(err, "Field 'v': u8 cannot hold a crc16/kermit result (PS-585)") == 0);
+    TCHECK(field_set_checksum(&f, "crc8/smbus", true, 1, 0, NULL, err, sizeof(err))
+           == SCHEMA_ERR_PARSE);
+    TCHECK(strcmp(err, "The checksum of 'v': `seed` applies to sum8 and xor8, not "
+                  "crc8/smbus (PS-585)") == 0);
+    TCHECK(field_set_checksum(&f, "sum8", true, 256, 0, NULL, err, sizeof(err))
+           == SCHEMA_ERR_PARSE);
+    TCHECK(strcmp(err, "The checksum of 'v': `seed` is a byte, 0 to 255 (PS-585)") == 0);
+    TCHECK(field_set_checksum(&f, "sum8", false, 0, -1, NULL, err, sizeof(err))
+           == SCHEMA_ERR_PARSE);
+    TCHECK(strcmp(err, "The checksum of 'v': `from` is a byte offset, 0 or more "
+                  "(PS-585)") == 0);
+    TCHECK(field_set_checksum(&f, "sum8", false, 0, 0, "ignore", err, sizeof(err))
+           == SCHEMA_ERR_PARSE);
+    TCHECK(strcmp(err, "The checksum of 'v': `on_mismatch` is `error` or `warn` "
+                  "(PS-586)") == 0);
+    TCHECK(f.checksum_algo == SCHEMA_CHECKSUM_NONE);          /* left unchanged */
+    f = field_u32("w", ENDIAN_BIG);
+    TCHECK(field_set_checksum(&f, "crc16/kermit", false, 0, 3, "warn", err, sizeof(err))
+           == SCHEMA_OK);
+    TCHECK(f.checksum_algo == SCHEMA_CHECKSUM_CRC16_KERMIT && f.checksum_from == 3
+           && f.checksum_warn);
+
+    /* A byte_group member cannot carry one: refused, not dropped (PS-446). */
+    schema_t s;
+    memset(&s, 0, sizeof(s));
+    s.endian = ENDIAN_BIG;
+    field_def_t g = field_byte_group(1, ENDIAN_DEFAULT, 1, 1);
+    schema_add_field(&s, &g);
+    field_def_t member = checked_u8("c", "xor8", false, 0, 0, NULL);
+    schema_place_field(&s, 1, &member);
+    decode_result_t r;
+    const uint8_t frame[] = {0x00};
+    TCHECK(schema_decode(&s, frame, sizeof(frame), &r) == SCHEMA_ERR_TYPE);
+    TCHECK(strstr(r.error_msg, "declares a checksum") != NULL);
+}
+
 void selftest_schema(void) {
     LOG(LOG_INFO, MOD, "Running schema interpreter self-tests");
 
@@ -1940,6 +2244,14 @@ void selftest_schema(void) {
     test_a_wide_bit_range_reads_its_base();
     test_a_wide_bit_range_short_read_is_named();
     test_a_wide_bit_range_encodes_as_decoded();
+    test_the_checksum_catalogue_values();
+    test_a_checksum_mismatch_is_an_error();
+    test_a_checksum_mismatch_can_warn();
+    test_a_checksum_is_computed_on_encode();
+    test_an_outer_checksum_covers_an_inner_one();
+    test_a_checksum_range_starts_before_its_field();
+    test_a_checksum_in_a_case_body();
+    test_a_checksum_declaration_is_checked();
 
     LOG(LOG_INFO, MOD, "Schema interpreter self-tests complete");
 }

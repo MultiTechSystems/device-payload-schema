@@ -165,6 +165,7 @@ VOCABULARY: Dict[str, Dict[str, Tuple[Tuple[str, ...], str]]] = {
         "numeral": (_DECODERS, "decimal | hex: an ascii field reported as the integer its digits give (PS-560)"),
         "nul": (_DECODERS, "trailing | stop | drop: how an ascii field treats its 0x00 bytes (PS-534)"),
         "terminator": (_DECODERS, "a byte 0 to 255 that ends a variable-length ascii field, in place of length (PS-593)"),
+        "checksum": (_DECODERS, "a check value over earlier bytes, verified on decode and computed on encode (PS-585)"),
         "valid_range": (("py", "go", "cs", "outschema"), "quality flag (_quality)"),
         "resolution": (("py", "go", "cs"), "measurement resolution annotation"),
         "unece": (("py", "go", "cs"), "UN/ECE unit code annotation"),
@@ -257,6 +258,12 @@ VOCABULARY: Dict[str, Dict[str, Tuple[Tuple[str, ...], str]]] = {
             ("doc:reference",),
             "documented in the language reference; no tool reads it",
         ),
+    },
+    "checksum": {
+        "algo": (_DECODERS, "sum8 | xor8 | crc8/smbus | crc16/kermit (PS-585)"),
+        "seed": (_DECODERS, "starting value of sum8 or xor8, a byte (PS-585)"),
+        "from": (_DECODERS, "byte offset where the covered range starts (PS-585)"),
+        "on_mismatch": (_DECODERS, "error | warn (PS-586)"),
     },
     "sampled": {
         "interval": (("py", "go", "java", "cs"), "seconds, a $ reference or {configured: name} (PS-567)"),
@@ -500,7 +507,7 @@ def iter_keys(schema: Any) -> Iterator[Tuple[str, str, str]]:
                 for i, cond in enumerate(value.get("when") or []):
                     if isinstance(cond, dict):
                         yield from rec("guard_when", cond, "%s.when[%d]" % (kpath, i))
-            elif key in ("compute", "ipso", "senml", "semantic", "sampled") and isinstance(
+            elif key in ("compute", "ipso", "senml", "semantic", "sampled", "checksum") and isinstance(
                 value, dict
             ):
                 yield from rec(key, value, kpath)

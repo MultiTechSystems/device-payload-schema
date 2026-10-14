@@ -97,6 +97,10 @@ The `inherent` reasons, each of which is a decision recorded elsewhere:
                     to write back (PS-595: "a decode followed by an encode may differ from the
                     original frame"). Judged from the schema: an ascii field with either mode
                     in a vector that does not re-encode.
+  checksum-mismatch A checksum declaring `on_mismatch: warn` did not match its frame, and
+                    the decode warned and reported the rest (PS-586, CR-2026-174). An
+                    encoder computes the check value over the bytes it writes (PS-587), so
+                    the wrong value the frame carried is not in the output.
 
 One reason is *not* inherent and is reported separately, because it is a gap rather than a
 loss:
@@ -143,6 +147,7 @@ INHERENT = (
     "shared-label",
     "negative-zero",
     "nul-mode",
+    "checksum-mismatch",
 )
 
 #: The floating-point types PS-566 covers.
@@ -299,6 +304,8 @@ def classify(decoded, traits, schema=None, port=None):
         for warning in decoded.warnings:
             if any(marker in warning for marker in UNREAD_MARKERS):
                 return "undecoded-bytes"
+            if "(PS-586)" in warning:
+                return "checksum-mismatch"                               # CR-2026-174
     if has_null_element(decoded.data):
         return "null-element"
     for trait in INHERENT + FIXABLE:

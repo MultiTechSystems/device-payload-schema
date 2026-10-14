@@ -45,6 +45,15 @@ public class Field {
     private Integer terminator;
     public Integer getTerminator() { return terminator; }
     public void setTerminator(Integer terminator) { this.terminator = terminator; }
+    /** A {@code checksum} declaration and the type it sits on (PS-585, CR-2026-174). */
+    private Map<String, Object> checksum;
+    private String checksumType;
+    public Map<String, Object> getChecksum() { return checksum; }
+    public String getChecksumType() { return checksumType; }
+    public void setChecksum(Map<String, Object> checksum, String type) {
+        this.checksum = checksum;
+        this.checksumType = type;
+    }
     private String endian;
     private Double add;
     private Double mult;

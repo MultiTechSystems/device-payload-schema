@@ -139,6 +139,8 @@ public class SchemaField
     public string? Nul { get; set; }
     /// <summary>The byte that ends a variable-length ascii field, in place of length (PS-593).</summary>
     public int? Terminator { get; set; }
+    /// <summary>A check value over the bytes before the field (PS-585 to PS-587, CR-2026-174).</summary>
+    public ChecksumSpec? Checksum { get; set; }
     /// <summary>A computed field written `type: integer` (PS-283); its Type is Number.</summary>
     public bool IntegerResult { get; set; }
     public string RawType { get; set; } = "";

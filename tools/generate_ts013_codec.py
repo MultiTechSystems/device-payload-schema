@@ -1539,8 +1539,9 @@ function encCaseClaims(fields, optional) {             // _case_claims
     }
     if ("match" in f && !f.type) { out = out.concat(encMatchClaims(f.match)); return; }
     if (!f.name || String(f.name).charAt(0) === "_") return;
-    // A literal or computed field claims its name, never required (no-silent-empty).
-    if (encIsLiteral(f) || ENC_COMPUTED.indexOf(f.type) >= 0 || encIsEcho(f)) { out.push([f, true]); return; }
+    // A literal or computed field claims its name, never required (no-silent-empty), and a
+    // checksum is never taken from the input (PS-587).
+    if (encIsLiteral(f) || ENC_COMPUTED.indexOf(f.type) >= 0 || encIsEcho(f) || f.checksum) { out.push([f, true]); return; }
     // PS-551 (CR-2026-141): a peek the fields after it fix need not be given.
     out.push([f, !!optional || f.optional === true || covered.indexOf(f) >= 0]);
   });
@@ -1757,6 +1758,7 @@ function encEmit(fr, bytes, carried) {
   }
   for (var c = 0; c < bytes.length; c++) encCover(fr, offset + c, encCov(bytes, c));
   (bytes.pk || []).forEach(function (pk) { fr.pk.push(encShifted(pk, offset)); });
+  (bytes.ck || []).forEach(function (c) { fr.ck.push({ p: c.p + offset, f: c.f, endian: c.endian }); });
   (bytes.ec || []).forEach(function (ec) { fr.ec.push(encEchoShifted(ec, offset)); });
   var merged = [];
   for (var i = 0; i < bytes.length; i++) merged.push(i < shared ? (bytes[i] | fr.pend[i]) : bytes[i]);
@@ -1807,6 +1809,40 @@ function encCover(fr, at, mask) { fr.cov[at] = (fr.cov[at] || 0) | mask; }
 
 function encShifted(pk, by) {
   return { p: pk.p + by, size: pk.size, endian: pk.endian, start: pk.start, width: pk.width, raw: pk.raw, name: pk.name };
+}
+
+/* PS-587 (CR-2026-174): a checksum is written as zeros and computed once the frame is
+ * finished (fill_checksums). An array's `ck` lists each placeholder: {p, f, endian}. */
+var ENC_CK_SIZE = { u8: 1, u16: 2, u24: 3, u32: 4, u64: 8, uint8: 1, uint16: 2, uint24: 3, uint32: 4, uint64: 8 };
+
+function encChecksumUnwritten(name) {                  // checksum_unwritten_message
+  return "Field '" + name + "': the bytes its checksum covers are not all written when it is reached (PS-587)";
+}
+
+function encChecksumPlaceholder(out, f, fr, ctx) {    // _checksum_placeholder
+  // A tlv entry or a repeat element or trailer is encoded apart from the frame.
+  if (fr.pend.length || ctx.d564) encFail(encChecksumUnwritten(f.name));
+  var endian = (f.endian === "little" || f.endian === "big") ? f.endian : ctx.endian;
+  out.ck = out.ck || [];
+  out.ck.push({ p: out.length, f: f, endian: endian });
+  (ctx.ckOpen = ctx.ckOpen || []).push(f);
+  for (var i = 0; i < ENC_CK_SIZE[f.type]; i++) out.push(0);
+}
+
+function encFillChecksums(out, ctx) {                 // fill_checksums
+  (out.ck || []).slice().sort(function (a, b) { return a.p - b.p; }).forEach(function (c) {
+    var spec = c.f.checksum, from = spec["from"] || 0, size = ENC_CK_SIZE[c.f.type];
+    if (from > c.p) encFail(encChecksumUnwritten(c.f.name));
+    var v = checksumOf(spec["algo"], out, from, c.p, spec["seed"] || 0);
+    for (var i = 0; i < size; i++) {
+      var shift = c.endian === "little" ? i : size - 1 - i;
+      out[c.p + i] = shift < 4 ? (v >>> (8 * shift)) & 0xFF : 0;
+    }
+    var k = ctx.ckOpen.indexOf(c.f);
+    if (k >= 0) ctx.ckOpen.splice(k, 1);
+  });
+  // One encoded apart from the frame - a tlv entry, a repeat element - never reached it.
+  if (ctx.ckOpen && ctx.ckOpen.length) encFail(encChecksumUnwritten(ctx.ckOpen[0].name));
 }
 
 function encPeekBytes(value, start, width, size, endian) {
@@ -2200,7 +2236,7 @@ function encListIn(out, fields, data, ctx, top, entry) {
   data = encDerive(fields, data, ctx);
   // CR-2026-136: a frame laid out as a decoder reads it (FrameBuffer). A bit range or
   // bool that does not consume leaves its bytes pending, and the next field's are ORed in.
-  var fr = { out: [], pend: [], cov: {}, pk: [], ec: [] };
+  var fr = { out: [], pend: [], cov: {}, pk: [], ck: [], ec: [] };
   // PS-564 (TailLevel): bytes an item adds go to the checks earlier items registered.
   var tl = { checks: [], size: null, mark: 0 };
   function tlClose() {
@@ -2230,6 +2266,10 @@ function encListIn(out, fields, data, ctx, top, entry) {
   if (fr.pk.length) {
     out.pk = out.pk || [];
     fr.pk.forEach(function (pk) { out.pk.push(encShifted(pk, base)); });
+  }
+  if (fr.ck.length) {
+    out.ck = out.ck || [];
+    fr.ck.forEach(function (c) { out.ck.push({ p: c.p + base, f: c.f, endian: c.endian }); });
   }
   if (fr.ec.length) {
     out.ec = out.ec || [];
@@ -2272,6 +2312,7 @@ function encListIn(out, fields, data, ctx, top, entry) {
       return;
     }
     if (encIsLiteral(f)) return;
+    if (f.checksum) { encChecksumPlaceholder(out, f, fr, ctx); return; }   // PS-587
     if ("value" in f) { encField(out, f, f.value, ctx); return; }
     var value;
     // A nameless field other than a skip is refused at load (PS-553); it was written
@@ -2311,7 +2352,7 @@ function encListIn(out, fields, data, ctx, top, entry) {
 
 function encodeRoot(fields, data, endian) {
   // wa: PS-537's warnings, reported after the others as the reference reports them.
-  var ctx = { endian: endian, w: [], wa: [], t564: [], d564: 0 }, out = [];
+  var ctx = { endian: endian, w: [], wa: [], t564: [], d564: 0, ckOpen: [] }, out = [];
   ENC_SCOPE = fields;
   if (data && typeof data === "object" && ("_decode" in data || "_meta" in data)) {
     // PS-573: a decode record given in the input as `_decode`; `_meta` is not input.
@@ -2330,6 +2371,7 @@ function encodeRoot(fields, data, endian) {
     var selected = encRemainingSelection(c.m, c.tail);
     if (selected !== c.chosen) encFail(encRemainingMismatch(c.m, c.tail, selected, c.chosen));
   });
+  encFillChecksums(out, ctx);                            // PS-587 (CR-2026-174)
   if (!out.length) {
     var empty = encEmptyPayloadError(fields, data || {});   // PS-442
     if (empty) encFail(empty);
@@ -3423,6 +3465,36 @@ function bitRange(bytes, off, width, signed) {
   var text = decimalOf(out), v = Number(text);
   if (v <= SAFE_INTEGER) return neg ? -v : v;
   return neg ? '-' + text : text;
+}
+
+/* PS-585 (CR-2026-174): sum8, xor8, crc8/smbus and crc16/kermit over buf[from:to]. */
+function checksumOf(algo, buf, from, to, seed) {
+  var v = algo === "sum8" || algo === "xor8" ? (seed || 0) : 0, k, b;
+  for (var i = from; i < to; i++) {
+    b = buf[i];
+    if (algo === "sum8") v = (v + b) & 0xFF;
+    else if (algo === "xor8") v ^= b;
+    else if (algo === "crc8/smbus") {
+      v ^= b;
+      for (k = 0; k < 8; k++) v = v & 0x80 ? ((v << 1) ^ 0x07) & 0xFF : (v << 1) & 0xFF;
+    } else {
+      v ^= b;
+      for (k = 0; k < 8; k++) v = v & 1 ? (v >>> 1) ^ 0x8408 : v >>> 1;
+    }
+  }
+  return v;
+}
+
+/* PS-586: the check value read at `at` against the bytes it covers; an error, or with
+ * on_mismatch: warn a warning. */
+function checkChecksum(buf, at, carried, spec, name, wn) {
+  var from = spec["from"] || 0;
+  if (from > at) throw new Error("Field '" + name + "': the checksum range starts at byte " + from + ", after the field at byte " + at + " (PS-585)");
+  var v = checksumOf(spec["algo"], buf, from, at, spec["seed"] || 0), got = Number(carried);
+  if (v === got) return;
+  var msg = "Field '" + name + "': " + spec["algo"] + " over bytes " + from + " to " + (at - 1) + " is 0x" +
+    v.toString(16).toUpperCase() + ", but the frame carries 0x" + got.toString(16).toUpperCase() + " (PS-586)";
+  if (spec["on_mismatch"] === "warn") wn.push(msg); else throw new Error(msg);
 }
 
 function readU(buf, pos, size, endian) {
@@ -4709,6 +4781,10 @@ function writeS(buf, pos, size, value, endian) {
             lines.append(f'{i}  pos += 4;')
         else:
             lines.append(f'{i}  var {js_name} = {read_fn}(buf, pos, {sz}, {endian_arg});')
+            if isinstance(field.get('checksum'), dict):
+                # PS-586 (CR-2026-174): verified against the bytes before it.
+                lines.append(f'{i}  checkChecksum(buf, pos, {js_name}, '
+                             f'{json.dumps(field["checksum"])}, {json.dumps(str(name))}, wn);')
             lines.append(f'{i}  pos += {sz};')
             if field.get('sentinel'):
                 # PS-427: the sentinel is the bit pattern, before any encoding.
