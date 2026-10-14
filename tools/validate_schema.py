@@ -1519,6 +1519,21 @@ def check_remaining_length(schema: Dict[str, Any]) -> List[str]:
     return errors
 
 
+def _spliced(expanded, where, raw):
+    """The field list at `where` in the `$ref`-expanded schema, else the raw one."""
+    node = expanded
+    for key in where:
+        if not isinstance(node, dict) or key not in node:
+            node = None
+            break
+        node = node[key]
+    if isinstance(node, dict):
+        node = node.get('fields')
+    if isinstance(node, list) and node:
+        return node
+    return raw['fields'] if 'fields' in raw else raw
+
+
 def validate_schema_structure(schema: Dict[str, Any]) -> List[str]:
     """Validate schema structure and return list of errors."""
     # PS-345, PS-348, PS-349, PS-461, PS-462: definitions and references, checked here
@@ -1564,6 +1579,11 @@ def validate_schema_structure(schema: Dict[str, Any]) -> List[str]:
                               f"omit or flag (PS-428)")
     has_fields = False
     has_ports = False
+    # The field lists are checked after their `$ref`s are spliced, as every loader reads
+    # them, so a definition is held to the field rules where it is used. Checking the
+    # raw lists passed a definition's members over: an object with `fields: []` (PS-142)
+    # was rejected written inline and accepted inside a definition.
+    expanded = expand_refs(schema)[0] if isinstance(schema, dict) else schema
     
     # Required fields
     if 'name' not in schema:
@@ -1624,7 +1644,8 @@ def validate_schema_structure(schema: Dict[str, Any]) -> List[str]:
                     errors.append(f"ports.{pk}: 'fields' must be a non-empty array")
                 else:
                     known_names = []
-                    validate_field_list(port_def['fields'], f"ports.{pk}.fields", errors, known_names)
+                    validate_field_list(_spliced(expanded, ('ports', port_key), port_def),
+                                        f"ports.{pk}.fields", errors, known_names)
     
     # PS-335, PS-337: a top-level fPort, checked as the interpreter checks it.
     errors.extend(fport_declaration_errors(schema))
@@ -1640,7 +1661,8 @@ def validate_schema_structure(schema: Dict[str, Any]) -> List[str]:
     # Validate top-level fields
     if has_fields and isinstance(schema.get('fields'), list) and len(schema['fields']) > 0:
         known_names = []
-        validate_field_list(schema['fields'], 'fields', errors, known_names)
+        validate_field_list(_spliced(expanded, ('fields',), schema), 'fields', errors,
+                            known_names)
     
     # Validate endian
     if 'endian' in schema:
