@@ -26,11 +26,22 @@ public final class EncodeResult {
     private final byte[] payload;
     private final List<String> warnings;
     private final List<String> errors;
+    private int fPort;
 
     EncodeResult(byte[] payload, List<String> warnings, List<String> errors) {
         this.payload = payload;
         this.warnings = warnings == null ? new ArrayList<>() : warnings;
         this.errors = errors == null ? new ArrayList<>() : errors;
+    }
+
+    /** The FPort the encode used (PS-581): the port entry chosen for a schema with
+     * {@code ports}, else the caller's, else the document's {@code fPort}; 0 where none. */
+    public int getFPort() {
+        return fPort;
+    }
+
+    void setFPort(int fPort) {
+        this.fPort = fPort;
     }
 
     /** The encoded bytes. Present even when {@link #getErrors()} is non-empty. */

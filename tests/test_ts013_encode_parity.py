@@ -283,7 +283,7 @@ def test_the_requested_port_is_encoded():
     assert (bytes(one["bytes"]).hex(), one["fPort"]) == ("05", 1)
     default = encode(schema, {"b": 7})
     assert (bytes(default["bytes"]).hex(), default["fPort"]) == ("0007", 2)
-    assert "PS-292" in encode(schema, {"c": 1}, 3)["errors"][0]
+    assert "PS-581" in encode(schema, {"c": 1}, 3)["errors"][0]
 
 
 def test_stripping_the_runtime_comments_touches_no_code():

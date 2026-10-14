@@ -351,6 +351,9 @@ type Schema struct {
 	Fields      []Field                   `json:"fields,omitempty" yaml:"fields,omitempty"`
 	Ports       map[string]*PortDef       `json:"-" yaml:"-"` // Port-based schema selection
 	Definitions map[string]*DefinitionDef `json:"-" yaml:"-"` // Reusable definitions
+	// DocFPort is the document's top-level fPort (PS-458), 0 where it declares none. An
+	// encoder of a schema without `ports` reports it where the caller gives no FPort.
+	DocFPort int `json:"-" yaml:"-"`
 	// repeatOnly is every name declared in some repeat's elements and nowhere outside
 	// one (PS-368): a reference to one from outside an element is an error.
 	repeatOnly map[string]bool
@@ -413,6 +416,8 @@ type DecodeContext struct {
 
 // EncodeContext maintains state during encoding.
 type EncodeContext struct {
+	// FPort is the FPort the encode used (PS-581); 0 where there is none.
+	FPort     int
 	Buffer    []byte
 	Endian    string
 	Variables map[string]any
@@ -1096,6 +1101,15 @@ func ParseSchema(data string) (*Schema, error) {
 				}
 				schema.Definitions[name] = dd
 			}
+		}
+	}
+
+	for _, key := range []string{"fPort", "fport"} {
+		switch v := raw[key].(type) {
+		case int:
+			schema.DocFPort = v
+		case float64:
+			schema.DocFPort = int(v)
 		}
 	}
 
@@ -4124,6 +4138,83 @@ func (s *Schema) Encode(data map[string]any) ([]byte, error) {
 type EncodeResult struct {
 	Payload  []byte
 	Warnings []string
+	// FPort is the FPort the encode used (PS-581): the port entry chosen for a schema
+	// with `ports`, else the caller's, else the document's `fPort`; 0 where there is none.
+	FPort int
+}
+
+// ChooseEncodePort is the port entry an encoder uses, by PS-581 (CR-2026-169), and the
+// FPort it reports. A caller's FPort (non-zero; a port is 1 to 255) chooses its entry, or
+// the `default` entry where none lists it, and an entry declared `uplink` is refused only
+// where direction is "downlink". Without one: the single entry declaring `downlink`, else
+// the single downlink-capable entry (`downlink`, `both` or no declaration, PS-287), else
+// the input is rejected naming the candidates. `default` is never chosen without an
+// FPort, having no number to report. A schema without `ports` returns the caller's FPort,
+// else the document's.
+func (s *Schema) ChooseEncodePort(fPort int, direction string) (int, error) {
+	if len(s.Ports) == 0 {
+		if fPort == 0 {
+			return s.DocFPort, nil
+		}
+		return fPort, nil
+	}
+	if fPort != 0 {
+		entry, ok := s.Ports[strconv.Itoa(fPort)]
+		if !ok {
+			entry, ok = s.Ports["default"]
+		}
+		if !ok {
+			return 0, fmt.Errorf("FPort %d matches no port entry and schema '%s' declares no default; it defines %s (PS-581)",
+				fPort, s.Name, joinPorts(s.numberedPorts(func(*PortDef) bool { return true })))
+		}
+		if entry.Direction == DirectionUplink && direction == DirectionDownlink {
+			return 0, fmt.Errorf("FPort %d is declared direction:uplink and takes no downlink to encode (PS-581)", fPort)
+		}
+		return fPort, nil
+	}
+	tiers := []struct {
+		name string
+		ok   func(*PortDef) bool
+	}{
+		{"declared downlink", func(e *PortDef) bool { return e.Direction == DirectionDownlink }},
+		{"downlink-capable", func(e *PortDef) bool {
+			return e.Direction == DirectionDownlink || e.Direction == DirectionBoth || e.Direction == ""
+		}},
+	}
+	for _, tier := range tiers {
+		candidates := s.numberedPorts(tier.ok)
+		if len(candidates) == 1 {
+			return candidates[0], nil
+		}
+		if len(candidates) > 1 {
+			return 0, fmt.Errorf("no FPort was given, and schema '%s' has %d %s port entries (%s); give the FPort (PS-581)",
+				s.Name, len(candidates), tier.name, joinPorts(candidates))
+		}
+	}
+	return 0, fmt.Errorf("no FPort was given, and schema '%s' has no port entry that takes a downlink (PS-581)", s.Name)
+}
+
+// numberedPorts lists, ascending, the numbered port entries satisfying ok.
+func (s *Schema) numberedPorts(ok func(*PortDef) bool) []int {
+	var out []int
+	for key, entry := range s.Ports {
+		if n, err := strconv.Atoi(key); err == nil && entry != nil && ok(entry) {
+			out = append(out, n)
+		}
+	}
+	sort.Ints(out)
+	return out
+}
+
+func joinPorts(ports []int) string {
+	if len(ports) == 0 {
+		return "nothing"
+	}
+	parts := make([]string, len(ports))
+	for i, p := range ports {
+		parts[i] = strconv.Itoa(p)
+	}
+	return strings.Join(parts, ", ")
 }
 
 // EncodeWithPort encodes data to binary using port-based schema selection.
@@ -4146,10 +4237,28 @@ func (s *Schema) EncodeWithPort(data map[string]any, fPort int) ([]byte, error) 
 // direction produces bytes the far end reads against different field definitions, so
 // nothing is encoded. Pass "" for direction to skip the check.
 func (s *Schema) EncodeWithPortDirection(data map[string]any, fPort int, direction string) ([]byte, error) {
-	if err := s.checkDirection(fPort, direction); err != nil {
+	used, err := s.ChooseEncodePort(fPort, direction) // PS-581
+	if err != nil {
 		return nil, err
 	}
-	return s.EncodeWithPort(data, fPort)
+	if err := s.checkDirection(used, direction); err != nil {
+		return nil, err
+	}
+	return s.EncodeWithPort(data, used)
+}
+
+// EncodeToResultDirection is EncodeToResult choosing its port entry by PS-581 (a zero
+// fPort is none given) and checking direction against it; the result reports the FPort
+// used. Pass "" for direction to skip the uplink check.
+func (s *Schema) EncodeToResultDirection(data map[string]any, fPort int, direction string) (*EncodeResult, error) {
+	used, err := s.ChooseEncodePort(fPort, direction)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.checkDirection(used, direction); err != nil {
+		return nil, err
+	}
+	return s.EncodeToResult(data, used)
 }
 
 // EncodeToResult is EncodeWithPort with the warnings retained, matching what the
@@ -4159,7 +4268,7 @@ func (s *Schema) EncodeToResult(data map[string]any, fPort int) (*EncodeResult, 
 	if err != nil {
 		return nil, err
 	}
-	return &EncodeResult{Payload: ctx.Buffer, Warnings: ctx.Warnings}, nil
+	return &EncodeResult{Payload: ctx.Buffer, Warnings: ctx.Warnings, FPort: ctx.FPort}, nil
 }
 
 // encodeToContext is the one encode path. EncodeWithPort and
@@ -4178,7 +4287,13 @@ func (s *Schema) encodeToContext(
 func (s *Schema) encodeToContextRecord(
 	data map[string]any, fPort int, order []string, record map[string]any,
 ) (*EncodeContext, error) {
+	// PS-581: which port entry this encode uses, and the FPort it reports.
+	fPort, err := s.ChooseEncodePort(fPort, "")
+	if err != nil {
+		return nil, err
+	}
 	ctx := NewEncodeContext(s.Endian)
+	ctx.FPort = fPort
 	data, ctx.trace = s.takeRecord(data, record)
 	ctx.TLVOrder = order
 	ctx.Definitions = s.Definitions

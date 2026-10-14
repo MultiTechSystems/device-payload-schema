@@ -121,6 +121,9 @@ public static partial class SchemaParser
             schema.Direction = Scalar(direction);
         CheckPortDeclarations(root);
         Cr159.CheckPorts(root);            // CR-2026-159
+        foreach (var docKey in new[] { "fPort", "fport" })
+            if (root.TryGetValue(docKey, out var docNode) && int.TryParse(Scalar(docNode), out var docPort))
+                schema.DocFPort = docPort;
 
         // No `header:` block. It was never in the specification, and honouring it
         // here while Python and Go ignored it meant the same schema decoded

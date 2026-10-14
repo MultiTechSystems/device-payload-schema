@@ -23,6 +23,9 @@ public class EncodeResult
     public byte[] Payload { get; internal set; } = Array.Empty<byte>();
     public List<string> Warnings { get; } = new();
     public List<string> Errors { get; } = new();
+    /// <summary>The FPort the encode used (PS-581): the port entry chosen for a schema with
+    /// `ports`, else the caller's, else the document's `fPort`; 0 where there is none.</summary>
+    public int FPort { get; internal set; }
 
     /// <summary>True when no field failed to encode. Warnings do not clear success.</summary>
     public bool Success => Errors.Count == 0;
@@ -67,7 +70,7 @@ public static class SchemaEncoder
     public static EncodeResult Encode(PayloadSchemaDefinition schema,
         Dictionary<string, object?> data, IReadOnlyList<string>? order = null,
         Dictionary<string, object?>? decodeRecord = null)
-        => new Encoding(schema, schema.Fields, order).Run(data, decodeRecord);
+        => EncodeWithPort(schema, data, 0, order, null, decodeRecord);
 
     /// <summary>
     /// Encode with port-based schema selection.
@@ -81,8 +84,76 @@ public static class SchemaEncoder
         Dictionary<string, object?> data, int fPort, IReadOnlyList<string>? order = null,
         string? direction = null, Dictionary<string, object?>? decodeRecord = null)
     {
-        SchemaDirection.Check(schema, fPort, direction);
-        return new Encoding(schema, ResolveFieldsForEncode(schema, fPort), order).Run(data, decodeRecord);
+        // PS-581: which port entry this encode uses, and the FPort it reports. A rejection
+        // is reported through the result, as every encode failure is.
+        int used;
+        try
+        {
+            used = ChoosePort(schema, fPort, direction);
+        }
+        catch (InvalidOperationException ex) when (ex.Message.Contains("(PS-581)"))
+        {
+            var rejected = new EncodeResult();
+            rejected.Errors.Add(ex.Message);
+            return rejected;
+        }
+        SchemaDirection.Check(schema, used, direction);
+        var result = new Encoding(schema, ResolveFieldsForEncode(schema, used), order).Run(data, decodeRecord);
+        result.FPort = used;
+        return result;
+    }
+
+    /// <summary>
+    /// The FPort whose entry an encode uses, by PS-581 (CR-2026-169). A caller's FPort
+    /// (non-zero; a port is 1 to 255) chooses its entry, or the `default` entry where none
+    /// lists it, and an entry declared `uplink` is refused only where the direction is
+    /// `downlink`. Without one: the single entry declaring `downlink`, else the single
+    /// downlink-capable entry (`downlink`, `both` or no declaration, PS-287), else the input
+    /// is rejected naming the candidates. `default` is never chosen without an FPort, having
+    /// no number to report. A schema without `ports` gives the caller's FPort, else the
+    /// document's, else 0.
+    /// </summary>
+    public static int ChoosePort(PayloadSchemaDefinition schema, int fPort, string? direction)
+    {
+        if (schema.Ports == null || schema.Ports.Count == 0)
+            return fPort != 0 ? fPort : schema.DocFPort;
+        static string Join(IEnumerable<int> ports)
+        {
+            var list = ports.ToList();
+            return list.Count == 0 ? "nothing" : string.Join(", ", list);
+        }
+        List<int> Numbered(Func<PortDef, bool> ok) => schema.Ports
+            .Where(kv => kv.Value != null && ok(kv.Value) && int.TryParse(kv.Key, out _))
+            .Select(kv => int.Parse(kv.Key)).OrderBy(n => n).ToList();
+        if (fPort != 0)
+        {
+            if (!schema.Ports.TryGetValue(fPort.ToString(), out var entry)
+                && !schema.Ports.TryGetValue("default", out entry))
+                throw new InvalidOperationException(
+                    $"FPort {fPort} matches no port entry and schema '{schema.Name}' declares no default; "
+                    + $"it defines {Join(Numbered(_ => true))} (PS-581)");
+            if (entry.Direction == SchemaDirection.Uplink && direction == SchemaDirection.Downlink)
+                throw new InvalidOperationException(
+                    $"FPort {fPort} is declared direction:uplink and takes no downlink to encode (PS-581)");
+            return fPort;
+        }
+        var tiers = new (string name, Func<PortDef, bool> ok)[]
+        {
+            ("declared downlink", e => e.Direction == SchemaDirection.Downlink),
+            ("downlink-capable", e => e.Direction == null || e.Direction == SchemaDirection.Downlink
+                                      || e.Direction == SchemaDirection.Both),
+        };
+        foreach (var (name, ok) in tiers)
+        {
+            var candidates = Numbered(ok);
+            if (candidates.Count == 1) return candidates[0];
+            if (candidates.Count > 1)
+                throw new InvalidOperationException(
+                    $"no FPort was given, and schema '{schema.Name}' has {candidates.Count} {name} port entries "
+                    + $"({Join(candidates)}); give the FPort (PS-581)");
+        }
+        throw new InvalidOperationException(
+            $"no FPort was given, and schema '{schema.Name}' has no port entry that takes a downlink (PS-581)");
     }
 
     static List<SchemaField> ResolveFieldsForEncode(PayloadSchemaDefinition schema, int fPort)

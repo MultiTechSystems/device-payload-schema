@@ -359,6 +359,8 @@ public class PayloadSchemaDefinition
     public string? Direction { get; set; }
     public List<SchemaField> Fields { get; set; } = new();
     public Dictionary<string, PortDef>? Ports { get; set; }
+    /// <summary>The document's top-level fPort (PS-458), 0 where it declares none.</summary>
+    public int DocFPort { get; set; }
     public Dictionary<string, DefinitionDef>? Definitions { get; set; }
     /// <summary>Names declared only inside some repeat's elements (PS-368).</summary>
     internal HashSet<string> RepeatOnlyNames { get; set; } = new();
