@@ -318,7 +318,8 @@ def run():
             continue
         traits = schema_traits(schema)
         for vector in schema["test_vectors"]:
-            if is_encode_vector(vector) or not vector.get("payload"):
+            if is_encode_vector(vector) or "expected_error" in vector \
+                    or not vector.get("payload"):
                 continue
             want = bytes.fromhex(str(vector["payload"]).replace(" ", ""))
             port = vector.get("fport", vector.get("fPort"))

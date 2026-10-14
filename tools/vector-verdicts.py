@@ -38,7 +38,13 @@ sys.path.insert(0, str(REPO_ROOT / "tools"))
 
 from generate_ts013_codec import TS013Generator  # noqa: E402
 from schema_interpreter import SchemaInterpreter  # noqa: E402
-from validate_schema import expected_fields_match, values_match, warnings_match  # noqa: E402
+from validate_schema import (  # noqa: E402
+    expected_error_mismatch,
+    expected_fields_match,
+    expects_error,
+    values_match,
+    warnings_match,
+)
 
 PASS = "PASS"
 FAIL = "FAIL"
@@ -251,6 +257,15 @@ def expected_bytes(vector: dict) -> bytes:
     return bytes.fromhex(str(want).replace(" ", "").replace("0x", ""))
 
 
+def error_verdict(vector: dict, errors: list) -> tuple:
+    """Verdict for a vector expecting an error (PS-576), given the errors the run reported
+    (none where it succeeded). Wording is never compared."""
+    if not errors:
+        return FAIL, f"succeeded where {vector['expected_error']} was expected"
+    why = expected_error_mismatch("; ".join(errors), vector["expected_error"])
+    return (PASS, "") if why is None else (FAIL, why[:120])
+
+
 def run_interpreted_encode(schema: dict, vector: dict) -> tuple:
     """Verdict for one encode vector from the interpreter's encoder."""
     try:
@@ -258,7 +273,11 @@ def run_interpreted_encode(schema: dict, vector: dict) -> tuple:
             vector.get("input") or {}, fPort=vector_fport(vector)
         )
     except Exception as exc:
+        if expects_error(vector):
+            return error_verdict(vector, [str(exc)])
         return FAIL, f"{type(exc).__name__}: {exc}"[:120]
+    if expects_error(vector):
+        return error_verdict(vector, [] if result.success else result.errors)
     if not result.success:
         return FAIL, "; ".join(result.errors)[:120]
     want = expected_bytes(vector)
@@ -283,6 +302,9 @@ def run_interpreted(schema: dict, vectors: list) -> list:
                 # every vector in the corpus.
                 input_metadata=vector.get("input_metadata"),
             )
+            if expects_error(vector):
+                out.append(error_verdict(vector, [] if result.success else result.errors))
+                continue
             if not result.success:
                 out.append((FAIL, "; ".join(result.errors)[:120]))
                 continue
@@ -295,6 +317,9 @@ def run_interpreted(schema: dict, vectors: list) -> list:
                 )
             out.append((PASS if ok else FAIL, detail))
         except Exception as exc:  # a raising decoder is a failure, not a crash of this tool
+            if expects_error(vector):
+                out.append(error_verdict(vector, [str(exc)]))
+                continue
             out.append((FAIL, f"{type(exc).__name__}: {exc}"[:120]))
     return out
 
@@ -360,6 +385,10 @@ def run_generated(schema: dict, vectors: list) -> list:
 
     out = []
     for vector, result in zip(vectors, results):
+        if expects_error(vector):
+            # PS-576: the codec's errors[] are the error messages.
+            out.append(error_verdict(vector, result.get("errors") or []))
+            continue
         if result.get("errors"):
             out.append((FAIL, "; ".join(result["errors"])[:120]))
             continue

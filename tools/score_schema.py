@@ -49,6 +49,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 from schema_interpreter import SchemaInterpreter
 from validate_schema import (validate_schema, ValidationResult, values_match,
+                             expected_error_mismatch,
                              is_independent_vector, CORRECTED_SOURCE)
 
 #: Tolerance for comparing a decoded value with a test vector's expected value.
@@ -137,6 +138,15 @@ def check_test_vectors_exist(schema: Dict[str, Any]) -> Tuple[bool, int, List[st
     usable = 0
     for i, tv in enumerate(vectors):
         complete = True
+        if 'expected_error' in tv:
+            # PS-576: a vector expecting an error states a payload (or an input) and the
+            # error, and asserts a rejection - which is evidence like any other vector.
+            if not (tv.get('payload') or tv.get('input') is not None):
+                issues.append(f"Test vector {i}: missing 'payload' or 'input'")
+                complete = False
+            if complete:
+                usable += 1
+            continue
         if not tv.get('payload'):
             issues.append(f"Test vector {i}: missing 'payload'")
             complete = False
@@ -162,6 +172,26 @@ def expected_encode_bytes(vector: Dict[str, Any]) -> bytes:
     if isinstance(want, list):
         return bytes(want)
     return bytes.fromhex(str(want).replace(' ', '').replace('0x', ''))
+
+
+def run_expected_error(
+    interpreter: SchemaInterpreter, vector: Dict[str, Any], fport
+) -> Tuple[bool, str]:
+    """Run a vector that expects an error (PS-576), a decode or an encode, and judge the
+    error it raised or reported: the requirement it cites, the field it names."""
+    try:
+        if 'payload' in vector:
+            result = interpreter.decode(
+                bytes.fromhex(str(vector['payload']).replace(' ', '')), fPort=fport)
+        else:
+            result = interpreter.encode(vector.get('input') or {}, fPort=fport)
+        errors = [] if result.success else list(result.errors)
+    except Exception as exc:
+        errors = [str(exc)]
+    if not errors:
+        return False, f"succeeded where {vector['expected_error']} was expected"
+    why = expected_error_mismatch('; '.join(errors), vector['expected_error'])
+    return (why is None), (why or '')
 
 
 def run_encode_vector(
@@ -214,6 +244,14 @@ def run_python_tests(
         # component while validate_schema and vector-verdicts both passed them.
         # Same helper and the same encoder call as those two, so the three tools
         # cannot disagree about whether a vector passes.
+        if 'expected_error' in tv:
+            ok, detail = run_expected_error(interpreter, tv, fport)
+            if ok:
+                passed += 1
+            else:
+                failed += 1
+                errors.append(f"{tv_name}: {detail}")
+            continue
         if is_encode_vector(tv):
             ok, detail = run_encode_vector(interpreter, tv, fport)
             if ok:
@@ -297,6 +335,16 @@ def run_js_tests(schema: Dict[str, Any], schema_path: str) -> Tuple[str, List[st
     test_cases = []
     for i, tv in enumerate(vectors):
         tv_name = tv.get('name', f'test_{i}')
+        if 'expected_error' in tv:
+            # PS-576: the codec must report an error that meets the vector.
+            case = {'name': tv_name, 'expect_error': tv['expected_error'],
+                    'fPort': tv.get('fPort') or tv.get('fport') or 1}
+            if 'payload' in tv:
+                case['payload'] = str(tv['payload']).replace(' ', '')
+            else:
+                case['encode'] = tv.get('input') or {}
+            test_cases.append(case)
+            continue
         if is_encode_vector(tv):
             # PS-047: the values to encode, not bytes to decode. These went through
             # decodeUplink with an empty payload, and passed only while the generated
@@ -360,8 +408,44 @@ function show(v) {{
 let passed = 0, failed = 0;
 const errors = [];
 
+// PS-576, as validate_schema.expected_error_mismatch has it: the PS numbers the error cites
+// must include every requirement listed (only where it cites any), and `at` must be named,
+// quoted, or be a pointer the message contains. Wording is never compared.
+function errorMismatch(message, want) {{
+    const wanted = Array.isArray(want.requirement) ? want.requirement : [want.requirement];
+    const cited = new Set(message.match(/PS-\\d+[a-z]?/g) || []);
+    if (cited.size > 0 && !wanted.every(function (w) {{ return cited.has(w); }})) {{
+        return 'the error cites ' + Array.from(cited).join(',') + ', not ' + wanted.join(',');
+    }}
+    if (want.at !== undefined && message.indexOf("'" + want.at + "'") < 0
+            && !(want.at.charAt(0) === '/' && message.indexOf(want.at) >= 0)) {{
+        return 'the error does not name ' + want.at;
+    }}
+    return null;
+}}
+
 for (const t of tests) {{
     try {{
+        if (t.expect_error) {{
+            let out;
+            if (t.encode) {{
+                out = encodeDownlink({{ data: t.encode, fPort: t.fPort === null ? undefined : t.fPort }});
+            }} else {{
+                const bytes = [];
+                for (let i = 0; i < t.payload.length; i += 2) {{
+                    bytes.push(parseInt(t.payload.substr(i, 2), 16));
+                }}
+                out = decodeUplink({{ bytes, fPort: t.fPort }});
+            }}
+            if (!out.errors || out.errors.length === 0) {{
+                failed++;
+                errors.push(t.name + ': succeeded where an error was expected');
+            }} else {{
+                const why = errorMismatch(out.errors.join('; '), t.expect_error);
+                if (why) {{ failed++; errors.push(t.name + ': ' + why); }} else passed++;
+            }}
+            continue;
+        }}
         if (t.encode) {{
             const enc = encodeDownlink({{ data: t.encode, fPort: t.fPort === null ? undefined : t.fPort }});
             if (enc.errors && enc.errors.length > 0) {{

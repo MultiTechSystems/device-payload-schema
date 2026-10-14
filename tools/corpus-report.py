@@ -38,7 +38,13 @@ sys.path.insert(0, str(REPO_ROOT / "tools"))
 
 from schema_interpreter import SchemaInterpreter  # noqa: E402
 from score_schema import CONFORMANCE_TOLERANCE  # noqa: E402
-from validate_schema import expected_fields_match, is_encode_vector, warnings_match  # noqa: E402
+from validate_schema import (  # noqa: E402
+    expected_error_mismatch,
+    expected_fields_match,
+    expects_error,
+    is_encode_vector,
+    warnings_match,
+)
 
 CORPUS = REPO_ROOT / "schemas" / "devices"
 DETAIL_LIMIT = 200
@@ -112,7 +118,16 @@ def python_verdict(schema: dict, vector: dict) -> Tuple[str, str]:
     try:
         result = SchemaInterpreter(schema).decode(payload, fPort=fport)
     except Exception as exc:  # a raising decoder is an error, not a crash of this tool
+        if expects_error(vector):
+            why = expected_error_mismatch(str(exc), vector["expected_error"])
+            return ("pass", "") if why is None else ("fail", why)
         return "error", "%s: %s" % (type(exc).__name__, exc)
+    if expects_error(vector):
+        # PS-576 (CR-2026-167): the decode must fail, and the error must meet the vector.
+        if result.success:
+            return "fail", "succeeded where %s was expected" % (vector["expected_error"],)
+        why = expected_error_mismatch("; ".join(result.errors), vector["expected_error"])
+        return ("pass", "") if why is None else ("fail", why)
     if not result.success:
         return "error", "; ".join(str(e) for e in result.errors[:2])
     # PS-043/PS-044, with a null expectation asserting absence (CR-2026-075).

@@ -123,14 +123,14 @@ Generated inventory of this repository: what lives where, what each document cov
 
 ## Device schemas
 
-355 schemas under `schemas/devices/`.
-Mean quality score 82.0% (PLATINUM 44, GOLD 49, SILVER 241, BRONZE 6, REJECTED 15). Tiers follow the specification's Section 10: Platinum 95-100%, Gold 85-94%, Silver 70-84%, Bronze 60-69%, Rejected below 60%. Gold and Platinum also have gates (PS-239) -- see `../AGENTS.md`. A high score shows self-consistency with a schema's own test vectors, not that the vectors are right.
+356 schemas under `schemas/devices/`.
+Mean quality score 82.0% (PLATINUM 44, GOLD 49, SILVER 242, BRONZE 6, REJECTED 15). Tiers follow the specification's Section 10: Platinum 95-100%, Gold 85-94%, Silver 70-84%, Bronze 60-69%, Rejected below 60%. Gold and Platinum also have gates (PS-239) -- see `../AGENTS.md`. A high score shows self-consistency with a schema's own test vectors, not that the vectors are right.
 
 ### By vendor
 
 | Vendor | Schemas | Vectors | Tiers |
 |---|---|---|---|
-| _language-conformance | 143 | 312 | GOLD 1, SILVER 138, BRONZE 4 |
+| _language-conformance | 144 | 321 | GOLD 1, SILVER 139, BRONZE 4 |
 | milesight | 84 | 1427 | PLATINUM 31, GOLD 34, SILVER 16, REJECTED 3 |
 | decentlab | 58 | 204 | PLATINUM 10, GOLD 11, SILVER 32, BRONZE 1, REJECTED 4 |
 | _library-composed | 49 | 57 | SILVER 49 |
@@ -179,6 +179,7 @@ Mean quality score 82.0% (PLATINUM 44, GOLD 49, SILVER 241, BRONZE 6, REJECTED 1
 | `_language-conformance/encoding` | 3 | 1 | fields | 81% | SILVER |
 | `_language-conformance/enum-description` | 3 | 2 | fields | 81% | SILVER |
 | `_language-conformance/enum-spec-default` | 2 | 1 | fields | 81% | SILVER |
+| `_language-conformance/expected-error` | 5 | 9 | ports | 78% | SILVER |
 | `_language-conformance/field-endian` | 3 | 1 | fields | 81% | SILVER |
 | `_language-conformance/flagged-group-field-list` | 8 | 2 | fields | 66% | BRONZE |
 | `_language-conformance/float-endian` | 4 | 1 | fields | 81% | SILVER |

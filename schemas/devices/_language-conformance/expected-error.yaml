@@ -1,0 +1,117 @@
+# Vectors that expect the decode or the encode to FAIL (CR-2026-167, PS-576, PS-577).
+#
+# `expected_error` replaces `expected` / `expected_payload`. `requirement` is the PS number
+# of the rule the failure enforces, or a list of them; `at` is the field the error names.
+# A runner fails the vector where the execution succeeds, where the error cites PS numbers
+# and they leave out a listed requirement, or where `at` is given and the error does not
+# name it. The wording of an error is never compared (PS-576).
+#
+# Each rejection here is a run-time rejection whose error cites its requirement in every
+# implementation that can produce it. A rejection exists for a payload, an encode input, or
+# both; the encode vectors (port 1) are run by tools/vector-verdicts.py, as every encode
+# vector is, and the C interpreter has no tlv, match or encode-by-name path for them.
+name: probe_expected_error
+version: 1
+endian: big
+ports:
+  1:
+    fields:
+      - name: temperature
+        type: u16
+        div: 10
+      - name: humidity
+        type: u8
+  2:
+    fields:
+      - tlv:
+          tag_size: 1
+          length_size: 1
+          cases:
+            0x01:
+              - name: level
+                type: u8
+  3:
+    fields:
+      - match:
+          length: 1
+          name: kind
+          default: error
+          cases:
+            1:
+              - name: reading
+                type: u8
+test_vectors:
+  # The vectors that succeed are there so the schema is held as tightly as the rejections:
+  # a rejection says nothing of a field's byte order, scale or width, and a mutation that
+  # changes them leaves a payload that is too short just as short.
+  - name: the_cr_example_decodes
+    description: "the CR-2026-167 example's own success vector, beside its two rejections"
+    fport: 1
+    payload: "00D741"
+    source: spec-example
+    expected:
+      temperature: 21.5
+      humidity: 65
+  - name: asymmetric_bytes_fix_the_byte_order_and_scale
+    description: "0x0123 is 291, 29.1 after the scale; read little-endian it would be 896.1"
+    fport: 1
+    payload: "012341"
+    source: generated
+    expected:
+      temperature: 29.1
+      humidity: 65
+  - name: a_whole_tlv_entry_decodes
+    description: "tag 01, one byte of length, one byte of value"
+    fport: 2
+    payload: "010107"
+    source: generated
+    expected:
+      level: 7
+  - name: a_listed_discriminator_selects_its_case
+    description: "discriminator 1 lists a case that reads one byte"
+    fport: 3
+    payload: "0107"
+    source: generated
+    expected:
+      kind: 1
+      reading: 7
+  - name: underflow_names_the_field
+    description: "one byte where a u16 is read: PS-535 names the field that ran out"
+    fport: 1
+    payload: "00"
+    source: spec-example
+    expected_error:
+      requirement: PS-535
+      at: temperature
+  - name: tlv_entry_cut_short
+    description: "tag 01 declares 5 bytes and one remains: PS-486"
+    fport: 2
+    payload: "0105AA"
+    source: spec-example
+    expected_error:
+      requirement: PS-486
+  - name: match_with_no_case_and_no_default
+    description: "discriminator 9 lists no case and the match falls to an error default"
+    fport: 3
+    payload: "09"
+    source: spec-example
+    expected_error:
+      requirement: PS-565
+  - name: encode_value_does_not_fit
+    description: "300 is outside a u8: PS-168 names the field"
+    fport: 1
+    input:
+      temperature: 21.5
+      humidity: 300
+    source: spec-example
+    expected_error:
+      requirement: PS-168
+      at: humidity
+  - name: encode_missing_input
+    description: "humidity is required and the input omits it: PS-551. No `at`: the message names the field unquoted"
+    fport: 1
+    input:
+      temperature: 21.5
+    source: spec-example
+    expected_error:
+      requirement: PS-551

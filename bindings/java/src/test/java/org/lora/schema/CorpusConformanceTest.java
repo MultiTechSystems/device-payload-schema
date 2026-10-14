@@ -50,7 +50,7 @@ class CorpusConformanceTest {
     // CR-2026-096 added nine vectors (the meta-* fixtures); with _meta compared exactly
     // where a vector carries expected_meta, all pass: 2549.
     // CR-2026-097 added meta-tlv-channels.yaml: 2550.
-    private static final int CORPUS_FLOOR = 2744;   // +3: negative-zero (2) and bf16 negative_zero (CR-2026-154); +9: bf16 and bf16's infinity and NaN vectors (CR-2026-149); +3: match-discriminator-from-inner-case (CR-2026-151); +10: the no-silent-empty fixtures (length-selects-layout, literal-selects-branch, tag-entry-constants); +5: wide-peek-selector, wide-peek-selector-u64; +4: ascii-numeral (CR-2026-150); +9: bf16 and bf16-specials (CR-2026-149); +12: the four tlv encode-gap fixtures (tlv-object-with-inner-branch, tlv-case-of-one-inline-branch, tlv-float-reading, tlv-scaled-wide-reading); +2: tlv-name-object-and-scalar; +5: match-fractional-discriminator (a fraction matches no single key); +4: mask-reference-binding; +16: CR-2026-109/132 lookup-reference-binding (14 vectors) and tag-component-reference-binding (2); +4: ascii-latin1 (CR-2026-114); +1: CR-2026-128 tlv-repeat-merge-shared-last; +2: CR-2026-125 tlv-repeat-collect-first-case, tlv-repeat-merge-shared-member; +6: CR-2026-110 tlv-repeat-* fixtures; +3: byte-group-width (CR-2026-131); +2: CR-2026-135 encoder-rounding and arithmetic-worked-examples; +1: round-large-value just_above_one (mutation gate); +5: CR-2026-121/123 fixtures (repeat-element-null-sentinel, repeat-element-internal-name, repeat-identity-sibling x2, repeat-count-computed); +2: CR-2026-124 guard-set empty in/not_in; +8: match-u32-peek-discriminator and match-u32-inline-discriminator; +4: names-mangling-alike; +2: CR-2026-127 guard-boolean-operand; +2: CR-2026-117 guard-absent-operand; +10: CR-2026-118 element-several-readings, element-case-several-readings, present-if-set, guard-set; +8: registry divergence fixtures (tag-component-ref, reference-to-absent, zero-length, numeric-looking-text, name-from-object, round-large-value); +7: CR-2026-111 repeat-element-* and repeat-index-base; +2: flagged-group-field-list; +8: name-from-rendering (CR-2026-112); +2: boolean-literal (CR-2026-107); +14: the nine TS13-defect fixtures (bitfield-string-wide, wide-bit-range, ...); +8: CR-2026-104 lookup-boolean-labels and lookup-number-labels; +3: byte-group-bool; +11: tlv-case-field-list, object-member-field-list, tlv-tag-var-name-from; +5: tlv-case-key-patterns; dl-atm41g2's two vendor vectors (+2); +121: vendor-codec vectors that kill vobo's mutation survivors
+    private static final int CORPUS_FLOOR = 2751;   // +7: expected-error (CR-2026-167: three decode vectors expecting a failure, four that decode); +3: negative-zero (2) and bf16 negative_zero (CR-2026-154); +9: bf16 and bf16's infinity and NaN vectors (CR-2026-149); +3: match-discriminator-from-inner-case (CR-2026-151); +10: the no-silent-empty fixtures (length-selects-layout, literal-selects-branch, tag-entry-constants); +5: wide-peek-selector, wide-peek-selector-u64; +4: ascii-numeral (CR-2026-150); +9: bf16 and bf16-specials (CR-2026-149); +12: the four tlv encode-gap fixtures (tlv-object-with-inner-branch, tlv-case-of-one-inline-branch, tlv-float-reading, tlv-scaled-wide-reading); +2: tlv-name-object-and-scalar; +5: match-fractional-discriminator (a fraction matches no single key); +4: mask-reference-binding; +16: CR-2026-109/132 lookup-reference-binding (14 vectors) and tag-component-reference-binding (2); +4: ascii-latin1 (CR-2026-114); +1: CR-2026-128 tlv-repeat-merge-shared-last; +2: CR-2026-125 tlv-repeat-collect-first-case, tlv-repeat-merge-shared-member; +6: CR-2026-110 tlv-repeat-* fixtures; +3: byte-group-width (CR-2026-131); +2: CR-2026-135 encoder-rounding and arithmetic-worked-examples; +1: round-large-value just_above_one (mutation gate); +5: CR-2026-121/123 fixtures (repeat-element-null-sentinel, repeat-element-internal-name, repeat-identity-sibling x2, repeat-count-computed); +2: CR-2026-124 guard-set empty in/not_in; +8: match-u32-peek-discriminator and match-u32-inline-discriminator; +4: names-mangling-alike; +2: CR-2026-127 guard-boolean-operand; +2: CR-2026-117 guard-absent-operand; +10: CR-2026-118 element-several-readings, element-case-several-readings, present-if-set, guard-set; +8: registry divergence fixtures (tag-component-ref, reference-to-absent, zero-length, numeric-looking-text, name-from-object, round-large-value); +7: CR-2026-111 repeat-element-* and repeat-index-base; +2: flagged-group-field-list; +8: name-from-rendering (CR-2026-112); +2: boolean-literal (CR-2026-107); +14: the nine TS13-defect fixtures (bitfield-string-wide, wide-bit-range, ...); +8: CR-2026-104 lookup-boolean-labels and lookup-number-labels; +3: byte-group-bool; +11: tlv-case-field-list, object-member-field-list, tlv-tag-var-name-from; +5: tlv-case-key-patterns; dl-atm41g2's two vendor vectors (+2); +121: vendor-codec vectors that kill vobo's mutation survivors
 
     @Test
     void corpusVectorsDecodeAsExpected() throws IOException {
@@ -133,6 +133,29 @@ class CorpusConformanceTest {
                     }
                     report.addMeta(rel, index, vectorName, meta, decodeRecord);
                 }
+                if (vector.get("expected_error") instanceof Map<?, ?> expectedError) {
+                    // CR-2026-167 (PS-576): the decode must fail, and its error must meet
+                    // the vector. A decode that succeeds is the failure.
+                    byte[] payload = hexToBytes(payloadHex);
+                    Object fport = vector.get("fPort");
+                    if (fport == null) fport = vector.get("fport");
+                    String problem;
+                    try {
+                        if (fport instanceof Number n) schema.decodeWithPort(payload, n.intValue());
+                        else schema.decode(payload);
+                        problem = "succeeded where an error was expected";
+                    } catch (RuntimeException e) {
+                        problem = errorMismatch(String.valueOf(e.getMessage()), expectedError);
+                    }
+                    if (problem == null) {
+                        passed++;
+                        report.add(rel, index, vectorName, "pass", "");
+                    } else {
+                        failures.merge(file.getFileName() + ": " + problem, 1, Integer::sum);
+                        report.add(rel, index, vectorName, "fail", problem);
+                    }
+                    continue;
+                }
                 Object expectedRaw = vector.get("expected");
                 if (!(expectedRaw instanceof Map<?, ?> expected)) {
                     report.add(rel, index, vectorName, "skip", "no expected block");
@@ -208,6 +231,41 @@ class CorpusConformanceTest {
         } else if (passed < CORPUS_FLOOR) {
             throw new AssertionError("only " + passed + " corpus vectors pass, floor is " + CORPUS_FLOOR);
         }
+    }
+
+    private static final java.util.regex.Pattern PS_NUMBER =
+            java.util.regex.Pattern.compile("PS-\\d+[a-z]?");
+
+    /**
+     * Why an error does not satisfy a vector's {@code expected_error}, or null where it
+     * does (PS-576). The PS numbers the message cites must include every requirement listed,
+     * checked only where it cites any (an implementation need not say which rule it
+     * enforced), and {@code at} must be named in it, quoted, or be a JSON Pointer it
+     * contains. Wording is never compared.
+     */
+    static String errorMismatch(String message, Map<?, ?> expectedError) {
+        Object requirement = expectedError.get("requirement");
+        List<String> wanted = new ArrayList<>();
+        if (requirement instanceof List<?> list) {
+            for (Object item : list) wanted.add(String.valueOf(item));
+        } else if (requirement != null) {
+            wanted.add(String.valueOf(requirement));
+        }
+        Set<String> cited = new TreeSet<>();
+        java.util.regex.Matcher matcher = PS_NUMBER.matcher(message);
+        while (matcher.find()) cited.add(matcher.group());
+        if (!cited.isEmpty() && !cited.containsAll(wanted)) {
+            return "the error cites " + cited + ", not " + wanted + ": " + message;
+        }
+        Object at = expectedError.get("at");
+        if (at != null) {
+            String name = String.valueOf(at);
+            if (!message.contains("'" + name + "'")
+                    && !(name.startsWith("/") && message.contains(name))) {
+                return "the error does not name \"" + name + "\": " + message;
+            }
+        }
+        return null;
     }
 
     /**

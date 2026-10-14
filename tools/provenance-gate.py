@@ -53,7 +53,7 @@ KNOWN_SOURCES = INDEPENDENT_SOURCES | {"generated", CORRECTED_SOURCE}
 
 #: What a vector is asked, and what it claims the answer is.
 STIMULUS_KEYS = ("payload", "fPort", "fport", "port", "input", "input_metadata")
-OUTCOME_KEYS = ("expected", "expected_payload", "expected_warnings")
+OUTCOME_KEYS = ("expected", "expected_payload", "expected_warnings", "expected_error")
 
 
 # --------------------------------------------------------------------------------------

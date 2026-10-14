@@ -841,6 +841,7 @@ def run():
 
     entries, skips, vector_total = [], collections.Counter(), 0
     skipped_vectors = 0
+    error_vectors = 0
     for path in sorted(args.corpus.rglob("*.yaml")):
         try:
             schema = yaml.safe_load(path.read_text())
@@ -853,8 +854,15 @@ def run():
         schema, ref_errors = expand_refs(schema)
         if ref_errors:
             continue
+        # PS-576 (CR-2026-167): a vector expecting an error is not run here. The struct
+        # API reports a status code and `error_msg`, and the PS-535 and PS-168 messages are
+        # the reference's, but the constructs the shared fixtures reject through (ports,
+        # tlv, match with no case, encode by name) are ones the harness cannot build, so
+        # it counts them and says why instead of leaving them out silently.
+        error_vectors += sum(1 for v in schema["test_vectors"] if "expected_error" in v)
         vectors = [v for v in schema["test_vectors"]
-                   if v.get("payload") and not is_encode_vector(v)]
+                   if v.get("payload") and not is_encode_vector(v)
+                   and "expected_error" not in v]
         if not vectors:
             continue
         vector_total += len(vectors)
@@ -984,6 +992,10 @@ def run():
                     "lossy": " - the reference does not rebuild the payload either",
                 }.get(verdict, ""))
     print()
+    print(f"  {error_vectors} vector(s) expecting an error (PS-576) not run: the schemas that "
+          "carry them need ports, tlv or an encoder keyed by name, which the harness "
+          "cannot build")
+    print()
     print("  Why a schema was not attempted:")
     for reason, count in skips.most_common():
         print(f"  {count:>5} {reason}")
@@ -1006,6 +1018,7 @@ def run():
         pathlib.Path(args.json).write_text(json.dumps({
             "passed": passed, "attempted": attempted,
             "skipped_vectors": skipped_vectors, "corpus_vectors": vector_total,
+            "expected_error_vectors_not_run": error_vectors,
             "skips": dict(skips),
             "attempted_schemas": [name for _, (name, _, _, _) in entries],
             "unreportable_warnings": [{"schema": s, "vector": v, "detail": d}

@@ -107,6 +107,7 @@ def decoded(corpus) -> List[Decoded]:
             v
             for v in schema.get("test_vectors") or []
             if isinstance(v, dict) and "payload" in v and not is_encode_vector(v)
+            and "expected_error" not in v
         ]
         if not vectors:
             continue
