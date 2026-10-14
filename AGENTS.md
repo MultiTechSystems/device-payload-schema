@@ -232,10 +232,10 @@ implementation has a runner that reads the same YAML and the same vectors:
 
 | Implementation | Runner | Decode floor | Re-encode floor |
 |---|---|---|---|
-| Python | `tests/test_corpus_conformance.py` | every vector | 2188 |
-| Go | `go/schema/corpus_conformance_test.go` | 2790 | 2206 (plain API 2178) |
-| C# | `dotnet/PayloadSchema.Tests/CorpusConformanceTests.cs` | 2790 | 2189 |
-| Java | `bindings/java/.../CorpusConformanceTest.java` | 2790 | 2188 |
+| Python | `tests/test_corpus_conformance.py` | every vector | 2199 |
+| Go | `go/schema/corpus_conformance_test.go` | 2801 | 2217 (plain API 2189) |
+| C# | `dotnet/PayloadSchema.Tests/CorpusConformanceTests.cs` | 2801 | 2200 |
+| Java | `bindings/java/.../CorpusConformanceTest.java` | 2801 | 2199 |
 | C | `tools/c-corpus-harness.py` (builds each expressible schema through the struct API) | 575 of 575 attempted | n/a |
 
 These figures move with every schema added. `make check-floors` prints each floor beside
@@ -824,10 +824,10 @@ exercised to the best-covered part of the project:
 
 | | Runner | Round-trips |
 |---|---|---|
-| Python | `tests/test_encode_round_trip.py` | 2188 |
-| Go | `go/schema/corpus_encode_test.go` | 2206 (plain 2178) |
-| Java | `bindings/java/.../CorpusEncodeRoundTripTest.java` | 2188 |
-| C# | `dotnet/.../CorpusEncodeRoundTripTests.cs` | 2189 |
+| Python | `tests/test_encode_round_trip.py` | 2199 |
+| Go | `go/schema/corpus_encode_test.go` | 2217 (plain 2189) |
+| Java | `bindings/java/.../CorpusEncodeRoundTripTest.java` | 2199 |
+| C# | `dotnet/.../CorpusEncodeRoundTripTests.cs` | 2200 |
 | C | `src/test_encoder.c`, built by `make test-c` (unit tests, not a corpus round trip) | n/a |
 
 - **A name may be an object under one tag and a scalar under another, and a tlv encoder
@@ -2526,6 +2526,20 @@ improved. The Go, Java and C# corpus runners write per-vector reports only when
   C-interpreter wave. **No corpus,
   library, example or registry schema is rejected or changes decode** (registry yabby-edge
   was rewritten as one 8-byte group, 69e1023). Fixture: `byte-group-width.yaml`.
+- **A byte_group member's `var:` binds like any field's (PS-523, PS-539).** The Python
+  reference (`_decode_byte_group_members` bound `[name]` only) and the generated TS013 codec
+  (`_bind_js(..., False)`, and the bool member bound `vars.name` alone) never bound it, so a
+  `ref`, a `compute` operand or a `match` selector reading it was absent or failed with "Match
+  field $vb has no value" while the member's own name worked. Measured before on
+  `byte-group-member-var.yaml` (a group at the top level, a flagged member, a group in a tlv
+  case): Go, C# and C already bound it (C through `var_name`; `make selftest` covers it);
+  Python and the generated codec failed 9 of 11 vectors. Java alone dropped a member with a
+  `var` and no name (reserved bits a later field reads) before binding; it binds now, and that
+  case has no round-trip vector (no value to write), so it is `ByteGroupMemberVarTest` and
+  `tests/test_byte_group_member_var.py`. Encode was unaffected: the selector is derived from
+  the member (PS-551) in all five. Floors: decode +11 in Go, Java and C#; re-encode +11
+  everywhere (Python, Java 2153 -> 2164; C# 2154 -> 2165; Go 2171 -> 2182, plain 2143 -> 2154),
+  all `tlv`.
 - **CR-2026-142 (PS-555): the binary schema form carries its names.** `schema_load_binary`
   used to name each field from its IPSO object (`ipso_to_name`: 3303 was "temperature",
   anything unlisted `field_xxxx`), so a schema reported different keys from its blob than

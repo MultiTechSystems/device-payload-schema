@@ -17,6 +17,7 @@ fields:
         - bit: 0
           fields:
             - name: temperature_target
+              description: "Temperature target"
               type: u16
               transform:
                 - div: 10
@@ -24,6 +25,7 @@ fields:
               unit: "°C"
               senml: {unit: Cel}
             - name: temperature_head
+              description: "Temperature head"
               type: u16
               transform:
                 - div: 10
@@ -33,9 +35,11 @@ fields:
         - bit: 1
           fields:
             - name: battery_voltage
+              description: "Battery voltage"
               type: u16
               div: 1000
               unit: "V"
+              semantic: "battery"
 test_vectors:
   - name: vendor_reference_1
     description: "Vendor-published test payload, decoded by the vendor's own decoder"

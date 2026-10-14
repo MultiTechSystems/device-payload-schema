@@ -39,6 +39,7 @@ fields:
               type: u16
               div: 1000
               unit: "V"
+              semantic: "battery"
 
 test_vectors:
   # The word-ordered field's bytes are the vendor-documented pair from

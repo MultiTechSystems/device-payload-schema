@@ -74,7 +74,6 @@ fields:
             unit: "%"
             ipso: {object: 3320, instance: 0, resource: 5700}
             senml: {name: "battery", unit: "/100"}
-            semantic: "battery"
             type: u8
             # raw: readUInt8(bytes[i])
         # TEMPERATURE
@@ -83,7 +82,7 @@ fields:
             unit: "°C"
             ipso: {object: 3303, instance: 0, resource: 5700}
             senml: {name: "temperature", unit: "Cel"}
-            semantic: "temperature"
+            semantic: "air.temperature"
             type: s16
             div: 10
         # DISTANCE

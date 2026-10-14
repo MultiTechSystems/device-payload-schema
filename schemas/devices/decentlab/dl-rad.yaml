@@ -17,9 +17,11 @@ fields:
         - bit: 0
           fields:
             - name: distance
+              description: "Distance"
               type: u16
               unit: "mm"
             - name: temperature
+              description: "Temperature"
               type: u16
               transform:
                 - add: -32768
@@ -27,25 +29,28 @@ fields:
               unit: "°C"
               ipso: {object: 3303, instance: 0, resource: 5700}
               senml: {name: "temperature", unit: "Cel"}
-              semantic: "temperature"
+              semantic: "air.temperature"
             - name: reliability
+              description: "Reliability"
               type: u16
               transform:
                 - add: -32768
                 - div: 100
               unit: "dB"
             - name: status
+              description: "Status"
               type: u16
         - bit: 1
           fields:
             - name: battery_voltage
+              description: "Battery voltage"
               type: u16
               div: 1000
               unit: "V"
 
               ipso: {object: 3316, instance: 0, resource: 5700}
               senml: {name: "battery_voltage", unit: "V"}
-              semantic: "battery.voltage"
+              semantic: "battery"
 test_vectors:
   - name: min_payload_vendor_1
     description: "Vendor-published test payload, decoded by the vendor's own decoder"

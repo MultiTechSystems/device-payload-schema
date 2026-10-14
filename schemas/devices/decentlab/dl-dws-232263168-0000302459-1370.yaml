@@ -57,3 +57,4 @@ fields:
               type: u16
               div: 1000
               unit: "V"
+              semantic: "battery"

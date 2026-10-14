@@ -21,11 +21,13 @@ fields:
             # cannot be read as one field. Reading only the low word also left the
             # high word unconsumed, misaligning every group after it.
             - name: voltage_ratio
+              description: "Voltage ratio"
               type: u32le16
               transform:
                 - div: 16777216
                 - add: -0.5
             - name: thermistor_resistance
+              description: "Thermistor resistance"
               type: number
               unit: "Ω"
               senml: {unit: Ohm}
@@ -60,9 +62,11 @@ fields:
               ref: $_ln_thermistor_resistance
               polynomial: [0.000000080592, 0.0, 0.000208802, 0.0008271111]
             - name: temperature
+              description: "Temperature"
               type: number
               unit: "°C"
               senml: {unit: Cel}
+              semantic: "air.temperature"
               compute:
                 op: div
                 a: 1
@@ -72,9 +76,11 @@ fields:
         - bit: 1
           fields:
             - name: battery_voltage
+              description: "Battery voltage"
               type: u16
               div: 1000
               unit: "V"
+              semantic: "battery"
 
 test_vectors:
   # Both payloads are the vendor decoder's own examples (the `main()` in

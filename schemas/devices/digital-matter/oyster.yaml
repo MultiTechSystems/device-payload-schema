@@ -17,7 +17,7 @@ ports:
         description: "Latitude in degrees (WGS84)"
         ipso: {object: 3336, instance: 0, resource: 5514}
         senml: {unit: "lat"}
-        semantic: "location.latitude"
+        semantic: "position.latitude"
         
       - name: longitude
         type: s32
@@ -26,7 +26,7 @@ ports:
         description: "Longitude in degrees (WGS84)"
         ipso: {object: 3336, instance: 0, resource: 5515}
         senml: {unit: "lon"}
-        semantic: "location.longitude"
+        semantic: "position.longitude"
         
       - byte_group:
           size: 1
@@ -49,7 +49,6 @@ ports:
         description: "Heading (0-360°)"
         ipso: {object: 3332}
         senml: {unit: "deg"}
-        semantic: "location.heading"
         
       - name: speed
         type: u8
@@ -57,7 +56,6 @@ ports:
         description: "Speed in km/h"
         ipso: {object: 3346}
         senml: {unit: "km/h"}
-        semantic: "location.speed"
         
       - name: battery
         type: u8
@@ -66,7 +64,7 @@ ports:
         description: "Battery voltage"
         ipso: {object: 3316}
         senml: {unit: "V"}
-        semantic: "battery.voltage"
+        semantic: "battery"
 
   2:
     description: "Downlink ACK"
@@ -102,7 +100,7 @@ ports:
         description: "Latitude in degrees (WGS84)"
         ipso: {object: 3336, instance: 0, resource: 5514}
         senml: {unit: "lat"}
-        semantic: "location.latitude"
+        semantic: "position.latitude"
         
       - name: longitude_raw
         type: s24
@@ -116,7 +114,7 @@ ports:
         description: "Longitude in degrees (WGS84)"
         ipso: {object: 3336, instance: 0, resource: 5515}
         senml: {unit: "lon"}
-        semantic: "location.longitude"
+        semantic: "position.longitude"
         
       - byte_group:
           size: 1
@@ -136,7 +134,6 @@ ports:
         description: "Heading (0-315° in 45° steps)"
         ipso: {object: 3332}
         senml: {unit: "deg"}
-        semantic: "location.heading"
         
       - name: speed
         type: number
@@ -146,7 +143,6 @@ ports:
         description: "Speed in km/h (0-155 in steps of 5)"
         ipso: {object: 3346}
         senml: {unit: "km/h"}
-        semantic: "location.speed"
         
       - name: battery
         type: u8
@@ -155,7 +151,7 @@ ports:
         description: "Battery voltage"
         ipso: {object: 3316}
         senml: {unit: "V"}
-        semantic: "battery.voltage"
+        semantic: "battery"
         
       - byte_group:
           size: 1

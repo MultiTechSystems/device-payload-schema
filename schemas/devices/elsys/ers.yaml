@@ -15,11 +15,13 @@ fields:
             div: 10
             unit: "°C"
             senml: {unit: Cel}
+            semantic: "air.temperature"
         0x02:
           - name: humidity
             type: u8
             unit: "%"
             senml: {unit: "%RH"}
+            semantic: "air.relativeHumidity"
         0x03:
           - name: x
             type: s8
@@ -32,13 +34,16 @@ fields:
             type: u16
             unit: "lux"
             senml: {unit: lx}
+            semantic: "air.lightIntensity"
         0x05:
           - name: motion
             type: u8
+            semantic: "action.motion.count"
         0x06:
           - name: co2
             type: u16
             unit: "ppm"
+            semantic: "air.co2"
         0x07:
           - name: vdd
             type: u16
@@ -53,6 +58,7 @@ fields:
             div: 10000
             unit: "°"
             senml: {unit: lat}
+            semantic: "position.latitude"
           - name: long
             type: s24
             div: 10000
@@ -102,6 +108,7 @@ fields:
             type: u32
             div: 1000
             unit: "hPa"
+            semantic: "air.pressure"
         0x15:
           - name: soundPeak
             type: u8

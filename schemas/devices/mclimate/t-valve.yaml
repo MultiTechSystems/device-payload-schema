@@ -43,3 +43,4 @@ fields:
     mult: 0.008
     add: 1.6
     unit: "V"
+    semantic: "battery"
