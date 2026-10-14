@@ -33,10 +33,10 @@ count that matters is how many vectors the C interpreter *decodes correctly*, ag
 many the corpus holds. Everything else is a reason it could not be asked.
 
 The expressible subset is what the struct API can build today: plain integers and floats,
-`bool`, a `uN[a:b]` or `sN[a:b]` bit range, `skip`, `ascii`/`hex`/`bytes`, `enum`, a `lookup` table, and
-the `mult`/`div`/`add` modifiers. A construct outside it is named in the skip reasons rather
-than approximated - an approximated schema would report a pass for something the interpreter
-cannot actually do.
+`bool`, a `uN[a:b]` or `sN[a:b]` bit range, `skip`, `ascii`/`hex`/`bytes`, `enum`, a `lookup` table,
+the `mult`/`div`/`add` modifiers, and a `checksum` on an unsigned integer (CR-2026-174). A
+construct outside it is named in the skip reasons rather than approximated - an approximated
+schema would report a pass for something the interpreter cannot actually do.
 """
 
 import argparse
@@ -250,8 +250,47 @@ def field_source(field, schema_endian):
                 return None, f"{key} is not a literal number"
             lines.append(f"    {setter}(&f, {float(field[key])!r});")
 
+    if "checksum" in field:
+        built, reason = checksum_source(field["checksum"])
+        if built is None:
+            return None, reason
+        lines.extend(built)
+
     lines.append("    schema_add_field(s, &f);")
     return lines, None
+
+
+#: The keys of a `checksum:` mapping field_set_checksum() takes (PS-585).
+CHECKSUM_KEYS = ("algo", "seed", "from", "on_mismatch")
+
+
+def checksum_source(spec):
+    """The C that declares a field's checksum (CR-2026-174), or (None, reason).
+
+    field_set_checksum() applies PS-585's rules on the field's type and the mapping's
+    values, and its refusal is a load error. Whether the mapping is one, and has no other
+    key, are the two rules about the mapping as written, so they are this harness's to
+    check; no corpus schema breaks either, and one that did is named here rather than
+    built without the key."""
+    if not isinstance(spec, dict):
+        return None, "a checksum that is not a mapping (PS-585)"
+    extra = [k for k in spec if k not in CHECKSUM_KEYS and k != "description"
+             and not str(k).startswith("x-")]
+    if extra:
+        return None, f"a checksum key {extra[0]!r} the struct API has no argument for"
+    seed, start = spec.get("seed"), spec.get("from", 0)
+    for value in (seed, start):
+        if value is not None and (isinstance(value, bool) or not isinstance(value, int)):
+            return None, "a checksum seed or from that is not an integer"
+    algo, on_mismatch = spec.get("algo"), spec.get("on_mismatch")
+    return [
+        "    if (field_set_checksum(&f, "
+        f"{c_string(algo) if algo is not None else 'NULL'}, "
+        f"{'true' if seed is not None else 'false'}, {int(seed or 0)}L, {int(start)}L, "
+        f"{c_string(on_mismatch) if on_mismatch is not None else 'NULL'}, "
+        "load_error, sizeof(load_error)) != SCHEMA_OK)",
+        "        load_failed = SCHEMA_ERR_PARSE;",
+    ], None
 
 
 
@@ -662,6 +701,14 @@ static void emit(const char* schema, const char* vector,
                     printf("I\\t%s\\t%lld\\n", key, (long long)d->value.i64);
                 break;
         }
+    }
+    /* PS-586 (CR-2026-174): a checksum declared `on_mismatch: warn` that did not match is
+     * reported as numbers; the text is rendered from them and the payload. A field's own
+     * warning, so before PS-472's. */
+    {
+        char text[160];
+        if (schema_checksum_warning(&s, &r, payload, (size_t)len, text, sizeof(text)))
+            printf("W\\t%s\\n", text);
     }
     /* PS-472. The interpreter has no warning list; it reports the leftover bytes as two
      * numbers, and this renders them as the warning the other five would give, so a

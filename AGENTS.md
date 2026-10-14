@@ -232,10 +232,10 @@ implementation has a runner that reads the same YAML and the same vectors:
 
 | Implementation | Runner | Decode floor | Re-encode floor |
 |---|---|---|---|
-| Python | `tests/test_corpus_conformance.py` | every vector | 2199 |
-| Go | `go/schema/corpus_conformance_test.go` | 2801 | 2217 (plain API 2189) |
-| C# | `dotnet/PayloadSchema.Tests/CorpusConformanceTests.cs` | 2801 | 2200 |
-| Java | `bindings/java/.../CorpusConformanceTest.java` | 2801 | 2199 |
+| Python | `tests/test_corpus_conformance.py` | every vector | 2205 |
+| Go | `go/schema/corpus_conformance_test.go` | 2809 | 2223 (plain API 2195) |
+| C# | `dotnet/PayloadSchema.Tests/CorpusConformanceTests.cs` | 2809 | 2206 |
+| Java | `bindings/java/.../CorpusConformanceTest.java` | 2809 | 2205 |
 | C | `tools/c-corpus-harness.py` (builds each expressible schema through the struct API) | 575 of 575 attempted | n/a |
 
 These figures move with every schema added. `make check-floors` prints each floor beside
@@ -824,10 +824,10 @@ exercised to the best-covered part of the project:
 
 | | Runner | Round-trips |
 |---|---|---|
-| Python | `tests/test_encode_round_trip.py` | 2199 |
-| Go | `go/schema/corpus_encode_test.go` | 2217 (plain 2189) |
-| Java | `bindings/java/.../CorpusEncodeRoundTripTest.java` | 2199 |
-| C# | `dotnet/.../CorpusEncodeRoundTripTests.cs` | 2200 |
+| Python | `tests/test_encode_round_trip.py` | 2205 |
+| Go | `go/schema/corpus_encode_test.go` | 2223 (plain 2195) |
+| Java | `bindings/java/.../CorpusEncodeRoundTripTest.java` | 2205 |
+| C# | `dotnet/.../CorpusEncodeRoundTripTests.cs` | 2206 |
 | C | `src/test_encoder.c`, built by `make test-c` (unit tests, not a corpus round trip) | n/a |
 
 - **A name may be an object under one tag and a scalar under another, and a tlv encoder
@@ -3331,6 +3331,63 @@ improved. The Go, Java and C# corpus runners write per-vector reports only when
     -> 2166, C# 2154 -> 2167, Go 2171 -> 2184, plain 2143 -> 2156), `match` 160 -> 173, every vector
     round-tripping.
 
+
+- **CR-2026-174 (PS-585 to PS-587; la-payload-schema main 4203c12, for 0.5.7): checksum
+  fields.** A `uN` field may declare `checksum: {algo, seed?, from?, on_mismatch?}`: `sum8`,
+  `xor8` (both seeded, default 0), `crc8/smbus` or `crc16/kermit`, over the frame's bytes from
+  `from` to the byte before the field.
+  - **Load (PS-585)**, the prototype's `check_checksum` text and order, first failure only:
+    a mapping, its keys (PS-448, without the prototype's "did you mean" hint), an unsigned
+    type (aliases accepted; a bit range is not one), a known `algo`, a wide enough type,
+    `seed` only on sum8/xor8 and a byte, `from` >= 0, `on_mismatch` error|warn. Python
+    `checksum_field_errors`/`checksum_errors` (from `schema_iterator_errors`, so the
+    validator and the TS013 generator too), Go `checkChecksum` (`cr174.go`, from
+    `checkFieldRules`), Java `Checksum.check` (from `parseRaw`), C# `Checksum.Check` (from
+    `ParseRoot`), C `field_set_checksum`. Vocabulary: a field key and a `checksum` context;
+    closed in `payload-schema.json`.
+  - **Decode (PS-586):** compared on the raw value read, before any modifier; `from` is an
+    offset into the payload being decoded, so one in a match case counts the discriminator
+    before it. A mismatch is `Field '{name}': {algo} over bytes {from} to {p-1} is 0x{c:X},
+    but the frame carries 0x{v:X} (PS-586)`, an error verbatim (Python re-raises it from a
+    nested list as a FieldError) or with `warn` a warning; `from` past the field is
+    `... the checksum range starts at byte {from}, after the field at byte {p} (PS-585)`.
+    Python `checksum_mismatch` in `_decode_field_inner`, the codec's `checkChecksum`, Go
+    `verifyChecksum`, Java and C# in the uN case of `decodeFieldBody`/`DecodeFieldBody`, C
+    `schema_checksum_check` (warn mode is `decoded_field_t.checksum_mismatch` and
+    `decode_result_t.checksum_warnings`, rendered by `schema_checksum_warning()`; C has no
+    text warning list, so only the first is rendered).
+  - **Encode (PS-587):** never taken from the input (an input value, internal or not, is
+    ignored) and never required (a tlv case claims it optionally). Written as zeros and
+    filled once the whole frame is known, earliest first, so an outer check covers an inner
+    one: Python `_checksum_placeholder` + `fill_checksums` (placeholders ride `Frame` and
+    `FrameBuffer` like peeks), the runtime's `encChecksumPlaceholder`/`encFillChecksums`
+    (an array's `ck`), Go `placeChecksum`/`fillChecksums` (one buffer, absolute positions),
+    Java and C# `FrameMeta` checksums with `fillChecksums`/`Fill`, C `schema_place_checksum`/
+    `schema_fill_checksums`. Rejected as `Field '{name}': the bytes its checksum covers are
+    not all written when it is reached (PS-587)` where peek bits are pending, where `from`
+    is past the field, and **inside a tlv entry or a repeat element or trailer**, which are
+    encoded apart from the frame (the prototype's sub-context departure, applied to
+    encoding). Measured before: Python, Go, Java, C#, the codec and C all ignored the key -
+    a bad check value decoded with success, and encode took the value from the input
+    (`Missing required field`, or PS-434 for `_crc`); C's `schema_binary.py` dropped it.
+  - **C:** implemented in the struct API in existing padding (`field_def_t` 1640 and
+    `schema_t` 52536 bytes, unchanged); the binary form refuses `checksum` (PS-446). The
+    fixture is port-based, which the harness skips; split per port it passes 3 of 7, the
+    rest failing on C's uppercase, 15-byte-capped `hex` (a C gap, not this CR's).
+  - **Not settled:** a checksum on a `byte_group` member is ignored by Python and refused by
+    C; the spec does not place one there.
+  - **Cases:** `tests/cr-2026-174-cases.yaml` (the prototype's `TestCR2026174Checksum` and
+    the evidence's vendor frames: acrios sum8 from 6, emu crc8/smbus, jooby xor8 0x55, seeed
+    crc16/kermit LE), read by `test_cr_2026_174_cases.py` (reference, validator, codec),
+    Go `cr174_test.go`, Java `CR2026174Test`, C# `CR2026_174Tests`; C selftests in
+    `selftest_schema.c`. `encode-round-trip.py` files a warned mismatch as
+    `checksum-mismatch` (inherent).
+  - **Floors:** fixture `checksum-fields.yaml` (8 vectors, one `expected_error`): decode
+    2801 -> 2809 in Go, Java and C#; re-encode +6 everywhere (Python and Java 2199 -> 2205,
+    C# 2200 -> 2206, Go 2217 -> 2223, plain 2189 -> 2195). Python files it `plain fixed`
+    (185 -> 191); the Go, Java and C# text scans file it `match` (173 -> 179) because
+    `on_mismatch:` contains `match:`. No corpus or registry schema declares the key, so no
+    other vector changed (failing sets diffed in Go, Java and C#).
 
 ## Converting a vendor codec
 

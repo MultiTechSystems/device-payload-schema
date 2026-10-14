@@ -240,6 +240,7 @@ public static class SchemaEncoder
             // (CR-2026-024), so the whole list is walked at once: a run cannot be found
             // by looking at one field in isolation.
             var frame = EncodeWithBitfieldRuns(_fields, data, topLevel: true);
+            var frameMeta = MetaOf(frame);
             output.AddRange(frame);
             if (_result.Errors.Count == 0)
             {
@@ -265,6 +266,26 @@ public static class SchemaEncoder
                             check.Chosen));
                         break;
                     }
+                }
+            }
+
+            if (_result.Errors.Count == 0)
+            {
+                // PS-587 (CR-2026-174): each checksum over the finished frame. One a construct
+                // encoded apart from the frame - a tlv entry, a repeat element - did not reach
+                // it, since the bytes before it were not written when it was.
+                try
+                {
+                    var filled = (byte[])frame.Clone();
+                    Checksum.Fill(filled, frameMeta?.Checksums ?? new List<ChecksumSlot>(), _checksumOpen);
+                    if (_checksumOpen.Count > 0)
+                        throw new FieldErrorException(Checksum.UnwrittenMessage(_checksumOpen[0].Name));
+                    output.Clear();
+                    output.AddRange(filled);
+                }
+                catch (InvalidOperationException e)
+                {
+                    _result.Errors.Add(e.Message);
                 }
             }
 
@@ -359,6 +380,10 @@ public static class SchemaEncoder
             // PS-359: a literal writes no bytes and its key is not required of the input.
             if (field.Type is FieldType.String or FieldType.Boolean && field.Value != null)
                 return Array.Empty<byte>();
+            // PS-587 (CR-2026-174): a checksum is computed over the bytes written, never
+            // taken from the input; its value is filled in when the frame is finished.
+            if (field.Checksum != null)
+                return ChecksumPlaceholder(field, frame);
             // PS-360: `value` on a field that reads bytes is the constant to write,
             // whatever the input supplies.
             if (field.Value != null)
@@ -679,6 +704,32 @@ public static class SchemaEncoder
             _framePending = output.PendingCount;
             _frameMeta = output.Meta();
             return frameBytes;
+        }
+
+        /// <summary>PS-587: the checksums placed and not yet computed (the reference's
+        /// _checksum_open). One left at the end never reached the top-level frame.</summary>
+        readonly List<SchemaField> _checksumOpen = new();
+
+        /// <summary>
+        /// PS-587 (CR-2026-174): the checksum's bytes, zero until the frame is finished
+        /// (<see cref="Checksum.Fill"/>). Bits a peek left pending would be ORed into it, so
+        /// its range is not all written: rejected. The reference's _checksum_placeholder.
+        /// </summary>
+        byte[] ChecksumPlaceholder(SchemaField field, FrameBuffer? frame)
+        {
+            if (frame != null && frame.PendingCount > 0)
+                throw new FieldErrorException(Checksum.UnwrittenMessage(field.Name));
+            int size = Checksum.Width(field.RawType)!.Value / 8;
+            var endian = string.IsNullOrEmpty(field.Endian) ? _endian : field.Endian!;
+            _checksumOpen.Add(field);
+            var bytes = new byte[size];
+            var covered = new byte[size];
+            Array.Fill(covered, (byte)0xFF);
+            _frameBytes = bytes;
+            _framePending = 0;
+            _frameMeta = new FrameMeta(covered, new List<Peek>(),
+                new List<ChecksumSlot> { new(0, field, endian == "little") });
+            return bytes;
         }
 
         // The last field list's bytes and how many at its end are still pending: a
@@ -2049,6 +2100,11 @@ public static class SchemaEncoder
                     sink.Add((f, true));
                     continue;
                 }
+                if (!string.IsNullOrEmpty(f.Name) && !f.Name.StartsWith("_") && f.Checksum != null)
+                {
+                    sink.Add((f, true));        // PS-587: computed, never taken from the input
+                    continue;
+                }
                 if (PayloadName(f) == null) continue;
                 // PS-551 (CR-2026-141): a peek the case's next field writes over is derived
                 // where the input omits it, so the case does not need it given.
@@ -3345,6 +3401,7 @@ internal sealed class FrameBuffer
     // and each bit range or bool placed, for the check where the frame closes.
     readonly List<byte> _covered = new();
     readonly List<Peek> _peeks = new();
+    readonly List<ChecksumSlot> _checksums = new();          // PS-587, as FrameMeta
 
     void Cover(int position, byte[] mask)
     {
@@ -3358,7 +3415,7 @@ internal sealed class FrameBuffer
         int size = _buf.Count + _pending.Count;
         var covered = new byte[size];
         for (int i = 0; i < size && i < _covered.Count; i++) covered[i] = _covered[i];
-        return new FrameMeta(covered, new List<Peek>(_peeks));
+        return new FrameMeta(covered, new List<Peek>(_peeks), new List<ChecksumSlot>(_checksums));
     }
 
     public IReadOnlyList<byte> Pending => _pending;
@@ -3394,7 +3451,10 @@ internal sealed class FrameBuffer
         for (int i = 0; i < data.Length; i++) mask[i] = FrameMeta.CoveredAt(meta, i);
         Cover(offset, mask);
         if (meta != null)
+        {
             foreach (var peek in meta.Peeks) _peeks.Add(peek with { Position = peek.Position + offset });
+            foreach (var slot in meta.Checksums) _checksums.Add(slot with { Position = slot.Position + offset });
+        }
         var merged = new byte[data.Length];
         for (int i = 0; i < data.Length; i++)
             merged[i] = i < shared ? (byte)(data[i] | _pending[i]) : data[i];
@@ -3472,11 +3532,15 @@ internal sealed class FrameMeta
 {
     public byte[] Covered { get; }
     public List<Peek> Peeks { get; }
+    /// <summary>PS-587 (CR-2026-174): each checksum written as a placeholder, computed
+    /// where the whole frame is known (<see cref="Checksum.Fill"/>).</summary>
+    public List<ChecksumSlot> Checksums { get; }
 
-    public FrameMeta(byte[] covered, List<Peek> peeks)
+    public FrameMeta(byte[] covered, List<Peek> peeks, List<ChecksumSlot>? checksums = null)
     {
         Covered = covered;
         Peeks = peeks;
+        Checksums = checksums ?? new List<ChecksumSlot>();
     }
 
     public static byte CoveredAt(FrameMeta? meta, int i)
@@ -3490,7 +3554,8 @@ internal sealed class FrameMeta
         for (int i = 0; i < prefix; i++) covered[i] = 0xFF;
         for (int i = 0; i < bodyLength; i++) covered[prefix + i] = CoveredAt(body, i);
         return new FrameMeta(covered,
-            body.Peeks.Select(p => p with { Position = p.Position + prefix }).ToList());
+            body.Peeks.Select(p => p with { Position = p.Position + prefix }).ToList(),
+            body.Checksums.Select(c => c with { Position = c.Position + prefix }).ToList());
     }
 
     static System.Numerics.BigInteger Read(byte[] frame, int position, int size, bool little)

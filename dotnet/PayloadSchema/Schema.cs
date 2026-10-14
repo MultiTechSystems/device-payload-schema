@@ -135,6 +135,8 @@ public class SchemaField
     public string? Encoding { get; set; }
     /// <summary>`decimal` or `hex` on an ascii field reported as an integer (PS-560).</summary>
     public string? Numeral { get; set; }
+    /// <summary>A check value over the bytes before the field (PS-585 to PS-587, CR-2026-174).</summary>
+    public ChecksumSpec? Checksum { get; set; }
     /// <summary>A computed field written `type: integer` (PS-283); its Type is Number.</summary>
     public bool IntegerResult { get; set; }
     public string RawType { get; set; } = "";

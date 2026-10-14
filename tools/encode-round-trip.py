@@ -91,6 +91,11 @@ The `inherent` reasons, each of which is a decision recorded elsewhere:
                     value, not the payload: a float field of a vector that does not
                     re-encode and reports 0.
 
+  checksum-mismatch A checksum declaring `on_mismatch: warn` did not match its frame, and
+                    the decode warned and reported the rest (PS-586, CR-2026-174). An
+                    encoder computes the check value over the bytes it writes (PS-587), so
+                    the wrong value the frame carried is not in the output.
+
 One reason is *not* inherent and is reported separately, because it is a gap rather than a
 loss:
 
@@ -135,6 +140,7 @@ INHERENT = (
     "null-element",
     "shared-label",
     "negative-zero",
+    "checksum-mismatch",
 )
 
 #: The floating-point types PS-566 covers.
@@ -279,6 +285,8 @@ def classify(decoded, traits, schema=None, port=None):
         for warning in decoded.warnings:
             if any(marker in warning for marker in UNREAD_MARKERS):
                 return "undecoded-bytes"
+            if "(PS-586)" in warning:
+                return "checksum-mismatch"                               # CR-2026-174
     if has_null_element(decoded.data):
         return "null-element"
     for trait in INHERENT + FIXABLE:

@@ -458,6 +458,12 @@ type EncodeContext struct {
 	// current reported object, each with its current entry (CR-2026-165: the names declared
 	// outside a recorded match). Reset for an object and for each repeat element.
 	enclosing []*enclosingList
+	// checksums holds each checksum placeholder written to the frame, filled in when the
+	// frame is finished (PS-587, CR-2026-174); nil in a branch, a tlv entry or a repeat
+	// element, whose bytes are encoded apart from the frame. checksumApart counts the
+	// repeat trailers being encoded, which are apart from it too.
+	checksums     *[]checksumPlace
+	checksumApart int
 }
 
 // enclosingList is one field list on the stack, and the index of the entry being encoded.
@@ -2556,11 +2562,18 @@ func decodeField(field Field, ctx *DecodeContext) (any, error) {
 		value = v
 
 	case TypeByte, TypeUInt, TypeU8, TypeU16, TypeU32, TypeU64, TypeU24:
+		start := ctx.Offset
 		data, err := ctx.Read(length)
 		if err != nil {
 			return nil, err
 		}
 		value = decodeUint(data, endian)
+		if spec := checksumOf(field); spec != nil {
+			// PS-586 (CR-2026-174): the check value against the bytes it covers.
+			if err := ctx.verifyChecksum(field, spec, start, decodeUint(data, endian)); err != nil {
+				return nil, err
+			}
+		}
 		if field.Encoding != "" {
 			// The sentinel is compared on the bits read, before the code is decoded
 			// (PS-427) - a sentinel need not be a valid code word at all.
@@ -4184,6 +4197,7 @@ func (s *Schema) encodeToContextRecord(
 	ctx.Definitions = s.Definitions
 	ctx.order = s.keyOrder
 	ctx.ps564 = &[]remainingCheck{}
+	ctx.checksums = &[]checksumPlace{} // PS-587 (CR-2026-174)
 
 	// Encode header fields first
 	if len(s.Header) > 0 {
@@ -4222,6 +4236,9 @@ func (s *Schema) encodeToContextRecord(
 		return nil, err
 	}
 	if err := ctx.checkRemaining(); err != nil { // PS-564
+		return nil, err
+	}
+	if err := ctx.fillChecksums(); err != nil { // PS-587 (CR-2026-174)
 		return nil, err
 	}
 	if len(ctx.Buffer) == 0 {
@@ -5228,6 +5245,10 @@ func encodeRepeat(field Field, data map[string]any, ctx *EncodeContext, siblings
 	ctx.mergeWarnings(elements)
 	// PS-385: the elements, then the trailer, whose values sit beside the repeat.
 	if len(field.Trailer) > 0 {
+		// PS-587: a trailer is encoded apart from the frame, as the reference's is, so a
+		// checksum in it is rejected.
+		ctx.checksumApart++
+		defer func() { ctx.checksumApart-- }()
 		return encodeFieldsSealed(field.Trailer, data, ctx)
 	}
 	return nil
@@ -5606,6 +5627,15 @@ func encodeFieldList(fields []Field, data map[string]any, ctx *EncodeContext) er
 				length = 1
 			}
 			ctx.writePadding(length) // CR-2026-141: no value
+			continue
+		}
+
+		// PS-587 (CR-2026-174): a checksum is computed over the bytes written, never taken
+		// from the input; its value is filled in when the frame is finished.
+		if spec := checksumOf(field); spec != nil {
+			if err := ctx.placeChecksum(field, spec); err != nil {
+				return err
+			}
 			continue
 		}
 

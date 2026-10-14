@@ -45,6 +45,32 @@ Each integer type has fixed aliases, and no others (PS-049, PS-326); they are ca
 | `u8`, `u16`, `u24`, `u32`, `u64` | `uint8`, `uint16`, `uint24`, `uint32`, `uint64` |
 | `s8`, `s16`, `s24`, `s32`, `s64` | `i8`, `i16`, `i24`, `i32`, `i64` and `int8`, `int16`, `int24`, `int32`, `int64` |
 
+### Checksum Fields
+
+An unsigned integer field may hold a check value over the bytes before it (PS-585 to
+PS-587). It declares `checksum`, a mapping:
+
+| Key | Meaning |
+|-----|---------|
+| `algo` | `sum8` (sum of the bytes, modulo 256), `xor8` (the bytes XORed), `crc8/smbus` (poly 0x07, init 0, not reflected) or `crc16/kermit` (poly 0x1021 reflected, init 0) |
+| `seed` | starting value of `sum8` or `xor8`, 0 to 255 (default 0); not allowed with a CRC |
+| `from` | byte offset in the frame where the covered range starts (default 0) |
+| `on_mismatch` | `error` (default): the decode fails; `warn`: a warning, and the rest is reported |
+
+The covered range runs from `from` to the byte before the field. A decoder compares the
+value read (in the field's type and byte order) with the checksum of that range; an encoder
+computes it over the bytes it wrote and ignores any input value. A checksum inside a tlv
+entry or a repeat element cannot be encoded (its range is not written when it is reached).
+A type other than `uN`, an unknown `algo`, a `seed` with a CRC, or a type too narrow for
+the result (`u8` for `crc16/kermit`) is rejected at load.
+
+```yaml
+- {name: _counter, type: u8}
+- {name: volume, type: u32, div: 1000}
+- {name: _lrc, type: u8, checksum: {algo: xor8, seed: 0x55}}       # Jooby LRC
+- {name: _crc, type: u16, endian: little, checksum: {algo: crc16/kermit}}   # Seeed E5
+```
+
 ### Word-Ordered 32-Bit Types
 
 Some devices send a 32-bit value as two 16-bit units in an order neither `endian`

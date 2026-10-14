@@ -308,6 +308,10 @@ func checkFieldRules(field map[string]any, at string) error {
 	if err := checkNumeral(field); err != nil {
 		return err
 	}
+	// PS-585 (CR-2026-174): a checksum on an unsigned integer wide enough for its algo.
+	if err := checkChecksum(field); err != nil {
+		return err
+	}
 	// PS-510 (CR-2026-102): ipso and senml are mappings.
 	if err := checkAnnotations(field); err != nil {
 		return err

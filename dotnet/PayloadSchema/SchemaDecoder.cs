@@ -519,9 +519,14 @@ public static class SchemaDecoder
             case FieldType.U32:
             case FieldType.U64:
             {
+                int position = ctx.Offset;
                 var data = ctx.Read(length);
                 var unsigned = Helpers.DecodeUint(data, endian);
                 read = unsigned;
+                // PS-586 (CR-2026-174): the check value against the bytes it covers, as read
+                // and before any encoding or modifier.
+                if (field.Checksum != null)
+                    Checksum.Verify(field, ctx.Data, position, unsigned, ctx.Warnings);
                 // PS-427: compared before the code is decoded, so a sentinel that is no
                 // valid codeword (0xFF under bcd) is absent rather than an error.
                 if (field.Encoding != null && field.Sentinel is { Count: > 0 } && SentinelHit(field, read))
