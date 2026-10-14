@@ -17,11 +17,13 @@ fields:
         - bit: 0
           fields:
             - name: water_potential
+              description: "Water potential"
               type: u16
               transform:
                 - div: -10
               unit: "kPa"
             - name: soil_temperature
+              description: "Soil temperature"
               type: u16
               transform:
                 - div: 10
@@ -32,6 +34,7 @@ fields:
         - bit: 1
           fields:
             - name: battery_voltage
+              description: "Battery voltage"
               type: u16
               div: 1000
               unit: "V"

@@ -17,13 +17,16 @@ fields:
         - bit: 0
           fields:
             - name: distance
+              description: "Distance"
               type: u16
               unit: "mm"
             - name: number_of_valid_samples
+              description: "Number of valid samples"
               type: u16
         - bit: 1
           fields:
             - name: battery_voltage
+              description: "Battery voltage"
               type: u16
               div: 1000
               unit: "V"

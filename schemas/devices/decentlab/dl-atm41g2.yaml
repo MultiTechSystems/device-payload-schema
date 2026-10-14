@@ -17,6 +17,7 @@ fields:
         - bit: 0
           fields:
             - name: solar_radiation
+              description: "Solar radiation"
               type: u16
               transform:
                 - div: 10
@@ -24,19 +25,23 @@ fields:
               unit: "W⋅m⁻²"
               senml: {unit: W/m2}
             - name: precipitation
+              description: "Precipitation"
               type: u16
               div: 1000
               unit: "mm"
             - name: lightning_strike_count
+              description: "Lightning strike count"
               type: u16
               add: -32768
               # A count: no unit. The vendor decoder writes 'None' for that, which the
               # converter copied as though it were a unit's name.
             - name: lightning_average_distance
+              description: "Lightning average distance"
               type: u16
               add: -32768
               unit: "km"
             - name: wind_speed
+              description: "Wind speed"
               type: u16
               transform:
                 - div: 100
@@ -45,6 +50,7 @@ fields:
               senml: {unit: m/s}
               semantic: "wind.speed"
             - name: wind_direction
+              description: "Wind direction"
               type: u16
               transform:
                 - div: 10
@@ -53,6 +59,7 @@ fields:
               senml: {unit: deg}
               semantic: "wind.direction"
             - name: maximum_wind_speed
+              description: "Maximum wind speed"
               type: u16
               transform:
                 - div: 100
@@ -60,6 +67,7 @@ fields:
               unit: "m⋅s⁻¹"
               senml: {unit: m/s}
             - name: air_temperature
+              description: "Air temperature"
               type: u16
               transform:
                 - div: 10
@@ -68,12 +76,14 @@ fields:
               senml: {unit: Cel}
               semantic: "air.temperature"
             - name: vapor_pressure
+              description: "Vapor pressure"
               type: u16
               transform:
                 - div: 100
                 - add: -327.68
               unit: "kPa"
             - name: barometric_pressure
+              description: "Barometric pressure"
               type: u16
               transform:
                 - div: 100
@@ -81,6 +91,7 @@ fields:
               unit: "kPa"
               semantic: "air.pressure"
             - name: relative_humidity
+              description: "Relative humidity"
               type: u16
               transform:
                 - div: 10
@@ -89,6 +100,7 @@ fields:
               senml: {unit: "%RH"}
               semantic: "air.relativeHumidity"
             - name: internal_temperature
+              description: "Internal temperature"
               type: u16
               transform:
                 - div: 10
@@ -96,6 +108,7 @@ fields:
               unit: "°C"
               senml: {unit: Cel}
             - name: tilt_angle_x_orientation
+              description: "Tilt angle, X orientation"
               type: u16
               transform:
                 - div: 10
@@ -103,6 +116,7 @@ fields:
               unit: "°"
               senml: {unit: deg}
             - name: tilt_angle_y_orientation
+              description: "Tilt angle, Y orientation"
               type: u16
               transform:
                 - div: 10
@@ -110,6 +124,7 @@ fields:
               unit: "°"
               senml: {unit: deg}
             - name: precipitation_electrical_conductivity
+              description: "Precipitation electrical conductivity"
               type: u16
               add: -32768
               unit: "µS⋅cm⁻¹"
@@ -118,6 +133,7 @@ fields:
             # cannot be read as one field. Reading only the low word also left the
             # high word unconsumed, misaligning every group after it.
             - name: cumulative_precipitation
+              description: "Cumulative precipitation"
               type: u32le16
               transform:
                 - div: 1000
@@ -125,6 +141,7 @@ fields:
         - bit: 1
           fields:
             - name: battery_voltage
+              description: "Battery voltage"
               type: u16
               div: 1000
               unit: "V"

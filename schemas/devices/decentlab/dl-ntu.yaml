@@ -17,8 +17,10 @@ fields:
         - bit: 0
           fields:
             - name: status
+              description: "Status"
               type: u16
             - name: temperature
+              description: "Temperature"
               type: u16
               transform:
                 - add: -32768
@@ -28,14 +30,17 @@ fields:
               senml: {name: "temperature", unit: "Cel"}
               semantic: "air.temperature"
             - name: turbidity_in_ntu
+              description: "Turbidity in NTU"
               type: u16
               div: 10
               unit: "NTU"
             - name: turbidity_in_fnu
+              description: "Turbidity in FNU"
               type: u16
               div: 10
               unit: "FNU"
             - name: turbidity_in_mg_l
+              description: "Turbidity in mg/L"
               type: u16
               div: 10
               unit: "mg⋅L⁻¹"
@@ -43,6 +48,7 @@ fields:
         - bit: 1
           fields:
             - name: battery_voltage
+              description: "Battery voltage"
               type: u16
               div: 1000
               unit: "V"

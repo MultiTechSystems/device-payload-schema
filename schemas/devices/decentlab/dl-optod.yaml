@@ -17,8 +17,10 @@ fields:
         - bit: 0
           fields:
             - name: status
+              description: "Status"
               type: u16
             - name: temperature
+              description: "Temperature"
               type: u16
               transform:
                 - add: -32768
@@ -28,6 +30,7 @@ fields:
               senml: {name: "temperature", unit: "Cel"}
               semantic: "air.temperature"
             - name: oxygen_saturation
+              description: "Oxygen saturation"
               type: u16
               transform:
                 - add: -32768
@@ -35,6 +38,7 @@ fields:
               unit: "%"
               senml: {unit: "/100"}
             - name: oxygen_concentration
+              description: "Oxygen concentration"
               type: u16
               transform:
                 - add: -32768
@@ -42,6 +46,7 @@ fields:
               unit: "mg⋅L⁻¹"
               senml: {unit: mg/l}
             - name: oxygen_concentration_alt
+              description: "Oxygen concentration (alt)"
               type: u16
               transform:
                 - add: -32768
@@ -52,6 +57,7 @@ fields:
         - bit: 1
           fields:
             - name: battery_voltage
+              description: "Battery voltage"
               type: u16
               div: 1000
               unit: "V"

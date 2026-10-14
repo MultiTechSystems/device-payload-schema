@@ -17,11 +17,13 @@ fields:
         - bit: 0
           fields:
             - name: soil_moisture_at_depth_0
+              description: "Soil moisture at depth 0"
               type: u16
               transform:
                 - div: 500
                 - add: -5
             - name: soil_temperature_at_depth_0
+              description: "Soil temperature at depth 0"
               type: u16
               transform:
                 - div: 100
@@ -29,11 +31,13 @@ fields:
               unit: "°C"
               senml: {unit: Cel}
             - name: soil_moisture_at_depth_1
+              description: "Soil moisture at depth 1"
               type: u16
               transform:
                 - div: 500
                 - add: -5
             - name: soil_temperature_at_depth_1
+              description: "Soil temperature at depth 1"
               type: u16
               transform:
                 - div: 100
@@ -41,11 +45,13 @@ fields:
               unit: "°C"
               senml: {unit: Cel}
             - name: soil_moisture_at_depth_2
+              description: "Soil moisture at depth 2"
               type: u16
               transform:
                 - div: 500
                 - add: -5
             - name: soil_temperature_at_depth_2
+              description: "Soil temperature at depth 2"
               type: u16
               transform:
                 - div: 100
@@ -53,11 +59,13 @@ fields:
               unit: "°C"
               senml: {unit: Cel}
             - name: soil_moisture_at_depth_3
+              description: "Soil moisture at depth 3"
               type: u16
               transform:
                 - div: 500
                 - add: -5
             - name: soil_temperature_at_depth_3
+              description: "Soil temperature at depth 3"
               type: u16
               transform:
                 - div: 100
@@ -65,11 +73,13 @@ fields:
               unit: "°C"
               senml: {unit: Cel}
             - name: soil_moisture_at_depth_4
+              description: "Soil moisture at depth 4"
               type: u16
               transform:
                 - div: 500
                 - add: -5
             - name: soil_temperature_at_depth_4
+              description: "Soil temperature at depth 4"
               type: u16
               transform:
                 - div: 100
@@ -77,11 +87,13 @@ fields:
               unit: "°C"
               senml: {unit: Cel}
             - name: soil_moisture_at_depth_5
+              description: "Soil moisture at depth 5"
               type: u16
               transform:
                 - div: 500
                 - add: -5
             - name: soil_temperature_at_depth_5
+              description: "Soil temperature at depth 5"
               type: u16
               transform:
                 - div: 100
@@ -89,11 +101,13 @@ fields:
               unit: "°C"
               senml: {unit: Cel}
             - name: soil_moisture_at_depth_6
+              description: "Soil moisture at depth 6"
               type: u16
               transform:
                 - div: 500
                 - add: -5
             - name: soil_temperature_at_depth_6
+              description: "Soil temperature at depth 6"
               type: u16
               transform:
                 - div: 100
@@ -101,11 +115,13 @@ fields:
               unit: "°C"
               senml: {unit: Cel}
             - name: soil_moisture_at_depth_7
+              description: "Soil moisture at depth 7"
               type: u16
               transform:
                 - div: 500
                 - add: -5
             - name: soil_temperature_at_depth_7
+              description: "Soil temperature at depth 7"
               type: u16
               transform:
                 - div: 100
@@ -115,6 +131,7 @@ fields:
         - bit: 1
           fields:
             - name: battery_voltage
+              description: "Battery voltage"
               type: u16
               div: 1000
               unit: "V"

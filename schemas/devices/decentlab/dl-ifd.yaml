@@ -17,12 +17,14 @@ fields:
         - bit: 0
           fields:
             - name: fruit_size
+              description: "Fruit size"
               type: u16
               div: 100
               unit: "mm"
         - bit: 1
           fields:
             - name: battery_voltage
+              description: "Battery voltage"
               type: u16
               div: 1000
               unit: "V"

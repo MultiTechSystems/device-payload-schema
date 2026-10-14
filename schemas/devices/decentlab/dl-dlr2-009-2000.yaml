@@ -37,6 +37,7 @@ fields:
               transform:
                 - mult: 2000
             - name: thermistor_resistance
+              description: "Thermistor resistance"
               type: number
               compute:
                 op: div
@@ -47,6 +48,7 @@ fields:
             # temperature is a quadratic in that resistance, so `polynomial` states
             # it directly: 0.0000104876 R^2 + 0.23469 R - 245.18.
             - name: temperature
+              description: "Temperature"
               type: number
               ref: $thermistor_resistance
               polynomial: [0.0000104876, 0.23469, -245.18]
@@ -56,6 +58,7 @@ fields:
         - bit: 1
           fields:
             - name: battery_voltage
+              description: "Battery voltage"
               type: u16
               div: 1000
               unit: "V"

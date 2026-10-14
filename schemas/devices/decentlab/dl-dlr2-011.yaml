@@ -17,14 +17,17 @@ fields:
         - bit: 0
           fields:
             - name: ch0_input
+              description: "CH0: Input"
               type: u16
         - bit: 1
           fields:
             - name: ch1_input
+              description: "CH1: Input"
               type: u16
         - bit: 2
           fields:
             - name: battery_voltage
+              description: "Battery voltage"
               type: u16
               div: 1000
               unit: "V"

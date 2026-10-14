@@ -17,10 +17,12 @@ fields:
         - bit: 0
           fields:
             - name: water_depth
+              description: "Water depth"
               type: u16
               add: -32768
               unit: "mm"
             - name: temperature
+              description: "Temperature"
               type: u16
               transform:
                 - add: -32768
@@ -30,13 +32,16 @@ fields:
               senml: {name: "temperature", unit: "Cel"}
               semantic: "air.temperature"
             - name: electrical_conductivity
+              description: "Electrical conductivity"
               type: u16
               unit: "µS⋅cm⁻¹"
             - name: freezing_flag
+              description: "Freezing flag"
               type: u16
         - bit: 1
           fields:
             - name: battery_voltage
+              description: "Battery voltage"
               type: u16
               div: 1000
               unit: "V"

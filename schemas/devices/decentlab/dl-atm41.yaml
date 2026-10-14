@@ -17,11 +17,13 @@ fields:
         - bit: 0
           fields:
             - name: solar_radiation
+              description: "Solar radiation"
               type: u16
               add: -32768
               unit: "W⋅m⁻²"
               senml: {unit: W/m2}
             - name: precipitation
+              description: "Precipitation"
               type: u16
               transform:
                 - add: -32768
@@ -29,13 +31,16 @@ fields:
               unit: "mm"
               semantic: "rain.cumulative"
             - name: lightning_strike_count
+              description: "Lightning strike count"
               type: u16
               add: -32768
             - name: lightning_average_distance
+              description: "Lightning average distance"
               type: u16
               add: -32768
               unit: "km"
             - name: wind_speed
+              description: "Wind speed"
               type: u16
               transform:
                 - add: -32768
@@ -44,6 +49,7 @@ fields:
               senml: {unit: m/s}
               semantic: "wind.speed"
             - name: wind_direction
+              description: "Wind direction"
               type: u16
               transform:
                 - add: -32768
@@ -53,6 +59,7 @@ fields:
               senml: {name: "wind_direction", unit: "deg"}
               semantic: "wind.direction"
             - name: maximum_wind_speed
+              description: "Maximum wind speed"
               type: u16
               transform:
                 - add: -32768
@@ -60,6 +67,7 @@ fields:
               unit: "m⋅s⁻¹"
               senml: {unit: m/s}
             - name: air_temperature
+              description: "Air temperature"
               type: u16
               transform:
                 - add: -32768
@@ -69,12 +77,14 @@ fields:
               senml: {name: "air_temperature", unit: "Cel"}
               semantic: "air.temperature"
             - name: vapor_pressure
+              description: "Vapor pressure"
               type: u16
               transform:
                 - add: -32768
                 - div: 100
               unit: "kPa"
             - name: atmospheric_pressure
+              description: "Atmospheric pressure"
               type: u16
               transform:
                 - add: -32768
@@ -82,6 +92,7 @@ fields:
               unit: "kPa"
               semantic: "air.pressure"
             - name: relative_humidity
+              description: "Relative humidity"
               type: u16
               transform:
                 - add: -32768
@@ -91,6 +102,7 @@ fields:
               senml: {name: "relative_humidity", unit: "%RH"}
               semantic: "air.relativeHumidity"
             - name: sensor_temperature_internal
+              description: "Sensor temperature (internal)"
               type: u16
               transform:
                 - add: -32768
@@ -99,6 +111,7 @@ fields:
               ipso: {object: 3303, instance: 1, resource: 5700}
               senml: {name: "sensor_temperature_internal", unit: "Cel"}
             - name: x_orientation_angle
+              description: "X orientation angle"
               type: u16
               transform:
                 - add: -32768
@@ -106,6 +119,7 @@ fields:
               unit: "°"
               senml: {unit: deg}
             - name: y_orientation_angle
+              description: "Y orientation angle"
               type: u16
               transform:
                 - add: -32768
@@ -113,12 +127,14 @@ fields:
               unit: "°"
               senml: {unit: deg}
             - name: compass_heading
+              description: "Compass heading"
               type: u16
               add: -32768
               unit: "°"
               ipso: {object: 3332, instance: 1, resource: 5700}
               senml: {name: "compass_heading", unit: "deg"}
             - name: north_wind_speed
+              description: "North wind speed"
               type: u16
               transform:
                 - add: -32768
@@ -126,6 +142,7 @@ fields:
               unit: "m⋅s⁻¹"
               senml: {unit: m/s}
             - name: east_wind_speed
+              description: "East wind speed"
               type: u16
               transform:
                 - add: -32768
@@ -135,6 +152,7 @@ fields:
         - bit: 1
           fields:
             - name: battery_voltage
+              description: "Battery voltage"
               type: u16
               div: 1000
               unit: "V"

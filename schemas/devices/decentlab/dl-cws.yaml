@@ -17,6 +17,7 @@ fields:
         - bit: 0
           fields:
             - name: surface_temperature
+              description: "Surface temperature"
               type: u16
               transform:
                 - div: 100
@@ -24,6 +25,7 @@ fields:
               unit: "°C"
               senml: {unit: Cel}
             - name: air_temperature
+              description: "Air temperature"
               type: u16
               transform:
                 - div: 100
@@ -31,6 +33,7 @@ fields:
               unit: "°C"
               senml: {unit: Cel}
             - name: air_humidity
+              description: "Air humidity"
               type: u16
               transform:
                 - div: 100
@@ -39,6 +42,7 @@ fields:
               senml: {unit: "%RH"}
               semantic: "air.relativeHumidity"
             - name: dew_point
+              description: "Dew point"
               type: u16
               transform:
                 - div: 100
@@ -46,12 +50,14 @@ fields:
               unit: "°C"
               senml: {unit: Cel}
             - name: angle
+              description: "Angle"
               type: u16
               transform:
                 - add: -32768
               unit: "°"
               senml: {unit: deg}
             - name: sensor_temperature
+              description: "Sensor temperature"
               type: u16
               transform:
                 - div: 100
@@ -61,6 +67,7 @@ fields:
         - bit: 1
           fields:
             - name: battery_voltage
+              description: "Battery voltage"
               type: u16
               div: 1000
               unit: "V"

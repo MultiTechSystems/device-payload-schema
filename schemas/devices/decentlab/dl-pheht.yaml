@@ -17,8 +17,10 @@ fields:
         - bit: 0
           fields:
             - name: status
+              description: "Status"
               type: u16
             - name: temperature
+              description: "Temperature"
               type: u16
               transform:
                 - add: -32768
@@ -28,17 +30,20 @@ fields:
               senml: {name: "temperature", unit: "Cel"}
               semantic: "air.temperature"
             - name: ph
+              description: "pH"
               type: u16
               transform:
                 - add: -32768
                 - div: 100
             - name: redox
+              description: "Redox"
               type: u16
               transform:
                 - add: -32768
                 - div: 10
               unit: "mV"
             - name: ph_mv
+              description: "pH-mV"
               type: u16
               transform:
                 - add: -32768
@@ -47,6 +52,7 @@ fields:
         - bit: 1
           fields:
             - name: battery_voltage
+              description: "Battery voltage"
               type: u16
               div: 1000
               unit: "V"

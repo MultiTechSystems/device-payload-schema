@@ -17,8 +17,10 @@ fields:
         - bit: 0
           fields:
             - name: status
+              description: "Status"
               type: u16
             - name: temperature
+              description: "Temperature"
               type: u16
               transform:
                 - add: -32768
@@ -28,22 +30,26 @@ fields:
               senml: {name: "temperature", unit: "Cel"}
               semantic: "air.temperature"
             - name: sludge_blanket
+              description: "Sludge blanket"
               type: u16
               div: 100
               unit: "%"
               senml: {unit: "/100"}
             - name: suspended_solid
+              description: "Suspended solid"
               type: u16
               div: 100
               unit: "g⋅L⁻¹"
               senml: {unit: g/l}
             - name: turbidity
+              description: "Turbidity"
               type: u16
               div: 10
               unit: "FAU"
         - bit: 1
           fields:
             - name: battery_voltage
+              description: "Battery voltage"
               type: u16
               div: 1000
               unit: "V"

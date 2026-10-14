@@ -17,6 +17,7 @@ fields:
         - bit: 0
           fields:
             - name: temperature
+              description: "Temperature"
               type: u16
               transform:
                 - add: -32768
@@ -28,6 +29,7 @@ fields:
         - bit: 1
           fields:
             - name: battery_voltage
+              description: "Battery voltage"
               type: u16
               div: 1000
               unit: "V"

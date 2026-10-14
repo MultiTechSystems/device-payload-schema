@@ -17,12 +17,14 @@ fields:
         - bit: 0
           fields:
             - name: photosynthetically_active_radiation
+              description: "Photosynthetically active radiation"
               type: u16
               transform:
                 - add: -32768
                 - div: 10
               unit: "µmol⋅m⁻²⋅s⁻¹"
             - name: air_temperature
+              description: "Air temperature"
               type: u16
               transform:
                 - add: -32768
@@ -32,6 +34,7 @@ fields:
               senml: {name: "air_temperature", unit: "Cel"}
               semantic: "air.temperature"
             - name: air_humidity
+              description: "Air humidity"
               type: u16
               transform:
                 - add: -32768
@@ -41,6 +44,7 @@ fields:
               senml: {name: "air_humidity", unit: "%RH"}
               semantic: "air.relativeHumidity"
             - name: co2_concentration
+              description: "CO2 concentration"
               type: u16
               transform:
                 - add: -32768
@@ -50,6 +54,7 @@ fields:
               senml: {name: "co2_concentration", unit: "ppm"}
               semantic: "air.co2"
             - name: atmospheric_pressure
+              description: "Atmospheric pressure"
               type: u16
               transform:
                 - add: -32768
@@ -57,12 +62,14 @@ fields:
               unit: "kPa"
               semantic: "air.pressure"
             - name: vapor_pressure_deficit
+              description: "Vapor pressure deficit"
               type: u16
               transform:
                 - add: -32768
                 - div: 100
               unit: "kPa"
             - name: dew_point
+              description: "Dew point"
               type: u16
               transform:
                 - add: -32768
@@ -72,6 +79,7 @@ fields:
         - bit: 1
           fields:
             - name: battery_voltage
+              description: "Battery voltage"
               type: u16
               div: 1000
               unit: "V"

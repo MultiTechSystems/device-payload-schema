@@ -17,6 +17,7 @@ fields:
         - bit: 0
           fields:
             - name: pressure
+              description: "Pressure"
               type: u16
               transform:
                 - div: 8192
@@ -24,6 +25,7 @@ fields:
               unit: "bar"
               semantic: "air.pressure"
             - name: temperature
+              description: "Temperature"
               type: u16
               transform:
                 - div: 256
@@ -34,6 +36,7 @@ fields:
         - bit: 1
           fields:
             - name: battery_voltage
+              description: "Battery voltage"
               type: u16
               div: 1000
               unit: "V"

@@ -17,6 +17,7 @@ fields:
         - bit: 0
           fields:
             - name: air_temperature
+              description: "Air temperature"
               type: u16
               transform:
                 - mult: 0.002670328831921874
@@ -25,6 +26,7 @@ fields:
               senml: {unit: Cel}
               semantic: "air.temperature"
             - name: air_humidity
+              description: "Air humidity"
               type: u16
               transform:
                 - mult: 0.0015259021896696424
@@ -35,6 +37,7 @@ fields:
         - bit: 1
           fields:
             - name: surface_temperature
+              description: "Surface temperature"
               type: u16
               transform:
                 - div: 10
@@ -42,6 +45,7 @@ fields:
               unit: "°C"
               senml: {unit: Cel}
             - name: head_temperature
+              description: "Head temperature"
               type: u16
               transform:
                 - div: 10
@@ -51,6 +55,7 @@ fields:
         - bit: 2
           fields:
             - name: battery_voltage
+              description: "Battery voltage"
               type: u16
               div: 1000
               unit: "V"
