@@ -423,7 +423,7 @@ func TestEncodeReportsUndeclaredPort(t *testing.T) {
 	if err == nil {
 		t.Fatalf("encoded % x on undeclared port 7, want an error", payload)
 	}
-	if !strings.Contains(err.Error(), "no port definition") {
+	if !strings.Contains(err.Error(), "FPort 7 matches no port entry") {
 		t.Errorf("error = %v, want it to name the missing port definition", err)
 	}
 
@@ -468,7 +468,8 @@ func TestEncodeToResultCarriesWarningsOnPortedSchema(t *testing.T) {
 	}
 
 	// humidity is omitted: rejected on the default port's path as anywhere (PS-551).
-	result, err := s.EncodeToResult(map[string]any{"temperature": 100}, 0)
+	// FPort 7 resolves to default; with no FPort, PS-581 never chooses default.
+	result, err := s.EncodeToResult(map[string]any{"temperature": 100}, 7)
 	if err == nil || !strings.Contains(err.Error(), "Missing required field: humidity") || result != nil {
 		t.Errorf("EncodeToResult = %v, %v, want the rejection naming humidity", result, err)
 	}

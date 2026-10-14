@@ -314,7 +314,7 @@ ports:
         )
         assert not result.success
         assert result.errors == [
-            "fPort 1 is declared direction:uplink; message direction is downlink"
+            "FPort 1 is declared direction:uplink and takes no downlink to encode (PS-581)"
         ]
 
     def test_nothing_is_encoded(self):
@@ -324,7 +324,7 @@ ports:
         # the input omits does - it would add PS-551's "Missing required field".
         result = interpreter(self.ENCODABLE).encode({}, fPort=1, direction="downlink")
         assert result.errors == [
-            "fPort 1 is declared direction:uplink; message direction is downlink"
+            "FPort 1 is declared direction:uplink and takes no downlink to encode (PS-581)"
         ]
 
     def test_no_payload_is_produced(self):
@@ -339,6 +339,14 @@ ports:
             {"reporting_interval": 60}, fPort=2, direction="uplink"
         )
         assert not result.success
+        assert result.errors == [
+            "fPort 2 is declared direction:downlink; message direction is uplink"
+        ]
+
+    def test_nothing_is_encoded_for_an_uplink_of_a_downlink_port(self):
+        # As test_nothing_is_encoded: an encoder that went on would add PS-551's
+        # "Missing required field" to the direction error.
+        result = interpreter(self.ENCODABLE).encode({}, fPort=2, direction="uplink")
         assert result.errors == [
             "fPort 2 is declared direction:downlink; message direction is uplink"
         ]

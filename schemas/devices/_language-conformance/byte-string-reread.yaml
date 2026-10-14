@@ -1,0 +1,109 @@
+# A `bytes`, `hex` or `ascii` field declaring `consume: 0` reads and reports its span and
+# leaves the read position where it was, so the fields after it read the same bytes again
+# (PS-588, CR-2026-175). Its length may be `remaining`, beside a field that also reads to
+# the end (PS-015). Every implementation used to advance past the span anyway, so the
+# field after it read the wrong bytes or ran past the end. An encoder writes nothing for
+# it, and a value given for it must equal what it decodes from the bytes the other
+# fields write (PS-589), so each vector round-trips.
+name: probe_byte_string_reread
+endian: big
+ports:
+  1:
+    fields:
+    - name: raw
+      type: bytes
+      length: remaining
+      consume: 0
+    - name: temperature
+      type: s16
+      div: 10
+    - name: humidity
+      type: u8
+  2:
+    fields:
+    - name: lead
+      type: u8
+    - name: cmd
+      type: hex
+      length: 2
+      consume: 0
+    - name: word
+      type: u16
+  3:
+    fields:
+    - name: tag
+      type: ascii
+      length: 3
+      consume: 0
+    - name: a
+      type: u8
+    - name: b
+      type: u8
+    - name: c
+      type: u8
+  4:
+    fields:
+    - name: whole
+      type: bytes
+      length: remaining
+      consume: 0
+      format: hex:upper
+      separator: ":"
+    - name: rest
+      type: bytes
+      length: remaining
+test_vectors:
+- name: whole_frame_reported_first
+  source: generated
+  fPort: 1
+  payload: "00 D7 5A"
+  expected:
+    raw: "00d75a"
+- name: field_after_the_whole_frame_reads_from_the_start
+  source: generated
+  fPort: 1
+  payload: "00 D7 5A"
+  expected:
+    temperature: 21.5
+- name: last_field_after_the_whole_frame
+  source: generated
+  fPort: 1
+  payload: "00 D7 5A"
+  expected:
+    humidity: 90
+- name: mid_frame_span
+  source: generated
+  fPort: 2
+  payload: "01 02 03"
+  expected:
+    cmd: "0203"
+- name: field_after_a_mid_frame_span
+  source: generated
+  fPort: 2
+  payload: "01 02 03"
+  expected:
+    word: 515
+- name: text_span_drops_trailing_padding
+  source: generated
+  fPort: 3
+  payload: "41 42 00"
+  expected:
+    tag: "AB"
+- name: field_after_a_text_span
+  source: generated
+  fPort: 3
+  payload: "41 42 00"
+  expected:
+    b: 66
+- name: formatted_whole_frame
+  source: generated
+  fPort: 4
+  payload: "0A 1B"
+  expected:
+    whole: "0A:1B"
+- name: remainder_read_again
+  source: generated
+  fPort: 4
+  payload: "0A 1B"
+  expected:
+    rest: "0a1b"

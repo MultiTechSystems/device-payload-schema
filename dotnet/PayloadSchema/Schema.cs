@@ -255,6 +255,15 @@ public class SchemaField
     // Bool
     public int Bit { get; set; }
     public int Consume { get; set; }
+    /// <summary>Whether <c>consume</c> was written, so <c>consume: 0</c> differs from no
+    /// <c>consume</c> at all (CR-2026-175).</summary>
+    public bool ConsumeDeclared { get; set; }
+
+    /// <summary>A <c>bytes</c>, <c>hex</c> or <c>ascii</c> field declaring <c>consume: 0</c>
+    /// (PS-588): it reports its span and leaves the read position, and an encoder writes
+    /// nothing for it (PS-589).</summary>
+    public bool IsEcho => ConsumeDeclared && Consume == 0
+        && (Type == FieldType.Bytes || Type == FieldType.Hex || Type == FieldType.Ascii);
 
     // Enum
     public string? Base { get; set; }
@@ -359,6 +368,8 @@ public class PayloadSchemaDefinition
     public string? Direction { get; set; }
     public List<SchemaField> Fields { get; set; } = new();
     public Dictionary<string, PortDef>? Ports { get; set; }
+    /// <summary>The document's top-level fPort (PS-458), 0 where it declares none.</summary>
+    public int DocFPort { get; set; }
     public Dictionary<string, DefinitionDef>? Definitions { get; set; }
     /// <summary>Names declared only inside some repeat's elements (PS-368).</summary>
     internal HashSet<string> RepeatOnlyNames { get; set; } = new();

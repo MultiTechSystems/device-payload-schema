@@ -33,7 +33,7 @@ test_vectors:
       schema: probe_name_from_var
       fields:
         channel_id: {type: u8, reports: integer}
-        channel_3_reading: {type: u8, reports: integer, unit: V}
+        channel_3_reading: {type: u8, reports: integer, unit: V, display_unit: V}
   - name: a_different_channel_moves_the_key
     description: "The key is built from the payload, so channel 7 names a different one"
     payload: "072A"
@@ -46,4 +46,4 @@ test_vectors:
       schema: probe_name_from_var
       fields:
         channel_id: {type: u8, reports: integer}
-        channel_7_reading: {type: u8, reports: integer, unit: V}
+        channel_7_reading: {type: u8, reports: integer, unit: V, display_unit: V}
