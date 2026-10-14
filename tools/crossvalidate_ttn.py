@@ -91,6 +91,16 @@ def find_codec(vendor_dir, stem):
     for candidate in sorted(vendor_dir.glob("*-codec-*.yaml")):
         if candidate.stem.replace("-codec-", "-", 1) == stem:
             return candidate
+    # Some vendors name the file without the "-codec" infix: pallidus `codec-mr1.yaml`,
+    # mcci `codec-catena4610.yaml`, ellenex `codec-single.yaml`, dragino `sw3l-lbcodec.yaml`.
+    # Fall back to any codec file whose uplink decoder is <stem>.js, as the TTN device
+    # repository itself links them.
+    for candidate in sorted(vendor_dir.rglob("*codec*.yaml")):
+        if candidate.stem == stem:
+            return candidate
+        name = (load_codec(candidate).get("uplinkDecoder") or {}).get("fileName") or ""
+        if Path(name).stem == stem:
+            return candidate
     return direct
 
 
