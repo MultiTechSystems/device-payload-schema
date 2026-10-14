@@ -123,14 +123,14 @@ Generated inventory of this repository: what lives where, what each document cov
 
 ## Device schemas
 
-358 schemas under `schemas/devices/`.
-Mean quality score 82.5% (PLATINUM 43, GOLD 54, SILVER 241, BRONZE 5, REJECTED 15). Tiers follow the specification's Section 10: Platinum 95-100%, Gold 85-94%, Silver 70-84%, Bronze 60-69%, Rejected below 60%. Gold and Platinum also have gates (PS-239) -- see `../AGENTS.md`. A high score shows self-consistency with a schema's own test vectors, not that the vectors are right.
+359 schemas under `schemas/devices/`.
+Mean quality score 82.5% (PLATINUM 43, GOLD 54, SILVER 242, BRONZE 5, REJECTED 15). Tiers follow the specification's Section 10: Platinum 95-100%, Gold 85-94%, Silver 70-84%, Bronze 60-69%, Rejected below 60%. Gold and Platinum also have gates (PS-239) -- see `../AGENTS.md`. A high score shows self-consistency with a schema's own test vectors, not that the vectors are right.
 
 ### By vendor
 
 | Vendor | Schemas | Vectors | Tiers |
 |---|---|---|---|
-| _language-conformance | 146 | 325 | GOLD 1, SILVER 141, BRONZE 4 |
+| _language-conformance | 147 | 347 | GOLD 1, SILVER 142, BRONZE 4 |
 | milesight | 84 | 1427 | PLATINUM 31, GOLD 36, SILVER 14, REJECTED 3 |
 | decentlab | 58 | 204 | PLATINUM 9, GOLD 13, SILVER 31, BRONZE 1, REJECTED 4 |
 | _library-composed | 49 | 57 | SILVER 49 |
@@ -221,6 +221,7 @@ Mean quality score 82.5% (PLATINUM 43, GOLD 54, SILVER 241, BRONZE 5, REJECTED 1
 | `_language-conformance/meta-tlv-channels` | 2 | 1 | fields | 69% | BRONZE |
 | `_language-conformance/metadata-enrichment` | 2 | 3 | fields | 75% | SILVER |
 | `_language-conformance/metadata-epoch-calendar` | 2 | 1 | fields | 81% | SILVER |
+| `_language-conformance/minifloat-reference-binding` | 44 | 22 | fields | 84% | SILVER |
 | `_language-conformance/minifloat` | 7 | 1 | fields | 85% | SILVER |
 | `_language-conformance/name-from-object` | 4 | 1 | fields | 81% | SILVER |
 | `_language-conformance/name-from-rendering` | 16 | 8 | ports | 86% | SILVER |

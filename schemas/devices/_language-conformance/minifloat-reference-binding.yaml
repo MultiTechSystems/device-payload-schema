@@ -1,0 +1,147 @@
+# A number field's ref reads a float field through its var and through its own name
+# (PS-523, PS-314): the minifloats, bf16, the word-ordered and IEEE floats, and the nibble
+# decimals.
+#
+# Found by the registry's NU-02 batch (MCCI model4841): the generated codec never bound the
+# var of a uflt16, sflt16 or sflt24 field, so a number computed from it was absent while the
+# same schema over u16 reported it. The same omission was in its bf16, f16, f32, f64, udec and
+# sdec paths. Each type is read twice, once declaring a var and once not, and each reading is
+# referenced by a number field. One vector asserts one reported value, so a name left unbound
+# shows as that vector alone failing. The payload is the same in every vector and every word
+# is exact in its type.
+name: minifloat_reference_binding
+endian: big
+fields:
+- {name: via_var_uflt16, type: uflt16, var: bound_uflt16}
+- {name: from_var_uflt16, type: number, ref: $bound_uflt16}
+- {name: own_uflt16, type: uflt16}
+- {name: from_own_uflt16, type: number, ref: $own_uflt16}
+- {name: via_var_sflt16, type: sflt16, var: bound_sflt16}
+- {name: from_var_sflt16, type: number, ref: $bound_sflt16}
+- {name: own_sflt16, type: sflt16}
+- {name: from_own_sflt16, type: number, ref: $own_sflt16}
+- {name: via_var_sflt24, type: sflt24, var: bound_sflt24}
+- {name: from_var_sflt24, type: number, ref: $bound_sflt24}
+- {name: own_sflt24, type: sflt24}
+- {name: from_own_sflt24, type: number, ref: $own_sflt24}
+- {name: via_var_bf16, type: bf16, var: bound_bf16}
+- {name: from_var_bf16, type: number, ref: $bound_bf16}
+- {name: own_bf16, type: bf16}
+- {name: from_own_bf16, type: number, ref: $own_bf16}
+- {name: via_var_f32le16, type: f32le16, var: bound_f32le16}
+- {name: from_var_f32le16, type: number, ref: $bound_f32le16}
+- {name: own_f32le16, type: f32le16}
+- {name: from_own_f32le16, type: number, ref: $own_f32le16}
+- {name: via_var_f32be16le, type: f32be16le, var: bound_f32be16le}
+- {name: from_var_f32be16le, type: number, ref: $bound_f32be16le}
+- {name: own_f32be16le, type: f32be16le}
+- {name: from_own_f32be16le, type: number, ref: $own_f32be16le}
+- {name: via_var_f16, type: f16, var: bound_f16}
+- {name: from_var_f16, type: number, ref: $bound_f16}
+- {name: own_f16, type: f16}
+- {name: from_own_f16, type: number, ref: $own_f16}
+- {name: via_var_f32, type: f32, var: bound_f32}
+- {name: from_var_f32, type: number, ref: $bound_f32}
+- {name: own_f32, type: f32}
+- {name: from_own_f32, type: number, ref: $own_f32}
+- {name: via_var_f64, type: f64, var: bound_f64}
+- {name: from_var_f64, type: number, ref: $bound_f64}
+- {name: own_f64, type: f64}
+- {name: from_own_f64, type: number, ref: $own_f64}
+- {name: via_var_udec, type: udec, var: bound_udec}
+- {name: from_var_udec, type: number, ref: $bound_udec}
+- {name: own_udec, type: udec}
+- {name: from_own_udec, type: number, ref: $own_udec}
+- {name: via_var_sdec, type: sdec, var: bound_sdec}
+- {name: from_var_sdec, type: number, ref: $bound_sdec}
+- {name: own_sdec, type: sdec}
+- {name: from_own_sdec, type: number, ref: $own_sdec}
+test_vectors:
+- name: uflt16_through_var
+  source: generated
+  payload: "F800 F800 7FFF 7FFF 3F0000 3F0000 3FC0 3FC0 00003F80 00003F80 803F0000 803F0000 3C00 3C00 3F800000 3F800000 3FF0000000000000 3FF0000000000000 15 15 15 15"
+  expected: {from_var_uflt16: 0.5}
+- name: uflt16_through_own_name
+  source: generated
+  payload: "F800 F800 7FFF 7FFF 3F0000 3F0000 3FC0 3FC0 00003F80 00003F80 803F0000 803F0000 3C00 3C00 3F800000 3F800000 3FF0000000000000 3FF0000000000000 15 15 15 15"
+  expected: {from_own_uflt16: 0.5}
+- name: sflt16_through_var
+  source: generated
+  payload: "F800 F800 7FFF 7FFF 3F0000 3F0000 3FC0 3FC0 00003F80 00003F80 803F0000 803F0000 3C00 3C00 3F800000 3F800000 3FF0000000000000 3FF0000000000000 15 15 15 15"
+  expected: {from_var_sflt16: 0.99951171875}
+- name: sflt16_through_own_name
+  source: generated
+  payload: "F800 F800 7FFF 7FFF 3F0000 3F0000 3FC0 3FC0 00003F80 00003F80 803F0000 803F0000 3C00 3C00 3F800000 3F800000 3FF0000000000000 3FF0000000000000 15 15 15 15"
+  expected: {from_own_sflt16: 0.99951171875}
+- name: sflt24_through_var
+  source: generated
+  payload: "F800 F800 7FFF 7FFF 3F0000 3F0000 3FC0 3FC0 00003F80 00003F80 803F0000 803F0000 3C00 3C00 3F800000 3F800000 3FF0000000000000 3FF0000000000000 15 15 15 15"
+  expected: {from_var_sflt24: 1.0}
+- name: sflt24_through_own_name
+  source: generated
+  payload: "F800 F800 7FFF 7FFF 3F0000 3F0000 3FC0 3FC0 00003F80 00003F80 803F0000 803F0000 3C00 3C00 3F800000 3F800000 3FF0000000000000 3FF0000000000000 15 15 15 15"
+  expected: {from_own_sflt24: 1.0}
+- name: bf16_through_var
+  source: generated
+  payload: "F800 F800 7FFF 7FFF 3F0000 3F0000 3FC0 3FC0 00003F80 00003F80 803F0000 803F0000 3C00 3C00 3F800000 3F800000 3FF0000000000000 3FF0000000000000 15 15 15 15"
+  expected: {from_var_bf16: 1.5}
+- name: bf16_through_own_name
+  source: generated
+  payload: "F800 F800 7FFF 7FFF 3F0000 3F0000 3FC0 3FC0 00003F80 00003F80 803F0000 803F0000 3C00 3C00 3F800000 3F800000 3FF0000000000000 3FF0000000000000 15 15 15 15"
+  expected: {from_own_bf16: 1.5}
+- name: f32le16_through_var
+  source: generated
+  payload: "F800 F800 7FFF 7FFF 3F0000 3F0000 3FC0 3FC0 00003F80 00003F80 803F0000 803F0000 3C00 3C00 3F800000 3F800000 3FF0000000000000 3FF0000000000000 15 15 15 15"
+  expected: {from_var_f32le16: 1.0}
+- name: f32le16_through_own_name
+  source: generated
+  payload: "F800 F800 7FFF 7FFF 3F0000 3F0000 3FC0 3FC0 00003F80 00003F80 803F0000 803F0000 3C00 3C00 3F800000 3F800000 3FF0000000000000 3FF0000000000000 15 15 15 15"
+  expected: {from_own_f32le16: 1.0}
+- name: f32be16le_through_var
+  source: generated
+  payload: "F800 F800 7FFF 7FFF 3F0000 3F0000 3FC0 3FC0 00003F80 00003F80 803F0000 803F0000 3C00 3C00 3F800000 3F800000 3FF0000000000000 3FF0000000000000 15 15 15 15"
+  expected: {from_var_f32be16le: 1.0}
+- name: f32be16le_through_own_name
+  source: generated
+  payload: "F800 F800 7FFF 7FFF 3F0000 3F0000 3FC0 3FC0 00003F80 00003F80 803F0000 803F0000 3C00 3C00 3F800000 3F800000 3FF0000000000000 3FF0000000000000 15 15 15 15"
+  expected: {from_own_f32be16le: 1.0}
+- name: f16_through_var
+  source: generated
+  payload: "F800 F800 7FFF 7FFF 3F0000 3F0000 3FC0 3FC0 00003F80 00003F80 803F0000 803F0000 3C00 3C00 3F800000 3F800000 3FF0000000000000 3FF0000000000000 15 15 15 15"
+  expected: {from_var_f16: 1.0}
+- name: f16_through_own_name
+  source: generated
+  payload: "F800 F800 7FFF 7FFF 3F0000 3F0000 3FC0 3FC0 00003F80 00003F80 803F0000 803F0000 3C00 3C00 3F800000 3F800000 3FF0000000000000 3FF0000000000000 15 15 15 15"
+  expected: {from_own_f16: 1.0}
+- name: f32_through_var
+  source: generated
+  payload: "F800 F800 7FFF 7FFF 3F0000 3F0000 3FC0 3FC0 00003F80 00003F80 803F0000 803F0000 3C00 3C00 3F800000 3F800000 3FF0000000000000 3FF0000000000000 15 15 15 15"
+  expected: {from_var_f32: 1.0}
+- name: f32_through_own_name
+  source: generated
+  payload: "F800 F800 7FFF 7FFF 3F0000 3F0000 3FC0 3FC0 00003F80 00003F80 803F0000 803F0000 3C00 3C00 3F800000 3F800000 3FF0000000000000 3FF0000000000000 15 15 15 15"
+  expected: {from_own_f32: 1.0}
+- name: f64_through_var
+  source: generated
+  payload: "F800 F800 7FFF 7FFF 3F0000 3F0000 3FC0 3FC0 00003F80 00003F80 803F0000 803F0000 3C00 3C00 3F800000 3F800000 3FF0000000000000 3FF0000000000000 15 15 15 15"
+  expected: {from_var_f64: 1.0}
+- name: f64_through_own_name
+  source: generated
+  payload: "F800 F800 7FFF 7FFF 3F0000 3F0000 3FC0 3FC0 00003F80 00003F80 803F0000 803F0000 3C00 3C00 3F800000 3F800000 3FF0000000000000 3FF0000000000000 15 15 15 15"
+  expected: {from_own_f64: 1.0}
+- name: udec_through_var
+  source: generated
+  payload: "F800 F800 7FFF 7FFF 3F0000 3F0000 3FC0 3FC0 00003F80 00003F80 803F0000 803F0000 3C00 3C00 3F800000 3F800000 3FF0000000000000 3FF0000000000000 15 15 15 15"
+  expected: {from_var_udec: 1.5}
+- name: udec_through_own_name
+  source: generated
+  payload: "F800 F800 7FFF 7FFF 3F0000 3F0000 3FC0 3FC0 00003F80 00003F80 803F0000 803F0000 3C00 3C00 3F800000 3F800000 3FF0000000000000 3FF0000000000000 15 15 15 15"
+  expected: {from_own_udec: 1.5}
+- name: sdec_through_var
+  source: generated
+  payload: "F800 F800 7FFF 7FFF 3F0000 3F0000 3FC0 3FC0 00003F80 00003F80 803F0000 803F0000 3C00 3C00 3F800000 3F800000 3FF0000000000000 3FF0000000000000 15 15 15 15"
+  expected: {from_var_sdec: 1.5}
+- name: sdec_through_own_name
+  source: generated
+  payload: "F800 F800 7FFF 7FFF 3F0000 3F0000 3FC0 3FC0 00003F80 00003F80 803F0000 803F0000 3C00 3C00 3F800000 3F800000 3FF0000000000000 3FF0000000000000 15 15 15 15"
+  expected: {from_own_sdec: 1.5}
