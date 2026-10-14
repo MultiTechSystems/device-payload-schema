@@ -16,8 +16,7 @@
         "disagrees": 1
       },
       "decentlab": {
-        "disagrees": 57,
-        "no-vendor-codec": 1
+        "disagrees": 58
       },
       "digital-matter": {
         "disagrees": 1
@@ -368,8 +367,8 @@
         "notes": 0
       },
       "ttn": {
-        "status": "no-vendor-codec",
-        "problems": 0,
+        "status": "disagrees",
+        "problems": 8,
         "decode_failures": 0,
         "notes": 0
       }
