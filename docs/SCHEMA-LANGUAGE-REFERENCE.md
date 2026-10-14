@@ -210,6 +210,30 @@ none do (PS-402). Devices that append fields in later firmware are described by 
   that supplies one after omitting an earlier one (PS-405).
 - When encoding it contributes no fixed count; the value supplies its own length.
 
+#### Reporting a span again (`consume: 0`)
+
+A `bytes`, `hex` or `ascii` field declaring `consume: 0` reads and reports its span and
+leaves the read position where it was, so the fields after it read the same bytes again
+(PS-588). It reports the whole frame, or a command's bytes, beside the values decoded from
+them. Its `length` may be `remaining`, and it does not count toward the one `remaining`
+field a level may hold (PS-015).
+
+```yaml
+- name: raw              # the whole frame, reported first
+  type: bytes
+  length: remaining
+  consume: 0
+- {name: temperature, type: s16, div: 10}
+- {name: humidity, type: u8}
+# 00D7 5A -> {"raw": "00d75a", "temperature": 21.5, "humidity": 90}
+```
+
+- An encoder writes nothing for it and does not require it. A value given for it must
+  equal what the field decodes from the bytes the other fields write over its span (its
+  `format` and `separator`, or the trailing 0x00 removal, applied first), or the input is
+  rejected naming the field (PS-589).
+- On any other type than a bit range or `bool`, `consume: 0` is NOT RECOMMENDED (PS-453).
+
 ### Special Types
 
 | Type | Description |

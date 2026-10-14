@@ -195,6 +195,21 @@ public class Field {
     public int getConsume() { return consume; }
     public void setConsume(int consume) { this.consume = consume; }
 
+    /** Whether the schema wrote `consume` at all, so `consume: 0` differs from none. */
+    private boolean consumeDeclared;
+    public boolean isConsumeDeclared() { return consumeDeclared; }
+    public void setConsumeDeclared(boolean declared) { this.consumeDeclared = declared; }
+
+    /**
+     * A `bytes`, `hex` or `ascii` field declaring `consume: 0` (PS-588, CR-2026-175): it
+     * reads and reports its span and leaves the read position, so later fields read the
+     * same bytes. An encoder writes nothing for it (PS-589).
+     */
+    public boolean isEcho() {
+        return consumeDeclared && consume == 0
+                && (type == FieldType.BYTES || type == FieldType.HEX || type == FieldType.ASCII);
+    }
+
     public int getBitBaseBytes() { return bitBaseBytes; }
     public void setBitBaseBytes(int bitBaseBytes) { this.bitBaseBytes = bitBaseBytes; }
 
