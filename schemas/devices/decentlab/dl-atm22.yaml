@@ -17,13 +17,16 @@ fields:
         - bit: 0
           fields:
             - name: wind_speed
+              description: "Wind speed"
               type: u16
               transform:
                 - add: -32768
                 - div: 100
               unit: "m⋅s⁻¹"
               senml: {unit: m/s}
+              semantic: "wind.speed"
             - name: wind_direction
+              description: "Wind direction"
               type: u16
               transform:
                 - add: -32768
@@ -33,6 +36,7 @@ fields:
               senml: {name: "wind_direction", unit: "deg"}
               semantic: "wind.direction"
             - name: maximum_wind_speed
+              description: "Maximum wind speed"
               type: u16
               transform:
                 - add: -32768
@@ -40,6 +44,7 @@ fields:
               unit: "m⋅s⁻¹"
               senml: {unit: m/s}
             - name: air_temperature
+              description: "Air temperature"
               type: u16
               transform:
                 - add: -32768
@@ -49,6 +54,7 @@ fields:
               senml: {name: "air_temperature", unit: "Cel"}
               semantic: "air.temperature"
             - name: x_orientation_angle
+              description: "X orientation angle"
               type: u16
               transform:
                 - add: -32768
@@ -56,6 +62,7 @@ fields:
               unit: "°"
               senml: {unit: deg}
             - name: y_orientation_angle
+              description: "Y orientation angle"
               type: u16
               transform:
                 - add: -32768
@@ -63,6 +70,7 @@ fields:
               unit: "°"
               senml: {unit: deg}
             - name: north_wind_speed
+              description: "North wind speed"
               type: u16
               transform:
                 - add: -32768
@@ -70,6 +78,7 @@ fields:
               unit: "m⋅s⁻¹"
               senml: {unit: m/s}
             - name: east_wind_speed
+              description: "East wind speed"
               type: u16
               transform:
                 - add: -32768
@@ -79,13 +88,14 @@ fields:
         - bit: 1
           fields:
             - name: battery_voltage
+              description: "Battery voltage"
               type: u16
               div: 1000
               unit: "V"
 
               ipso: {object: 3316, instance: 0, resource: 5700}
               senml: {name: "battery_voltage", unit: "V"}
-              semantic: "battery.voltage"
+              semantic: "battery"
 test_vectors:
   - name: min_payload_vendor_1
     description: "Vendor-published test payload, decoded by the vendor's own decoder"

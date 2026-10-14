@@ -18,7 +18,6 @@ fields:
             unit: "%"
             ipso: {object: 3320, instance: 0, resource: 5700}
             senml: {name: "battery", unit: "/100"}
-            semantic: "battery"
             type: u8
         # temperature
         "[3, 103]":
@@ -26,7 +25,7 @@ fields:
             unit: "°C"
             ipso: {object: 3303, instance: 0, resource: 5700}
             senml: {name: "temperature", unit: "Cel"}
-            semantic: "temperature"
+            semantic: "air.temperature"
             type: s16
             div: 10
         # temperature threshold alert
@@ -35,7 +34,7 @@ fields:
             unit: "°C"
             ipso: {object: 3303, instance: 0, resource: 5700}
             senml: {name: "temperature", unit: "Cel"}
-            semantic: "temperature"
+            semantic: "air.temperature"
             type: s16
             div: 10
           - name: temperature_alert
@@ -48,7 +47,7 @@ fields:
             unit: "°C"
             ipso: {object: 3303, instance: 0, resource: 5700}
             senml: {name: "temperature", unit: "Cel"}
-            semantic: "temperature"
+            semantic: "air.temperature"
             type: s16
             div: 10
           - name: temperature_change

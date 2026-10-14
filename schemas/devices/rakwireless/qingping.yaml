@@ -44,7 +44,7 @@ fields:
     valid_range: [-20, 50]
     ipso: {object: 3303}
     senml: {unit: "Cel"}
-    semantic: "temperature.ambient"
+    semantic: "air.temperature"
   - name: humidity
     type: number
     ref: $_humi_raw
@@ -54,13 +54,13 @@ fields:
     valid_range: [0, 99.9]
     ipso: {object: 3304}
     senml: {unit: "%RH"}
-    semantic: "humidity.relative"
+    semantic: "air.relativeHumidity"
   - name: co2
     type: u16
     unit: "ppm"
     valid_range: [400, 9999]
     ipso: {object: 3325}
-    semantic: "gas.co2"
+    semantic: "air.co2"
   - name: battery
     type: u8
     # a charge level, not the voltage the name suggests

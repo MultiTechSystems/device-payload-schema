@@ -17,6 +17,7 @@ fields:
         - bit: 0
           fields:
             - name: air_temperature
+              description: "Air temperature"
               type: u16
               transform:
                 - mult: 0.0026812744140625
@@ -24,15 +25,18 @@ fields:
               unit: "°C"
               senml: {unit: Cel}
             - name: air_humidity
+              description: "Air humidity"
               type: u16
               transform:
                 - mult: 0.0019073486328125
                 - add: -6
               unit: "%"
               senml: {unit: "%RH"}
+              semantic: "air.relativeHumidity"
         - bit: 1
           fields:
             - name: barometer_temperature
+              description: "Barometer temperature"
               type: u16
               transform:
                 - div: 100
@@ -40,9 +44,11 @@ fields:
               unit: "°C"
               senml: {unit: Cel}
             - name: barometric_pressure
+              description: "Barometric pressure"
               type: u16
               mult: 2
               unit: "Pa"
+              semantic: "air.pressure"
         - bit: 2
           fields:
             - name: co2_concentration
@@ -77,9 +83,11 @@ fields:
         - bit: 3
           fields:
             - name: battery_voltage
+              description: "Battery voltage"
               type: u16
               div: 1000
               unit: "V"
+              semantic: "battery"
 test_vectors:
   - name: vendor_reference_1
     description: "Vendor-published test payload, decoded by the vendor's own decoder"

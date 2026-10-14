@@ -55,6 +55,7 @@ fields:
             - name: battery_voltage
               type: u16
               unit: "mV"
+              semantic: "battery"
             - name: board_temperature
               type: u8
               unit: "Cel"
@@ -97,6 +98,7 @@ fields:
             - name: battery_voltage
               type: u16
               unit: "mV"
+              semantic: "battery"
             - name: board_temperature
               type: u8
               unit: "Cel"
@@ -142,6 +144,7 @@ fields:
             - name: battery_voltage
               type: u16
               unit: "mV"
+              semantic: "battery"
             - name: board_temperature
               type: u8
               unit: "Cel"
@@ -190,6 +193,7 @@ fields:
             - name: battery_voltage
               type: u16
               unit: "mV"
+              semantic: "battery"
             - name: board_temperature
               type: u8
               unit: "Cel"
@@ -232,6 +236,7 @@ fields:
             - name: battery_voltage
               type: u16
               unit: "mV"
+              semantic: "battery"
             - name: board_temperature
               type: u8
               unit: "Cel"
@@ -278,6 +283,7 @@ fields:
             - name: battery_voltage
               type: u16
               unit: "mV"
+              semantic: "battery"
             - name: board_temperature
               type: u8
               unit: "Cel"
@@ -323,6 +329,7 @@ fields:
             - name: battery_voltage
               type: u16
               unit: "mV"
+              semantic: "battery"
             - name: board_temperature
               type: u8
               unit: "Cel"

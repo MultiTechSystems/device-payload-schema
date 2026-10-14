@@ -17,48 +17,60 @@ fields:
         - bit: 0
           fields:
             - name: distance_average
+              description: "Distance: average"
               type: u16
               unit: "mm"
             - name: distance_minimum
+              description: "Distance: minimum"
               type: u16
               unit: "mm"
             - name: distance_maximum
+              description: "Distance: maximum"
               type: u16
               unit: "mm"
             - name: distance_median
+              description: "Distance: median"
               type: u16
               unit: "mm"
             - name: distance_10th_percentile
+              description: "Distance: 10th percentile"
               type: u16
               unit: "mm"
             - name: distance_25th_percentile
+              description: "Distance: 25th percentile"
               type: u16
               unit: "mm"
             - name: distance_75th_percentile
+              description: "Distance: 75th percentile"
               type: u16
               unit: "mm"
             - name: distance_90th_percentile
+              description: "Distance: 90th percentile"
               type: u16
               unit: "mm"
             - name: distance_most_frequent_value
+              description: "Distance: most frequent value"
               type: u16
               unit: "mm"
             - name: number_of_samples
+              description: "Number of samples"
               type: u16
             - name: total_acquisition_time
+              description: "Total acquisition time"
               type: u16
               div: 1.024
               unit: "ms"
         - bit: 1
           fields:
             - name: battery_voltage
+              description: "Battery voltage"
               type: u16
               div: 1000
               unit: "V"
 
               ipso: {object: 3316, instance: 0, resource: 5700}
               senml: {name: "battery_voltage", unit: "V"}
-              semantic: "battery.voltage"
+              semantic: "battery"
 test_vectors:
   - name: min_payload_vendor_1
     description: "Vendor-published test payload, decoded by the vendor's own decoder"

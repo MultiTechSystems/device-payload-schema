@@ -232,10 +232,10 @@ implementation has a runner that reads the same YAML and the same vectors:
 
 | Implementation | Runner | Decode floor | Re-encode floor |
 |---|---|---|---|
-| Python | `tests/test_corpus_conformance.py` | every vector | 2202 |
-| Go | `go/schema/corpus_conformance_test.go` | 2804 | 2220 (plain API 2192) |
-| C# | `dotnet/PayloadSchema.Tests/CorpusConformanceTests.cs` | 2804 | 2203 |
-| Java | `bindings/java/.../CorpusConformanceTest.java` | 2804 | 2202 |
+| Python | `tests/test_corpus_conformance.py` | every vector | 2213 |
+| Go | `go/schema/corpus_conformance_test.go` | 2815 | 2231 (plain API 2203) |
+| C# | `dotnet/PayloadSchema.Tests/CorpusConformanceTests.cs` | 2815 | 2214 |
+| Java | `bindings/java/.../CorpusConformanceTest.java` | 2815 | 2213 |
 | C | `tools/c-corpus-harness.py` (builds each expressible schema through the struct API) | 575 of 575 attempted | n/a |
 
 These figures move with every schema added. `make check-floors` prints each floor beside
@@ -824,10 +824,10 @@ exercised to the best-covered part of the project:
 
 | | Runner | Round-trips |
 |---|---|---|
-| Python | `tests/test_encode_round_trip.py` | 2202 |
-| Go | `go/schema/corpus_encode_test.go` | 2220 (plain 2192) |
-| Java | `bindings/java/.../CorpusEncodeRoundTripTest.java` | 2202 |
-| C# | `dotnet/.../CorpusEncodeRoundTripTests.cs` | 2203 |
+| Python | `tests/test_encode_round_trip.py` | 2213 |
+| Go | `go/schema/corpus_encode_test.go` | 2231 (plain 2203) |
+| Java | `bindings/java/.../CorpusEncodeRoundTripTest.java` | 2213 |
+| C# | `dotnet/.../CorpusEncodeRoundTripTests.cs` | 2214 |
 | C | `src/test_encoder.c`, built by `make test-c` (unit tests, not a corpus round trip) | n/a |
 
 - **A name may be an object under one tag and a scalar under another, and a tlv encoder
@@ -2526,6 +2526,20 @@ improved. The Go, Java and C# corpus runners write per-vector reports only when
   C-interpreter wave. **No corpus,
   library, example or registry schema is rejected or changes decode** (registry yabby-edge
   was rewritten as one 8-byte group, 69e1023). Fixture: `byte-group-width.yaml`.
+- **A byte_group member's `var:` binds like any field's (PS-523, PS-539).** The Python
+  reference (`_decode_byte_group_members` bound `[name]` only) and the generated TS013 codec
+  (`_bind_js(..., False)`, and the bool member bound `vars.name` alone) never bound it, so a
+  `ref`, a `compute` operand or a `match` selector reading it was absent or failed with "Match
+  field $vb has no value" while the member's own name worked. Measured before on
+  `byte-group-member-var.yaml` (a group at the top level, a flagged member, a group in a tlv
+  case): Go, C# and C already bound it (C through `var_name`; `make selftest` covers it);
+  Python and the generated codec failed 9 of 11 vectors. Java alone dropped a member with a
+  `var` and no name (reserved bits a later field reads) before binding; it binds now, and that
+  case has no round-trip vector (no value to write), so it is `ByteGroupMemberVarTest` and
+  `tests/test_byte_group_member_var.py`. Encode was unaffected: the selector is derived from
+  the member (PS-551) in all five. Floors: decode +11 in Go, Java and C#; re-encode +11
+  everywhere (Python, Java 2153 -> 2164; C# 2154 -> 2165; Go 2171 -> 2182, plain 2143 -> 2154),
+  all `tlv`.
 - **CR-2026-142 (PS-555): the binary schema form carries its names.** `schema_load_binary`
   used to name each field from its IPSO object (`ipso_to_name`: 3303 was "temperature",
   anything unlisted `field_xxxx`), so a schema reported different keys from its blob than
@@ -3363,9 +3377,9 @@ improved. The Go, Java and C# corpus runners write per-vector reports only when
     read by `test_cr_2026_170_cases.py` (reference, validator and generated codec), Go
     `cr170_test.go`, Java `CR2026170Test`, C# `CR2026_170Tests`. Fixture
     `_language-conformance/bitfield-string-padded-signed.yaml` (five ports, 14 vectors, all
-    round-tripping). **Floors:** decode 2790 -> 2804 in Go, Java and C#; re-encode +14
-    everywhere (Python and Java 2188 -> 2202, C# 2189 -> 2203, Go 2206 -> 2220, plain 2178 ->
-    2192), `plain fixed` 185 -> 199.
+    round-tripping). **Floors:** decode 2801 -> 2815 in Go, Java and C#; re-encode +14
+    everywhere (Python and Java 2199 -> 2213, C# 2200 -> 2214, Go 2217 -> 2231, plain 2189 ->
+    2203), `plain fixed` 185 -> 199.
 
 ## Converting a vendor codec
 

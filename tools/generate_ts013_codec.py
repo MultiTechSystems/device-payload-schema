@@ -3872,7 +3872,8 @@ function writeS(buf, pos, size, value, endian) {
                     # bool flags were missing from the generated codec's output.
                     bjs = to_js_name(bname)
                     lines.append(f'{i}  var {bjs}_out = (Math.floor(bgVal / {2 ** int(bf.get("bit", 0))}) % 2) === 1;')
-                    lines.append(f'{i}  vars.{bjs} = {bjs}_out;')
+                    lines.extend(f'{i}  {s}' for s in
+                                 self._bind_js(bf, bjs, f'{bjs}_out'))
                     if not bname.startswith('_'):
                         guards, target = name_from_to_js(bf, bjs)
                         for guard in guards:
@@ -3894,7 +3895,7 @@ function writeS(buf, pos, size, value, endian) {
                 # `vars` records the post-modifier value - see _apply_modifiers_expr.
                 bval = self._apply_modifiers_expr(bjs, bf)
                 lines.append(f'{i}  var {bjs}_out = {bval};')
-                lines.extend(f'{i}  {s}' for s in self._bind_js(bf, bjs, f'{bjs}_out', False))
+                lines.extend(f'{i}  {s}' for s in self._bind_js(bf, bjs, f'{bjs}_out'))
                 if not bname.startswith('_'):
                     guards, target = name_from_to_js(bf, bjs)
                     for guard in guards:
