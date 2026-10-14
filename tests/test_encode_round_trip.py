@@ -135,7 +135,7 @@ DEVICES = REPO_ROOT / "schemas" / "devices"
 # literal-selects-branch (2), match, and tag-entry-constants (4), tlv, and
 # tlv-case-field-list's literal_only, tlv - an entry reporting only a constant, which
 # encoded to no bytes with no error.
-FLOOR_TOTAL = 2175  # +22: minifloat-reference-binding (11 types x 2; plain fixed); +4: bitfield-string-field-endian (two fixtures); +4: expected-error (CR-2026-167: its four successful decodes round-trip; the rejections are skipped); +1: repeat-sampled (CR-2026-156); earlier moves follow
+FLOOR_TOTAL = 2188  # +13: match-fractional-range-keys (match; every vector round-trips); +4: bitfield-string-field-endian (two fixtures); +4: expected-error (CR-2026-167: its four successful decodes round-trip; the rejections are skipped); +1: repeat-sampled (CR-2026-156); earlier moves follow
 
 #: Per-shape floors, so a regression in a shape that works cannot hide behind the 948
 #: TLV vectors that do not. A shape absent here has no working round-trip to protect.
@@ -152,7 +152,7 @@ FLOOR_BY_SHAPE = {
     # FLOOR_TOTAL); +5: match-fractional-discriminator; +3:
     # match-discriminator-from-inner-case (CR-2026-151); +6: no silent empty (see
     # FLOOR_TOTAL)
-    "match": 160,  # +4: wide-peek-selector, wide-peek-selector-u64 (match); the skipped-four vector does not round-trip
+    "match": 173,  # +13: match-fractional-range-keys (match; every vector round-trips); +4: wide-peek-selector, wide-peek-selector-u64 (match); the skipped-four vector does not round-trip
     "byte_group": 28,  # +3: byte-group-width (CR-2026-131)
     # 6 -> 5 with plain fixed 66 -> 67: a bucket move. Composed library schemas now
     # carry only the definitions they reach, so one no longer has a `repeat` in an
