@@ -3477,6 +3477,42 @@ improved. The Go, Java and C# corpus runners write per-vector reports only when
     everywhere (Python and Java 2199 -> 2213, C# 2200 -> 2214, Go 2217 -> 2231, plain 2189 ->
     2203), `plain fixed` 185 -> 199.
 
+- **CR-2026-169 (PS-581; la-payload-schema main, for 0.5.7): which port entry an encoder
+  uses.** An encoder of a schema with `ports` encodes one entry and reports the FPort it used:
+  (1) a caller's FPort chooses its entry, or `default` where none lists it, and is rejected
+  where neither exists, or where the entry is declared `uplink` **and a downlink is being
+  encoded**; (2) else the one entry declaring `downlink`; (3) else the one downlink-capable
+  entry (`downlink`, `both` or no declaration); (4) else rejected, naming the candidates.
+  `default` is never chosen without an FPort. A schema without `ports` reports the caller's
+  FPort, else the document's `fPort` (PS-458).
+  - **Departures followed (Jason):** an uplink entry is refused only for a downlink - the
+    `direction` the caller states (Python `direction=`, Go `EncodeToResultDirection`,
+    Java `encodeWithPort(..., direction)`, C# `EncodeWithPort(direction:)`) or the generated
+    `encodeDownlink`, which is always one; an encode with no direction still encodes an uplink
+    entry the caller names, for round trips. A match keyed by a looked-up field encodes the
+    code (PS-523): already true here since CR-2026-109, pinned by the worked example's case.
+  - **Where:** Python `_choose_encode_port` (called first in `_encode`; `EncodeResult.fport`),
+    Go `ChooseEncodePort` (`schema.go`; fPort 0 is none given, ports being 1-255;
+    `EncodeResult.FPort`, `Schema.DocFPort`), Java `Schema.chooseEncodePort`
+    (`EncodeResult.getFPort`), C# `SchemaEncoder.ChoosePort` (`EncodeResult.FPort`,
+    `PayloadSchemaDefinition.DocFPort`), and the generator's `encodeDownlink`, whose choice is
+    computed at generation time. Rejections are reported as errors (Go: the error return), in
+    the spec prototype's text, with no payload.
+  - **Before:** Python raised PS-459's ValueError (uncaught) with no FPort, and Go, Java and C#
+    encoded the empty top-level `fields` of a ports schema (or its `default` entry under port 0)
+    with success. The generated codec took the first declared `downlink` entry, never checked
+    that it was unique, took any non-uplink entry for a given port, and did not take the
+    document's `fPort` for a flat schema.
+  - **Message changes:** an uplink entry refused for a downlink now reads `FPort 1 is declared
+    direction:uplink and takes no downlink to encode (PS-581)` in place of PS-292's wording on
+    the encode path (tests in `test_cr_2026_010_direction.py` and `test_ts013_encode_parity.py`
+    updated); a downlink entry encoded as an uplink keeps PS-288's.
+  - **Cases:** `tests/cr-2026-169-cases.yaml` (the prototype's `TestCR2026169EncodePort` plus
+    several-declared, none-capable and both-entry cases), read by `test_cr_2026_169_cases.py`
+    (reference and generated codec), Go `cr169_test.go`, Java `CR2026169Test`, C#
+    `CR2026_169Tests`. No corpus fixture: the runners already encode with the vector's fPort, so
+    no floor moves. C has no `ports`.
+
 ## Converting a vendor codec
 
 The converters in `tools/` (`convert_decentlab.py`, `convert_milesight.py`) do the

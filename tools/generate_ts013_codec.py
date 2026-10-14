@@ -5511,50 +5511,74 @@ function writeS(buf, pos, size, value, endian) {
             lines.append('function encodeDownlink(input) {')
             lines.append('  try {')
             lines.append(f'    var endian = "{self.endian}";')
-            # The port the caller names, where it has one (PS-292: never an entry that
-            # declares itself uplink-only); else the first entry declaring downlink. This
-            # used to ignore input.fPort and always encode the first downlink entry.
+            # PS-581 (CR-2026-169): the port the caller names chooses its entry, or the
+            # `default` entry where none lists it, and an entry declared uplink takes no
+            # downlink (encodeDownlink is always a downlink). Without one: the single entry
+            # declaring downlink, else the single downlink-capable entry (downlink, both or
+            # no declaration, PS-287), else the input is rejected naming the candidates. A
+            # `default` entry is never chosen without a port: it has no number to report.
             ports = self.schema['ports']
-            encodable = [pk for pk, pd in ports.items()
-                         if isinstance(pd, dict) and pd.get('direction') != 'uplink']
-            dl_ports = [pk for pk, pd in ports.items()
-                        if isinstance(pd, dict) and pd.get('direction') == 'downlink']
+            name = self.schema.get('name')
+            numbered = {int(pk): pd for pk, pd in ports.items()
+                        if str(pk) != 'default' and isinstance(pd, dict)}
+            choice = None
+            reject = None
+            for tier, wanted in (('declared downlink', ('downlink',)),
+                                 ('downlink-capable', ('downlink', 'both', None))):
+                found = sorted(pk for pk, pd in numbered.items()
+                               if pd.get('direction') in wanted)
+                if len(found) == 1:
+                    choice = found[0]
+                    break
+                if len(found) > 1:
+                    reject = (f"no FPort was given, and schema '{name}' has {len(found)} "
+                              f"{tier} port entries ({', '.join(map(str, found))}); "
+                              f"give the FPort (PS-581)")
+                    break
+            if choice is None and reject is None:
+                reject = (f"no FPort was given, and schema '{name}' has no port entry "
+                          f"that takes a downlink (PS-581)")
             lines.append('    var port = input.fPort;')
             lines.append('    var r;')
+            lines.append('    if (port === undefined || port === null) {')
+            if choice is not None:
+                lines.append(f'      port = {choice};')
+            else:
+                lines.append(f'      return {{ bytes: [], fPort: 1, warnings: [], errors: '
+                             f'[{json.dumps(reject)}] }};')
+            lines.append('    }')
             first = True
-            for pk in encodable:
-                if not str(pk).isdigit():
-                    continue
+            for pk, pd in sorted(numbered.items()):
                 kw = 'if' if first else '} else if'
                 first = False
                 lines.append(f'    {kw} (port === {pk}) {{')
-                lines.append(f'      r = encodePort{pk}(input.data, endian);')
-            uplink_only = [pk for pk, pd in ports.items()
-                           if isinstance(pd, dict) and pd.get('direction') == 'uplink'
-                           and str(pk).isdigit()]
-            for pk in uplink_only:
-                kw = 'if' if first else '} else if'
-                first = False
-                lines.append(f'    {kw} (port === {pk}) {{')
-                lines.append(f'      return {{ bytes: [], fPort: {pk}, warnings: [], errors: '
-                             f'["fPort {pk} declares direction uplink, so it is not encoded as a '
-                             f'downlink (PS-292)"] }};')
-            if 'default' in encodable:
-                # PS-024: an unlisted port encodes through the `default` entry.
-                kw = 'if' if first else '} else if'
-                first = False
-                lines.append(f'    {kw} (typeof port === "number") {{')
-                lines.append('      r = encodePortdefault(input.data, endian);')
+                if pd.get('direction') == 'uplink':
+                    msg = (f'FPort {pk} is declared direction:uplink and takes no '
+                           f'downlink to encode (PS-581)')
+                    lines.append(f'      return {{ bytes: [], fPort: {pk}, warnings: [], '
+                                 f'errors: [{json.dumps(msg)}] }};')
+                else:
+                    lines.append(f'      r = encodePort{pk}(input.data, endian);')
+            fallback = ports.get('default')
             kw = 'if' if first else '} else if'
-            if dl_ports:
-                lines.append(f'    {kw} (port === undefined || port === null) {{')
-                lines.append(f'      port = {dl_ports[0]};')
-                lines.append(f'      r = encodePort{dl_ports[0]}(input.data, endian);')
+            if isinstance(fallback, dict):
+                # PS-024: an unlisted port encodes through the `default` entry.
+                lines.append(f'    {kw} (typeof port === "number") {{')
+                if fallback.get('direction') == 'uplink':
+                    msg = ('FPort " + port + " is declared direction:uplink and takes no '
+                           'downlink to encode (PS-581)')
+                    lines.append(f'      return {{ bytes: [], fPort: port, warnings: [], '
+                                 f'errors: ["{msg}"] }};')
+                else:
+                    lines.append('      r = encodePortdefault(input.data, endian);')
                 lines.append('    } else {')
             else:
-                lines.append(f'    {kw} (true) {{' if first else '    } else {')
-            lines.append('      return { bytes: [], fPort: port || 1, warnings: [], errors: '
-                         '["No encodable entry for fPort " + port] };')
+                lines.append(f'    {kw} (true) {{' if not first else '    if (true) {')
+            known = ', '.join(str(k) for k in sorted(numbered)) or 'nothing'
+            msg = (f"matches no port entry and schema '{name}' declares no default; "
+                   f"it defines {known} (PS-581)")
+            lines.append(f'      return {{ bytes: [], fPort: port, warnings: [], errors: '
+                         f'["FPort " + port + {json.dumps(" " + msg)}] }};')
             lines.append('    }')
             lines.append('    return { bytes: r.bytes, fPort: port, warnings: r.warnings, errors: [] };')
             lines.append('  } catch (e) {')
@@ -5567,6 +5591,9 @@ function writeS(buf, pos, size, value, endian) {
             # as the `ports` branch enforces an entry's (PS-288, PS-292); the message is
             # the reference interpreter's. No declaration accepts both (PS-287).
             declared_dir = self.schema.get('direction')
+            # PS-581: the FPort reported is the caller's, else the document's (PS-458).
+            doc = self.schema.get('fPort', self.schema.get('fport'))
+            doc_fport = f'{doc} || ' if isinstance(doc, int) and not isinstance(doc, bool) else ''
 
             def guard(direction, encode=False):
                 if declared_dir is None or declared_dir in ('both', direction):
@@ -5575,7 +5602,7 @@ function writeS(buf, pos, size, value, endian) {
                     f"schema '{self.schema.get('name')}' is declared "
                     f"direction:{declared_dir}; message direction is {direction}")
                 if encode:
-                    lines.append(f'  if (true) {{ return {{ bytes: [], fPort: input.fPort || 1, '
+                    lines.append(f'  if (true) {{ return {{ bytes: [], fPort: input.fPort || {doc_fport}1, '
                                  f'warnings: [], errors: [{message}] }}; }}')
                 else:
                     lines.append(f'  if (true) {{ return {{ data: {{}}, warnings: [], '
@@ -5637,9 +5664,9 @@ function writeS(buf, pos, size, value, endian) {
                 guard('downlink', encode=True)
                 lines.append('  try {')
                 lines.append(f'    var r = encodePayload(input.data, "{self.endian}");')
-                lines.append('    return { bytes: r.bytes, fPort: input.fPort || 1, warnings: r.warnings, errors: [] };')
+                lines.append(f'    return {{ bytes: r.bytes, fPort: input.fPort || {doc_fport}1, warnings: r.warnings, errors: [] }};')
                 lines.append('  } catch (e) {')
-                lines.append('    return { bytes: [], fPort: input.fPort || 1, warnings: [], errors: [e.message] };')
+                lines.append(f'    return {{ bytes: [], fPort: input.fPort || {doc_fport}1, warnings: [], errors: [e.message] }};')
                 lines.append('  }')
                 lines.append('}')
 

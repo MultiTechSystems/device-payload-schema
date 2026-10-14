@@ -51,6 +51,9 @@ class EncodeResult:
     payload: bytes
     warnings: List[str] = field(default_factory=list)
     errors: List[str] = field(default_factory=list)
+    #: The FPort the encode used (PS-581): the port entry chosen for a schema with
+    #: `ports`, else the caller's, else the document's `fPort`; None where there is none.
+    fport: Optional[int] = None
     
     @property
     def success(self) -> bool:
@@ -4451,6 +4454,51 @@ class SchemaInterpreter:
 
         raise ValueError(f"No port definition for fPort {fPort} and no default in schema '{self.name}'")
 
+    def _choose_encode_port(self, fPort: Optional[int] = None,
+                            direction: Optional[str] = None) -> Optional[int]:
+        """The FPort whose entry an encode uses, by PS-581 (CR-2026-169).
+
+        A caller's FPort chooses its entry, or the `default` entry where none lists it;
+        an entry declared `uplink` is refused only where a downlink is being encoded.
+        Without one: the single entry declaring `downlink`, else the single
+        downlink-capable entry (`downlink`, `both` or no declaration, PS-287), else the
+        input is rejected naming the candidates. `default` is never chosen without an
+        FPort, having no number to report. Raises ValueError to reject. Returns None for
+        a schema without `ports`.
+        """
+        ports = self.schema.get('ports')
+        if not ports:
+            return None
+        if fPort is not None:
+            entry = ports.get(fPort, ports.get(str(fPort), ports.get('default')))
+            if not isinstance(entry, dict):
+                known = ', '.join(str(k) for k in sorted(
+                    (k for k in ports if k != 'default'), key=lambda k: int(k)))
+                raise ValueError(
+                    f"FPort {fPort} matches no port entry and schema {self.name!r} "
+                    f"declares no default; it defines {known or 'nothing'} (PS-581)")
+            if entry.get('direction') == 'uplink' and direction == 'downlink':
+                raise ValueError(
+                    f"FPort {fPort} is declared direction:uplink and takes no "
+                    f"downlink to encode (PS-581)")
+            return fPort
+        numbered = {int(k): e for k, e in ports.items()
+                    if k != 'default' and isinstance(e, dict)}
+        for tier, wanted in (('declared downlink', ('downlink',)),
+                             ('downlink-capable', ('downlink', 'both', None))):
+            candidates = sorted(k for k, e in numbered.items()
+                                if e.get('direction') in wanted)
+            if len(candidates) == 1:
+                return candidates[0]
+            if len(candidates) > 1:
+                raise ValueError(
+                    f"no FPort was given, and schema {self.name!r} has "
+                    f"{len(candidates)} {tier} port entries "
+                    f"({', '.join(map(str, candidates))}); give the FPort (PS-581)")
+        raise ValueError(
+            f"no FPort was given, and schema {self.name!r} has no port entry that "
+            f"takes a downlink (PS-581)")
+
     def _resolve_fields(self, fPort: int = None) -> list:
         """Resolve fields for a given fPort (port-based schema selection)."""
         entry, _ = self._select_port_entry(fPort)
@@ -7122,6 +7170,18 @@ class SchemaInterpreter:
         if self._load_errors:
             result.errors.extend(self._load_errors)
             return result
+
+        # PS-581: which port entry this encode uses, and the FPort it reports.
+        try:
+            fPort = self._choose_encode_port(fPort, direction)
+        except ValueError as e:
+            result.errors.append(str(e))
+            return result
+        if fPort is None:
+            doc = self.schema.get('fPort', self.schema.get('fport'))
+            result.fport = doc if isinstance(doc, int) and not isinstance(doc, bool) else None
+        else:
+            result.fport = fPort
 
         # PS-292, the mirror of the decode check: encoding for an entry that disclaims
         # this direction produces bytes the far end will read against different field

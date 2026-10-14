@@ -178,13 +178,15 @@ ports:
     [Fact]
     public void Encoding_for_a_port_that_disclaims_the_direction_is_an_error()
     {
-        // PS-292: emitting the bytes would put a malformed frame on the air.
+        // PS-292, worded by PS-581: emitting the bytes would put a malformed frame on the
+        // air. The refusal is reported through the result, as every encode failure is.
         var data = new Dictionary<string, object?> { ["temperature"] = 23.5 };
-        var caught = Assert.Throws<InvalidOperationException>(
-            () => SchemaEncoder.EncodeWithPort(Schema(), data, 1, null, "downlink"));
+        var result = SchemaEncoder.EncodeWithPort(Schema(), data, 1, null, "downlink");
+        Assert.False(result.Success);
+        Assert.Empty(result.Payload);
         Assert.Equal(
-            "fPort 1 is declared direction:uplink; message direction is downlink",
-            caught.Message);
+            new[] { "FPort 1 is declared direction:uplink and takes no downlink to encode (PS-581)" },
+            result.Errors);
     }
 
     [Fact]
