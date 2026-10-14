@@ -3331,20 +3331,11 @@ final class Encoder {
                 Long bitOff = asLong(part.get(0));
                 Long bitLen = asLong(part.get(1));
                 if (bitOff == null || bitLen == null) continue;
-                String format = part.size() >= 3 ? String.valueOf(part.get(2)) : "decimal";
-                String segment = i < segments.length ? segments[i].trim() : "0";
-                long raw;
-                try {
-                    // PS-431: a hex segment is read without regard to case.
-                    // Unsigned: a 64-bit part past Long.MAX_VALUE is a valid segment.
-                    raw = "hex".equals(format) || "hex:upper".equals(format)
-                            ? Long.parseUnsignedLong(segment, 16)
-                            : Long.parseUnsignedLong(segment);
-                } catch (NumberFormatException e) {
-                    throw new SchemaException.EncodeException("bitfield_string field '"
-                            + field.getName() + "': segment '" + segment + "' is not "
-                            + format);
-                }
+                Object format = part.size() >= 3 ? part.get(2) : "decimal";
+                String segment = i < segments.length ? segments[i] : "0";
+                // PS-096, PS-431, PS-583: parsed by the part's format; a value the width
+                // cannot hold is rejected, never masked.
+                long raw = BitfieldParts.parseSegment(segment, bitLen.intValue(), format, field.getName());
                 long mask = bitLen >= 64 ? -1L : (1L << bitLen) - 1;
                 packed |= (raw & mask) << bitOff;
             }

@@ -3183,17 +3183,11 @@ public static class SchemaEncoder
                 var (offOk, bitOff) = Helpers.ToInt(part[0]);
                 var (lenOk, bitLen) = Helpers.ToInt(part[1]);
                 if (!offOk || !lenOk) continue;
-                string format = part.Count >= 3 && part[2] is string f ? f : "decimal";
-                string segment = i < segments.Length ? segments[i].Trim() : "0";
-                ulong raw;
-                // PS-431: a hex segment is read without regard to case.
-                bool parsed = format is "hex" or "hex:upper"
-                    ? ulong.TryParse(segment, System.Globalization.NumberStyles.HexNumber,
-                        System.Globalization.CultureInfo.InvariantCulture, out raw)
-                    : ulong.TryParse(segment, out raw);
-                if (!parsed)
-                    throw new InvalidOperationException($"bitfield_string field "
-                        + $"'{field.Name}': segment '{segment}' is not {format}");
+                object? format = part.Count >= 3 ? part[2] : "decimal";
+                string segment = i < segments.Length ? segments[i] : "0";
+                // PS-096, PS-431, PS-583: parsed by the part's format; a value the width
+                // cannot hold is rejected, never masked.
+                ulong raw = BitfieldParts.ParseSegment(segment, bitLen, format, field.Name);
                 ulong mask = bitLen >= 64 ? ulong.MaxValue : (1UL << bitLen) - 1;
                 packed |= (raw & mask) << bitOff;
             }

@@ -1,0 +1,228 @@
+# CR-2026-170 (PS-430, PS-582, PS-096, PS-583): a bitfield_string part format is decimal,
+# sdecimal, hex or hex:upper with an optional `:N` minimum width from 1 to 32 that never
+# cuts; sdecimal is two's complement with the sign before the padding; an encoder rejects a
+# segment its part's width cannot hold, naming the field and the segment, never masking it.
+#
+# Read by the reference, the validator and the generated codec
+# (tests/test_cr_2026_170_cases.py), Go (go/schema/cr170_test.go), Java (CR2026170Test.java)
+# and C# (CR2026_170Tests.cs). C has no bitfield_string (PS-446).
+#
+#   decode: `schema` (YAML text), `payload` (hex) and `expected` (the value of `v`).
+#   cases:  `schema`, `input` (JSON text) and either `payload` (hex) or `error`.
+#   load:   `schema`, refused when it is loaded with `error`.
+#
+# The errors are the spec prototype's text (TestCR2026170BitfieldStringParts). A part format
+# is quoted wherever it carries a colon.
+
+decode:
+
+- name: hex_padded
+  schema: "name: t\nendian: big\nfields:\n  - {name: v, type: bitfield_string, length: 2, delimiter: ':', parts: [[8, 8, 'hex:2'], [0, 8, 'hex:2']]}\n"
+  payload: "0a3f"
+  expected: "0a:3f"
+
+- name: decimal_padded_with_prefix
+  schema: "name: t\nendian: big\nfields:\n  - {name: v, type: bitfield_string, length: 2, prefix: V, parts: [[8, 8, 'decimal:2'], [0, 8, 'decimal:3']]}\n"
+  payload: "0102"
+  expected: "V01.002"
+
+- name: sdecimal_pair
+  schema: "name: t\nendian: big\nfields:\n  - {name: v, type: bitfield_string, length: 2, delimiter: ',', parts: [[8, 8, sdecimal], [0, 8, sdecimal]]}\n"
+  payload: "fb03"
+  expected: "-5,3"
+
+- name: sdecimal_sign_precedes_padding
+  schema: "name: t\nendian: big\nfields:\n  - {name: v, type: bitfield_string, length: 1, parts: [[0, 8, 'sdecimal:2']]}\n"
+  payload: "fb"
+  expected: "-05"
+
+- name: a_width_never_cuts
+  schema: "name: t\nendian: big\nfields:\n  - {name: v, type: bitfield_string, length: 2, parts: [[0, 16, 'hex:2']]}\n"
+  payload: "1234"
+  expected: "1234"
+
+- name: a_decimal_width_never_cuts
+  schema: "name: t\nendian: big\nfields:\n  - {name: v, type: bitfield_string, length: 1, parts: [[0, 8, 'decimal:2']]}\n"
+  payload: "ff"
+  expected: "255"
+
+- name: upper_case_takes_a_width
+  schema: "name: t\nendian: big\nfields:\n  - {name: v, type: bitfield_string, length: 1, parts: [[0, 8, 'hex:upper:4']]}\n"
+  payload: "0a"
+  expected: "000A"
+
+- name: sdecimal_minimum
+  schema: "name: t\nendian: big\nfields:\n  - {name: v, type: bitfield_string, length: 1, parts: [[0, 8, sdecimal]]}\n"
+  payload: "80"
+  expected: "-128"
+
+- name: sdecimal_positive_padded
+  schema: "name: t\nendian: big\nfields:\n  - {name: v, type: bitfield_string, length: 1, parts: [[0, 8, 'sdecimal:3']]}\n"
+  payload: "05"
+  expected: "005"
+
+- name: sdecimal_nibbles
+  schema: "name: t\nendian: big\nfields:\n  - {name: v, type: bitfield_string, length: 1, parts: [[4, 4, sdecimal], [0, 4, sdecimal]]}\n"
+  payload: "f7"
+  expected: "-1.7"
+
+- name: sdecimal_64_bits_minus_one
+  schema: "name: t\nendian: big\nfields:\n  - {name: v, type: bitfield_string, length: 8, parts: [[0, 64, sdecimal]]}\n"
+  payload: "ffffffffffffffff"
+  expected: "-1"
+
+- name: sdecimal_64_bits_minimum
+  schema: "name: t\nendian: big\nfields:\n  - {name: v, type: bitfield_string, length: 8, parts: [[0, 64, sdecimal]]}\n"
+  payload: "8000000000000000"
+  expected: "-9223372036854775808"
+
+- name: hex_64_bits_padded
+  schema: "name: t\nendian: big\nfields:\n  - {name: v, type: bitfield_string, length: 8, parts: [[0, 64, 'hex:20']]}\n"
+  payload: "ffffffffffffffff"
+  expected: "0000ffffffffffffffff"
+
+- name: width_32
+  schema: "name: t\nendian: big\nfields:\n  - {name: v, type: bitfield_string, length: 1, parts: [[0, 8, 'decimal:32']]}\n"
+  payload: "07"
+  expected: "00000000000000000000000000000007"
+
+cases:
+
+- name: hex_padded
+  schema: "name: t\nendian: big\nfields:\n  - {name: v, type: bitfield_string, length: 2, delimiter: ':', parts: [[8, 8, 'hex:2'], [0, 8, 'hex:2']]}\n"
+  input: '{"v": "0a:3f"}'
+  payload: "0a3f"
+
+- name: decimal_padded_with_prefix
+  schema: "name: t\nendian: big\nfields:\n  - {name: v, type: bitfield_string, length: 2, prefix: V, parts: [[8, 8, 'decimal:2'], [0, 8, 'decimal:3']]}\n"
+  input: '{"v": "V01.002"}'
+  payload: "0102"
+
+- name: sdecimal_pair
+  schema: "name: t\nendian: big\nfields:\n  - {name: v, type: bitfield_string, length: 2, delimiter: ',', parts: [[8, 8, sdecimal], [0, 8, sdecimal]]}\n"
+  input: '{"v": "-5,3"}'
+  payload: "fb03"
+
+- name: sdecimal_padded_negative
+  schema: "name: t\nendian: big\nfields:\n  - {name: v, type: bitfield_string, length: 1, parts: [[0, 8, 'sdecimal:2']]}\n"
+  input: '{"v": "-05"}'
+  payload: "fb"
+
+- name: leading_zeros_are_accepted
+  schema: "name: t\nendian: big\nfields:\n  - {name: v, type: bitfield_string, length: 1, parts: [[0, 8, decimal]]}\n"
+  input: '{"v": "007"}'
+  payload: "07"
+
+- name: leading_zeros_on_sdecimal
+  schema: "name: t\nendian: big\nfields:\n  - {name: v, type: bitfield_string, length: 1, parts: [[0, 8, sdecimal]]}\n"
+  input: '{"v": "-0005"}'
+  payload: "fb"
+
+- name: hex_any_case_with_a_width
+  schema: "name: t\nendian: big\nfields:\n  - {name: v, type: bitfield_string, length: 1, parts: [[0, 8, 'hex:upper:4']]}\n"
+  input: '{"v": "00aB"}'
+  payload: "ab"
+
+- name: sdecimal_minimum
+  schema: "name: t\nendian: big\nfields:\n  - {name: v, type: bitfield_string, length: 1, parts: [[0, 8, sdecimal]]}\n"
+  input: '{"v": "-128"}'
+  payload: "80"
+
+- name: sdecimal_64_bits_minimum
+  schema: "name: t\nendian: big\nfields:\n  - {name: v, type: bitfield_string, length: 8, parts: [[0, 64, sdecimal]]}\n"
+  input: '{"v": "-9223372036854775808"}'
+  payload: "8000000000000000"
+
+- name: decimal_64_bits_maximum
+  schema: "name: t\nendian: big\nfields:\n  - {name: v, type: bitfield_string, length: 8, parts: [[0, 64, decimal]]}\n"
+  input: '{"v": "18446744073709551615"}'
+  payload: "ffffffffffffffff"
+
+- name: sdecimal_below_its_range
+  schema: "name: t\nendian: big\nfields:\n  - {name: v, type: bitfield_string, length: 1, parts: [[0, 8, sdecimal]]}\n"
+  input: '{"v": "-129"}'
+  error: "Field 'v': segment '-129' does not fit a 8-bit sdecimal part, -128 to 127 (PS-583)"
+
+- name: sdecimal_above_its_range
+  schema: "name: t\nendian: big\nfields:\n  - {name: v, type: bitfield_string, length: 1, parts: [[0, 8, sdecimal]]}\n"
+  input: '{"v": "128"}'
+  error: "Field 'v': segment '128' does not fit a 8-bit sdecimal part, -128 to 127 (PS-583)"
+
+- name: decimal_above_its_range
+  schema: "name: t\nendian: big\nfields:\n  - {name: v, type: bitfield_string, length: 1, parts: [[0, 8, 'decimal:2']]}\n"
+  input: '{"v": "256"}'
+  error: "Field 'v': segment '256' does not fit a 8-bit decimal part, 0 to 255 (PS-583)"
+
+- name: hex_above_its_range
+  schema: "name: t\nendian: big\nfields:\n  - {name: v, type: bitfield_string, length: 1, parts: [[0, 8, 'hex:2']]}\n"
+  input: '{"v": "100"}'
+  error: "Field 'v': segment '100' does not fit a 8-bit hex part, 0 to 255 (PS-583)"
+
+- name: sdecimal_nibble_above_its_range
+  schema: "name: t\nendian: big\nfields:\n  - {name: v, type: bitfield_string, length: 1, parts: [[4, 4, sdecimal], [0, 4, sdecimal]]}\n"
+  input: '{"v": "8.0"}'
+  error: "Field 'v': segment '8' does not fit a 4-bit sdecimal part, -8 to 7 (PS-583)"
+
+- name: decimal_64_bits_above_its_range
+  schema: "name: t\nendian: big\nfields:\n  - {name: v, type: bitfield_string, length: 8, parts: [[0, 64, decimal]]}\n"
+  input: '{"v": "18446744073709551616"}'
+  error: "Field 'v': segment '18446744073709551616' does not fit a 64-bit decimal part, 0 to 18446744073709551615 (PS-583)"
+
+- name: sdecimal_64_bits_below_its_range
+  schema: "name: t\nendian: big\nfields:\n  - {name: v, type: bitfield_string, length: 8, parts: [[0, 64, sdecimal]]}\n"
+  input: '{"v": "-9223372036854775809"}'
+  error: "Field 'v': segment '-9223372036854775809' does not fit a 64-bit sdecimal part, -9223372036854775808 to 9223372036854775807 (PS-583)"
+
+- name: not_a_number
+  schema: "name: t\nendian: big\nfields:\n  - {name: v, type: bitfield_string, length: 1, parts: [[0, 8, sdecimal]]}\n"
+  input: '{"v": "x1"}'
+  error: "Field 'v': segment 'x1' is not a sdecimal part (PS-096)"
+
+- name: a_sign_only_on_sdecimal
+  schema: "name: t\nendian: big\nfields:\n  - {name: v, type: bitfield_string, length: 1, parts: [[0, 8, decimal]]}\n"
+  input: '{"v": "-1"}'
+  error: "Field 'v': segment '-1' is not a decimal part (PS-096)"
+
+- name: a_plus_sign_is_not_a_part
+  schema: "name: t\nendian: big\nfields:\n  - {name: v, type: bitfield_string, length: 1, parts: [[0, 8, sdecimal]]}\n"
+  input: '{"v": "+1"}'
+  error: "Field 'v': segment '+1' is not a sdecimal part (PS-096)"
+
+- name: a_sign_on_hex
+  schema: "name: t\nendian: big\nfields:\n  - {name: v, type: bitfield_string, length: 1, parts: [[0, 8, 'hex:2']]}\n"
+  input: '{"v": "-1"}'
+  error: "Field 'v': segment '-1' is not a hex part (PS-096)"
+
+load:
+
+- name: format_hex_0
+  schema: "name: t\nendian: big\nfields:\n  - {name: v, type: bitfield_string, length: 1, parts: [[0, 8, 'hex:0']]}\n"
+  error: "bitfield_string part format must be decimal, sdecimal, hex or hex:upper, with an optional :N width from 1 to 32, not 'hex:0' (PS-430)"
+
+- name: format_hex_33
+  schema: "name: t\nendian: big\nfields:\n  - {name: v, type: bitfield_string, length: 1, parts: [[0, 8, 'hex:33']]}\n"
+  error: "bitfield_string part format must be decimal, sdecimal, hex or hex:upper, with an optional :N width from 1 to 32, not 'hex:33' (PS-430)"
+
+- name: format_decimal_02
+  schema: "name: t\nendian: big\nfields:\n  - {name: v, type: bitfield_string, length: 1, parts: [[0, 8, 'decimal:02']]}\n"
+  error: "bitfield_string part format must be decimal, sdecimal, hex or hex:upper, with an optional :N width from 1 to 32, not 'decimal:02' (PS-430)"
+
+- name: format_octal
+  schema: "name: t\nendian: big\nfields:\n  - {name: v, type: bitfield_string, length: 1, parts: [[0, 8, 'octal']]}\n"
+  error: "bitfield_string part format must be decimal, sdecimal, hex or hex:upper, with an optional :N width from 1 to 32, not 'octal' (PS-430)"
+
+- name: format_sdecimal_x
+  schema: "name: t\nendian: big\nfields:\n  - {name: v, type: bitfield_string, length: 1, parts: [[0, 8, 'sdecimal:x']]}\n"
+  error: "bitfield_string part format must be decimal, sdecimal, hex or hex:upper, with an optional :N width from 1 to 32, not 'sdecimal:x' (PS-430)"
+
+- name: format_hex
+  schema: "name: t\nendian: big\nfields:\n  - {name: v, type: bitfield_string, length: 1, parts: [[0, 8, 'HEX']]}\n"
+  error: "bitfield_string part format must be decimal, sdecimal, hex or hex:upper, with an optional :N width from 1 to 32, not 'HEX' (PS-430)"
+
+- name: format_hex_upper_
+  schema: "name: t\nendian: big\nfields:\n  - {name: v, type: bitfield_string, length: 1, parts: [[0, 8, 'hex:upper:']]}\n"
+  error: "bitfield_string part format must be decimal, sdecimal, hex or hex:upper, with an optional :N width from 1 to 32, not 'hex:upper:' (PS-430)"
+
+- name: format_sdecimal_1_2
+  schema: "name: t\nendian: big\nfields:\n  - {name: v, type: bitfield_string, length: 1, parts: [[0, 8, 'sdecimal:1:2']]}\n"
+  error: "bitfield_string part format must be decimal, sdecimal, hex or hex:upper, with an optional :N width from 1 to 32, not 'sdecimal:1:2' (PS-430)"

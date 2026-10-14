@@ -680,6 +680,35 @@ Parse bits into formatted string (e.g., version numbers):
 # Input: 0x0102 → Output: "v1.2"
 ```
 
+A part's third element is its format (PS-430): `decimal` (the default), `sdecimal`, `hex`
+(lower case) or `hex:upper`, optionally followed by `:N`, a minimum width from 1 to 32.
+With `:N` a part is zero-filled on the left to `N` digits; a part already that wide or wider
+is written in full, never cut. `sdecimal` reads the part's bits as two's complement of its
+width and writes a `-` before any padding, so -5 as `sdecimal:2` is `"-05"` (PS-582). Quote
+a format carrying `:N`.
+
+```yaml
+- name: mac_tail                   # 0x0A3F -> "0a:3f"
+  type: bitfield_string
+  length: 2
+  delimiter: ":"
+  parts:
+    - [8, 8, "hex:2"]
+    - [0, 8, "hex:2"]
+- name: ai_offsets                 # 0xFB03 -> "-5,3"
+  type: bitfield_string
+  length: 2
+  delimiter: ","
+  parts:
+    - [8, 8, sdecimal]
+    - [0, 8, sdecimal]
+```
+
+Encoding parses each segment by its format: leading zeros are accepted, hex in either case,
+and a `-` only on `sdecimal` (PS-096, PS-431). A segment the part's width cannot hold - 0 to
+2^w - 1, or -2^(w-1) to 2^(w-1) - 1 for `sdecimal` - is rejected naming the field and the
+segment, never masked (PS-583).
+
 ## Test Vectors
 
 ```yaml

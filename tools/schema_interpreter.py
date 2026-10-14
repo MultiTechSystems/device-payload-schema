@@ -2342,6 +2342,99 @@ def encode_numeral(name: Any, value: Any, length: Optional[int], numeral: str) -
     return sign + digits.rjust(width - len(sign), '0')
 
 
+# PS-430, PS-582, PS-583 (CR-2026-170): a bitfield_string part format is decimal, sdecimal, hex
+# or hex:upper, optionally followed by `:N`, a minimum width from 1 to 32 that never cuts.
+# One helper per job, so the template formats of CR-2026-176 can reuse format_part_number.
+PART_BASES = ('decimal', 'sdecimal', 'hex', 'hex:upper')
+
+
+def part_format_error(fmt: Any) -> Optional[str]:
+    """The PS-430 rejection of a part format, in the spec prototype's text, or None."""
+    try:
+        parse_part_format(fmt)
+    except ValueError as exc:
+        return str(exc)
+    return None
+
+
+def parse_part_format(fmt: Any) -> Tuple[str, Optional[int]]:
+    """A part format's base and its minimum width (None where it declares none). Any other
+    format - a width of 0 or over 32, a zero-led width, another base - is a ValueError
+    (PS-430)."""
+    text = fmt if isinstance(fmt, str) else None
+    if text is not None:
+        for base in sorted(PART_BASES, key=len, reverse=True):
+            if text == base:
+                return base, None
+            if text.startswith(base + ':'):
+                width = text[len(base) + 1:]
+                if re.fullmatch(r'[1-9][0-9]?', width) and int(width) <= 32:
+                    return base, int(width)
+    raise ValueError(f"bitfield_string part format must be decimal, sdecimal, hex or "
+                     f"hex:upper, with an optional :N width from 1 to 32, not {fmt!r} (PS-430)")
+
+
+def format_part_number(number: int, base: str, width: Optional[int]) -> str:
+    """An integer in a part format's base (PS-430): lower- or upper-case hex, else decimal; a
+    negative one with a leading `-` before the padding (PS-582); zero-filled on the left to
+    `width` digits, never cut."""
+    digits = (format(abs(number), 'x') if base == 'hex' else
+              format(abs(number), 'X') if base == 'hex:upper' else str(abs(number)))
+    if width is not None:
+        digits = digits.rjust(width, '0')
+    return ('-' if number < 0 else '') + digits
+
+
+def format_bitfield_part(raw: int, bits: int, fmt: Any) -> str:
+    """One part of a bitfield_string from its unsigned bits: `sdecimal` reads them as two's
+    complement of the part's width (PS-582)."""
+    base, width = parse_part_format(fmt)
+    if base == 'sdecimal' and bits > 0 and raw >= 1 << (bits - 1):
+        raw -= 1 << bits
+    return format_part_number(raw, base, width)
+
+
+_SEGMENT_PATTERNS = {'decimal': re.compile(r'[0-9]+'), 'sdecimal': re.compile(r'-?[0-9]+'),
+                     'hex': re.compile(r'[0-9A-Fa-f]+'), 'hex:upper': re.compile(r'[0-9A-Fa-f]+')}
+
+
+def parse_bitfield_segment(segment: str, bits: int, fmt: Any, name: Any) -> int:
+    """One segment back to its part's unsigned bits (PS-096, PS-431, PS-583): leading zeros
+    are accepted, a hex segment without regard to case, a `-` only on `sdecimal`. A value the
+    part's width cannot hold is rejected, never masked."""
+    base, _ = parse_part_format(fmt)
+    text = segment.strip()
+    if not _SEGMENT_PATTERNS[base].fullmatch(text):
+        raise FieldError(f"Field '{name}': segment {segment!r} is not a {base} part (PS-096)")
+    number = int(text, 16 if base.startswith('hex') else 10)
+    low, high = ((-(1 << (bits - 1)), (1 << (bits - 1)) - 1) if base == 'sdecimal'
+                 else (0, (1 << bits) - 1))
+    if not low <= number <= high:
+        raise FieldError(f"Field '{name}': segment {segment!r} does not fit a {bits}-bit "
+                         f"{base} part, {low} to {high} (PS-583)")
+    return number & ((1 << bits) - 1)
+
+
+def bitfield_part_errors(node, _top=True):
+    """PS-430: every bitfield_string part's format, walked over the whole schema."""
+    errors = []
+    if isinstance(node, list):
+        for item in node:
+            errors.extend(bitfield_part_errors(item, False))
+    elif isinstance(node, dict):
+        if node.get('type') == 'bitfield_string' and isinstance(node.get('parts'), list):
+            for part in node['parts']:
+                if isinstance(part, list) and len(part) > 2:
+                    problem = part_format_error(part[2])
+                    if problem:
+                        errors.append(problem)
+        for key, value in node.items():
+            if _top and key == 'test_vectors':
+                continue
+            errors.extend(bitfield_part_errors(value, False))
+    return errors
+
+
 def encode_ascii(name: Any, value: Any, length: Optional[int],
                  warnings: List[str]) -> bytes:
     """PS-537: a character above U+00FF, or a value longer than a fixed `length`, is
@@ -3240,6 +3333,7 @@ def schema_iterator_errors(schema):
     errors = field_name_errors(schema)
     errors.extend(withdrawn_errors(schema))                          # CR-2026-159
     errors.extend(numeral_errors(schema))                            # PS-560
+    errors.extend(bitfield_part_errors(schema))                      # PS-430
     errors.extend(lookup_type_errors(schema))                        # PS-571
     errors.extend(iterator_errors(schema.get('fields')))
     errors.extend(ipso_instance_errors(schema))                      # PS-548
@@ -5670,17 +5764,9 @@ class SchemaInterpreter:
             fmt = part[2] if len(part) >= 3 else 'decimal'
             mask = (1 << bit_len) - 1
             raw = (int_val >> bit_off) & mask
-            # PS-430 (CR-2026-066): `hex` lower case, `hex:upper` upper case, `decimal`
-            # the default; any other part format is rejected rather than read as decimal.
-            if fmt == 'hex':
-                part_strs.append(format(raw, 'x'))
-            elif fmt == 'hex:upper':
-                part_strs.append(format(raw, 'X'))
-            elif fmt == 'decimal':
-                part_strs.append(str(raw))
-            else:
-                raise ValueError(f"bitfield_string part format {fmt!r} is not one of "
-                                 f"decimal, hex, hex:upper (PS-430)")
+            # PS-430, PS-582: the part's format writes it; any other format is refused
+            # when the schema is loaded.
+            part_strs.append(format_bitfield_part(raw, bit_len, fmt))
         
         return prefix + delimiter.join(part_strs), pos
     
@@ -7716,10 +7802,9 @@ class SchemaInterpreter:
             bit_len = int(part[1])
             fmt = part[2] if len(part) > 2 else 'decimal'
             seg = segments[i] if i < len(segments) else '0'
-            # PS-431: a hex segment is read without regard to case.
-            val = int(seg, 16) if fmt in ('hex', 'hex:upper') else int(seg)
-            mask = (1 << bit_len) - 1
-            int_val |= (val & mask) << bit_off
+            # PS-096, PS-431, PS-583: parsed by the part's format, a value the width cannot
+            # hold rejected rather than masked.
+            int_val |= parse_bitfield_segment(seg, bit_len, fmt, field_def.get('name')) << bit_off
         
         # PS-050a: in the field's own byte order, as it is decoded.
         return int_val.to_bytes(length, self._bitfield_string_order(field_def), signed=False)

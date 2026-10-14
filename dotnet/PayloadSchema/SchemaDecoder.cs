@@ -702,19 +702,13 @@ public static class SchemaDecoder
                     if (part.Count < 2) continue;
                     var (_, bitOff) = Helpers.ToInt(part[0]);
                     var (_, bitLen) = Helpers.ToInt(part[1]);
-                    string format = part.Count >= 3 && part[2] is string f ? f : "decimal";
+                    object? format = part.Count >= 3 ? part[2] : "decimal";
                     // C# takes a shift count mod 64, so `(1UL << 64) - 1` was 0 and a
                     // 64-bit part read 0.
                     ulong mask = bitLen >= 64 ? ulong.MaxValue : (1UL << bitLen) - 1;
                     ulong raw = bitOff >= 64 ? 0 : (intVal >> bitOff) & mask;
-                    // PS-430: hex lower case, hex:upper upper case; any other format is
-                    // refused when the schema is loaded.
-                    partStrs.Add(format switch
-                    {
-                        "hex" => raw.ToString("x"),
-                        "hex:upper" => raw.ToString("X"),
-                        _ => raw.ToString(),
-                    });
+                    // PS-430, PS-582: the part's format writes it (checked at load).
+                    partStrs.Add(BitfieldParts.FormatPart(raw, bitLen, format));
                 }
                 value = prefix + string.Join(delimiter, partStrs);
                 break;

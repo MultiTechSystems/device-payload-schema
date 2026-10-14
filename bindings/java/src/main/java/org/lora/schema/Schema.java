@@ -608,7 +608,7 @@ public class Schema {
 
     /**
      * PS-426: match_value is withdrawn. PS-422: `encoding` is a named code on a uN.
-     * PS-430: a bitfield_string part is decimal, hex or hex:upper. PS-364: a byte_group
+     * PS-430: a bitfield_string part is decimal, sdecimal, hex or hex:upper, with an optional :N. PS-364: a byte_group
      * member declares no endian.
      */
     @SuppressWarnings("unchecked")
@@ -632,11 +632,8 @@ public class Schema {
         }
         if ("bitfield_string".equals(fm.get("type")) && fm.get("parts") instanceof List<?> parts) {
             for (Object raw : parts) {
-                if (raw instanceof List<?> part && part.size() > 2
-                        && !List.of("decimal", "hex", "hex:upper").contains(part.get(2))) {
-                    throw new SchemaException(at + "bitfield_string part format " + part.get(2)
-                            + " is not one of decimal, hex, hex:upper (PS-430)");
-                }
+                // PS-430 (CR-2026-170): the spec prototype's text, unprefixed.
+                if (raw instanceof List<?> part && part.size() > 2) BitfieldParts.parse(part.get(2));
             }
         }
         Object group = fm.get("byte_group");
@@ -3053,23 +3050,16 @@ public class Schema {
                 
                 int bitOff = toInt(part.get(0), 0);
                 int bitLen = toInt(part.get(1), 0);
-                String format = part.size() >= 3 ? String.valueOf(part.get(2)) : "decimal";
+                Object format = part.size() >= 3 ? part.get(2) : "decimal";
                 
                 // The value is unsigned: a logical shift, and a 64-bit part's mask is all
                 // ones - Java takes a shift count mod 64, so `(1L << 64) - 1` was 0 and
-                // a 64-bit part read 0. Rendered unsigned for the same reason.
+                // a 64-bit part read 0.
                 long mask = bitLen >= 64 ? -1L : (1L << bitLen) - 1;
                 long raw = bitOff >= 64 ? 0 : (intVal >>> bitOff) & mask;
                 
-                // PS-430: hex lower case, hex:upper upper case; any other format is
-                // refused when the schema is loaded.
-                if ("hex".equals(format)) {
-                    partStrs.add(Long.toHexString(raw));
-                } else if ("hex:upper".equals(format)) {
-                    partStrs.add(Long.toHexString(raw).toUpperCase());
-                } else {
-                    partStrs.add(Long.toUnsignedString(raw));
-                }
+                // PS-430, PS-582: the part's format writes it (checked at load).
+                partStrs.add(BitfieldParts.format(raw, bitLen, format));
             }
         }
         

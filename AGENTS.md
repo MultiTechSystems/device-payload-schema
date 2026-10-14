@@ -232,10 +232,10 @@ implementation has a runner that reads the same YAML and the same vectors:
 
 | Implementation | Runner | Decode floor | Re-encode floor |
 |---|---|---|---|
-| Python | `tests/test_corpus_conformance.py` | every vector | 2206 |
-| Go | `go/schema/corpus_conformance_test.go` | 2808 | 2224 (plain API 2196) |
-| C# | `dotnet/PayloadSchema.Tests/CorpusConformanceTests.cs` | 2808 | 2207 |
-| Java | `bindings/java/.../CorpusConformanceTest.java` | 2808 | 2206 |
+| Python | `tests/test_corpus_conformance.py` | every vector | 2220 |
+| Go | `go/schema/corpus_conformance_test.go` | 2822 | 2238 (plain API 2210) |
+| C# | `dotnet/PayloadSchema.Tests/CorpusConformanceTests.cs` | 2822 | 2221 |
+| Java | `bindings/java/.../CorpusConformanceTest.java` | 2822 | 2220 |
 | C | `tools/c-corpus-harness.py` (builds each expressible schema through the struct API) | 575 of 575 attempted | n/a |
 
 These figures move with every schema added. `make check-floors` prints each floor beside
@@ -824,10 +824,10 @@ exercised to the best-covered part of the project:
 
 | | Runner | Round-trips |
 |---|---|---|
-| Python | `tests/test_encode_round_trip.py` | 2206 |
-| Go | `go/schema/corpus_encode_test.go` | 2224 (plain 2196) |
-| Java | `bindings/java/.../CorpusEncodeRoundTripTest.java` | 2206 |
-| C# | `dotnet/.../CorpusEncodeRoundTripTests.cs` | 2207 |
+| Python | `tests/test_encode_round_trip.py` | 2220 |
+| Go | `go/schema/corpus_encode_test.go` | 2238 (plain 2210) |
+| Java | `bindings/java/.../CorpusEncodeRoundTripTest.java` | 2220 |
+| C# | `dotnet/.../CorpusEncodeRoundTripTests.cs` | 2221 |
 | C | `src/test_encoder.c`, built by `make test-c` (unit tests, not a corpus round trip) | n/a |
 
 - **A name may be an object under one tag and a scalar under another, and a tlv encoder
@@ -3427,6 +3427,55 @@ improved. The Go, Java and C# corpus runners write per-vector reports only when
     added, so **no floor moves**. `make gate-verdicts` rule 3 holds the four producers equal.
   - **Cases:** `tests/cr-2026-178-cases.yaml` (the prototype's three tests as eight), read by
     `test_cr_2026_178_cases.py`, Go `cr178_test.go`, Java `CR2026178Test`, C# `CR2026_178Tests`.
+
+- **CR-2026-170 (PS-430, PS-582 and PS-583 new, PS-096 amended; la-payload-schema main for
+  0.5.7): padded and signed bitfield_string parts.** A part format is `decimal`, `sdecimal`,
+  `hex` or `hex:upper`, optionally followed by `:N`, a minimum width from 1 to 32: a part with
+  fewer digits is zero-filled on the left, one with more is written in full, never cut (so
+  arwin's `slice(-2)` minor of 255 reads `255` here, not the vendor's `55`). `sdecimal` reads
+  the part's bits as two's complement of its width and writes `-` before the padding (`-5` as
+  `sdecimal:2` is `-05`).
+  - **Load (PS-430), the prototype's text, unprefixed:** `bitfield_string part format must be
+    decimal, sdecimal, hex or hex:upper, with an optional :N width from 1 to 32, not 'hex:0'
+    (PS-430)` - a width of 0 or over 32, a zero-led width (`decimal:02`), another base or case
+    (`HEX`, `octal`). Python `bitfield_part_errors` in `schema_iterator_errors` (so the
+    interpreter, the validator - whose own `'decimal', 'hex' or 'hex:upper'` check is gone - and
+    the TS013 generator); Go `parsePartFormat` from `checkFieldRules`; Java `BitfieldParts.parse`
+    from `checkWave4`'s bitfield block; C# `BitfieldParts.Parse` from `SchemaParser`. Each used to
+    reject anything but the three old formats with its own text and a field prefix.
+  - **Encode (PS-096, PS-583):** a segment is parsed by its part's format - leading zeros
+    accepted, hex in either case, a `-` only on `sdecimal`, surrounding whitespace stripped,
+    nothing else (`+1` is refused) - and a value the width cannot hold is rejected, never masked:
+    `Field 'v': segment '128' does not fit a 8-bit sdecimal part, -128 to 127 (PS-583)` and
+    `Field 'v': segment 'x1' is not a sdecimal part (PS-096)`, the segment as Python's repr.
+    **Measured before:** every encoder masked an out-of-range segment into its bits (`256` in an
+    8-bit part wrote 0); Python took `int()`'s grammar (`+7`, `1_0`), Go wrote 0 for a segment
+    it could not parse, and the codec took `parseInt`'s numeric prefix (`12ab` as 12); Java and
+    C# refused an unparsable one with their own text.
+  - **One helper set per language, and the formatting is one function** so CR-2026-176's
+    template formats can reuse it: Python `parse_part_format` / `format_part_number` /
+    `format_bitfield_part` / `parse_bitfield_segment`, Go `go/schema/cr170.go`
+    (`formatPartNumber`), Java `BitfieldParts` (`formatNumber`), C# `BitfieldParts.cs`
+    (`FormatNumber`), the codec's `partFormat` / `partText` / `bitfieldPart` and the runtime's
+    `encSegmentBits` (exact at 64 bits through byte and bit arrays, no BigInt). Go, Java and C#
+    parse a segment through a big integer, so a 64-bit range check is exact.
+  - **Not changed:** a string with fewer segments than parts still fills the rest with `0`, and
+    extra segments are ignored, in all five; the prototype rejects a count mismatch.
+  - **C:** has no bitfield_string; `tools/schema_binary.py` already refuses the type by name.
+  - **Vocabulary:** no new key. `schemas/payload-schema.json` now describes the third element of
+    a part with a pattern; `docs/SCHEMA-LANGUAGE-REFERENCE.md`'s Bitfield String section gains
+    the formats.
+  - **Measured:** decode and encode output unchanged, and nothing rejected at load, for all 248
+    corpus and private-registry schemas carrying a bitfield_string (Python, every vector
+    decoded and re-encoded before and after).
+  - **Cases:** `tests/cr-2026-170-cases.yaml` (decode, encode and load lists; the prototype's
+    `TestCR2026170BitfieldStringParts` case for case, plus 64-bit, nibble and width-32 cases),
+    read by `test_cr_2026_170_cases.py` (reference, validator and generated codec), Go
+    `cr170_test.go`, Java `CR2026170Test`, C# `CR2026_170Tests`. Fixture
+    `_language-conformance/bitfield-string-padded-signed.yaml` (five ports, 14 vectors, all
+    round-tripping). **Floors:** decode 2801 -> 2815 in Go, Java and C#; re-encode +14
+    everywhere (Python and Java 2199 -> 2213, C# 2200 -> 2214, Go 2217 -> 2231, plain 2189 ->
+    2203), `plain fixed` 185 -> 199.
 
 ## Converting a vendor codec
 
