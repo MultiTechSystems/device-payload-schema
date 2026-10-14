@@ -532,8 +532,8 @@ func checkPortDeclarations(raw map[string]any) error {
 // checkAnnotations holds PS-510 (CR-2026-102): a field's `ipso` is a mapping carrying
 // `object`, and its `senml` a mapping. `ipso: 3303` loaded and was dropped, so the author
 // believed the field annotated and no consumer saw an annotation. The wording is the spec
-// prototype's, and Python, Java and C# give it identically. The legacy
-// `semantic: {ipso: N}` is a different key, outside PS-510.
+// prototype's, and Python, Java and C# give it identically. A `semantic` is a string, a
+// TTN normalized path (PS-470, CR-2026-179).
 func checkAnnotations(field map[string]any) error {
 	name, ok := field["name"].(string)
 	if !ok {
@@ -547,6 +547,12 @@ func checkAnnotations(field map[string]any) error {
 	}
 	if senml, has := field["senml"]; has && asStringMap(senml) == nil {
 		return fmt.Errorf("The senml of '%s' is a mapping, such as {unit: Cel} (PS-510)", name)
+	}
+	if semantic, has := field["semantic"]; has {
+		// PS-470 (CR-2026-179): a TTN normalized path, so a string.
+		if _, ok := semantic.(string); !ok {
+			return fmt.Errorf("The semantic of '%s' is a string naming a normalized measurement type, such as air.temperature (PS-470)", name)
+		}
 	}
 	return nil
 }

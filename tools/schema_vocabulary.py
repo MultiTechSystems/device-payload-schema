@@ -62,7 +62,7 @@ READERS: Dict[str, List[str]] = {
         "bindings/java/src/test/java/org/lora/schema/CorpusConformanceTest.java",
     ],
     "verdicts": ["tools/vector-verdicts.py"],
-    # The binary schema encoders, which read the `semantic: {ipso: N}` form.
+    # The binary schema encoders.
     "binary": ["tools/schema_binary.py", "tools/binary_schema.py"],
     # Documentation, for an annotation no code reads: the key must be described there.
     "doc:reference": ["docs/SCHEMA-LANGUAGE-REFERENCE.md"],
@@ -169,7 +169,10 @@ VOCABULARY: Dict[str, Dict[str, Tuple[Tuple[str, ...], str]]] = {
         "unit": (("py", "score", "outschema"), "annotation"),
         "ipso": (("py", "score"), "annotation"),
         "senml": (("py", "score"), "annotation"),
-        "semantic": (("py", "score"), "annotation"),
+        "semantic": (
+            ("py", "go", "java", "cs", "score"),
+            "a TTN normalized path: _meta (PS-600), normalizeUplink (PS-598, PS-599)",
+        ),
     },
     "match": {
         "field": (_DECODERS, "discriminator reference"),
@@ -203,12 +206,6 @@ VOCABULARY: Dict[str, Dict[str, Tuple[Tuple[str, ...], str]]] = {
         "endian": (_DECODERS, "the group's byte order; members declare none (PS-364)"),
         "fields": (_DECODERS, "members"),
         "size": (_DECODERS, "shared byte count"),
-    },
-    "semantic": {
-        "ipso": (
-            ("binary",),
-            "the `semantic: {ipso: N}` form the binary encoders read",
-        ),
     },
     "transform": {
         "add": (_DECODERS, "stage"),

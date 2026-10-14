@@ -177,9 +177,6 @@ def get_field_id(field: Dict) -> int:
     ipso = field.get('ipso')
     if isinstance(ipso, dict) and isinstance(ipso.get('object'), int):
         return ipso['object'] & 0xFFFF
-    sem = field.get('semantic')
-    if isinstance(sem, dict) and isinstance(sem.get('ipso'), int):
-        return sem['ipso'] & 0xFFFF
     return 0
 
 
