@@ -3153,8 +3153,11 @@ public class Schema {
         for (Field member : group.getByteGroup()) {
             ctx.setOffset(start);
             String name = member.getName();
-            if (name == null || name.isEmpty()) continue;
-            ctx.produced(member, null);                             // PS-490
+            String memberVar = member.getVar();
+            boolean hasName = name != null && !name.isEmpty();
+            boolean hasVar = memberVar != null && !memberVar.isEmpty();
+            if (!hasName && !hasVar) continue;
+            if (hasName) ctx.produced(member, null);                // PS-490
             try {
                 Object value;
                 if (member.getType() == FieldType.BITS) {
@@ -3170,11 +3173,14 @@ public class Schema {
                             0, member.getType().defaultLength() * 8), member, ctx);
                 }
                 if (value == OMITTED) {
-                    ctx.bindMissed(name, member);                   // PS-523
+                    if (hasName) ctx.bindMissed(name, member);      // PS-523
+                    if (hasVar) ctx.bindMissed(memberVar, member);  // and under its var
                     continue;
                 }
                 if (value == null) continue;
-                ctx.bind(name, member, value);                      // PS-523
+                if (hasName) ctx.bind(name, member, value);         // PS-523
+                if (hasVar) ctx.bind(memberVar, member, value);     // and under its var
+                if (!hasName) continue;
                 if (name.startsWith("_")) {
                     // PS-572: as the reference records a group member - a bool its flag,
                     // any other the number its name binds.
