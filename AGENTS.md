@@ -3893,3 +3893,29 @@ Known weaknesses, so you neither trip over them nor assume they are intentional:
   codec's over the corpus. The generated codec is chiefly a way to test and verify a
   schema: the deployment target is the interpreted schema, which replaces a device's JS
   codec rather than generating another one.
+
+- **CR-2026-171 (PS-390 amended; la-payload-schema main 9e8957a, for 0.5.7): `ties: up`.** A
+  `round` stage's `ties` is `even` (default), `away` or `up`; `up` rounds an exact tie toward
+  +infinity, as JavaScript's `Math.round` and `Math.floor(x + 0.5)` do, so -2.5 is -2 and -3.5 is
+  -3 (`away` gives -3 and -4, `even` -2 and -4). Any other value is rejected at load. Encoding is
+  untouched (a round stage is not inverted; PS-552).
+  - **Where:** Python `round_decimal` (`ROUND_HALF_UP`, or `ROUND_HALF_DOWN` for a negative exact
+    value) and a new load-time check in `transform_stage_errors` - Python used to fail only when
+    the stage was applied, so a schema with `ties: down` passed the validator and the generator
+    refused it separately; Go `roundHalfAwayDecimal(value, decimals, up)`; Java `applyTransform`
+    (`HALF_DOWN` for a negative value); C# `RoundHalfAwayDecimal(..., up)`; the TS13 generator's
+    `roundHalfUp` over `roundDecimal`, which now takes the rule by name (`'even'|'away'|'up'`).
+    Go, Java and C# already rejected an unknown `ties` at load. C: `schema_binary.py` refuses
+    every `transform`, so `ties` is a recorded C gap.
+  - **The CR's own example does not hold on exact values.** Raw -999 over `div: 20` is -49.95,
+    which binary64 stores at -49.9500000000000028, just beyond the tie; PS-390 rounds the stored
+    value (2.355 is not a tie either), so every rule gives -50.0. The spec prototype passes it
+    because it rounds `Decimal(repr(value))`, the shortest text, which this repository does not
+    do. The cases use exact ties (`div: 2`, `div: 4`, `div: 1000` for -0.125) and pin the CR's
+    example as `-50` (`the_cr_example_is_not_a_binary_tie`). Vendor JS rounds `x * 10`, where the
+    multiply does land on the tie; a schema wanting that needs `mult: 10` before the round stage.
+  - **Cases:** `tests/cr-2026-171-cases.yaml`, read by `test_cr_2026_171_ties_up.py` (reference,
+    validator, TS13 generator and the generated codec under node), Go `cr171_test.go`, Java
+    `CR2026171Test`, C# `CR2026_171Tests`. Fixture `_language-conformance/round-ties-up.yaml`
+    (one vector, negative and positive ties beside `away` and `even`): decode floors 2790 -> 2791
+    in Go, Java and C#; the vector cannot re-encode, so no re-encode floor moves.

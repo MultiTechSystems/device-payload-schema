@@ -806,8 +806,9 @@ public class Schema {
                 throw new SchemaException(at + "names an unknown operation (PS-390)");
             }
             Object ties = stage.get("ties");
-            if (ties != null && !"even".equals(ties) && !"away".equals(ties)) {
-                throw new SchemaException(at + "round `ties` must be even or away (PS-390)");
+            if (ties != null && !"even".equals(ties) && !"away".equals(ties)
+                    && !"up".equals(ties)) {
+                throw new SchemaException(at + "round `ties` must be even, away or up (PS-390)");
             }
         }
     }
@@ -3385,8 +3386,15 @@ public class Schema {
                 // away` rounds a tie away from zero (PS-390). BigDecimal(double) is the
                 // exact binary value, so a tie is recognised only where there is one.
                 if (Double.isNaN(value) || Double.isInfinite(value)) continue;
-                java.math.RoundingMode mode = "away".equals(stage.getTies())
-                        ? java.math.RoundingMode.HALF_UP : java.math.RoundingMode.HALF_EVEN;
+                // `up` is toward +infinity: HALF_UP for a non-negative value, HALF_DOWN
+                // (toward zero) for a negative one.
+                String ties = stage.getTies();
+                java.math.RoundingMode mode = "away".equals(ties)
+                        ? java.math.RoundingMode.HALF_UP
+                        : "up".equals(ties)
+                        ? (value < 0 ? java.math.RoundingMode.HALF_DOWN
+                                     : java.math.RoundingMode.HALF_UP)
+                        : java.math.RoundingMode.HALF_EVEN;
                 value = new java.math.BigDecimal(value).setScale(decimals, mode).doubleValue();
                 continue;
             }
