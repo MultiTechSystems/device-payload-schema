@@ -17,6 +17,7 @@ fields:
         - bit: 0
           fields:
             - name: total_solar_radiation
+              description: "Total solar radiation"
               type: u16
               transform:
                 - mult: 0.457763671875
@@ -26,9 +27,11 @@ fields:
         - bit: 1
           fields:
             - name: battery_voltage
+              description: "Battery voltage"
               type: u16
               div: 1000
               unit: "V"
+              semantic: "battery"
 test_vectors:
   - name: vendor_reference_1
     description: "Vendor-published test payload, decoded by the vendor's own decoder"

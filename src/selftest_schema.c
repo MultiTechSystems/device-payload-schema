@@ -1566,6 +1566,36 @@ static void test_a_byte_group_in_a_tlv_case(void) {
     TCHECK(result_get_int(&r, "device_status", -1) == 5);
 }
 
+/* A member's `var_name` binds as any field's does (member-var fixture): the mask of a
+ * following flagged block is the low nibble of the group, and 0x32 selects bit 1. */
+static void test_a_byte_group_member_binds_its_var(void) {
+    schema_t s;
+    decode_result_t r;
+    memset(&s, 0, sizeof(s));
+    s.endian = ENDIAN_BIG;
+    field_def_t g = field_byte_group(1, ENDIAN_DEFAULT, 4, 2);
+    schema_add_field(&s, &g);
+    field_def_t fl = field_flagged("$mask");
+    field_add_flagged_group(&fl, 0, 2, 1);
+    field_add_flagged_group(&fl, 1, 3, 1);
+    schema_add_field(&s, &fl);
+    field_def_t a = field_u8("a");
+    field_def_t b = field_u8("b");
+    schema_place_field(&s, 2, &a);
+    schema_place_field(&s, 3, &b);
+    field_def_t lo = field_bit_range("lo", 1, false, 0, 4, 0, ENDIAN_DEFAULT);
+    field_set_var(&lo, "mask");
+    field_def_t hi = field_bit_range("hi", 1, false, 4, 4, 0, ENDIAN_DEFAULT);
+    schema_place_field(&s, 4, &lo);
+    schema_place_field(&s, 5, &hi);
+    const uint8_t p[] = {0x32, 0x07};
+    TCHECK(schema_decode(&s, p, sizeof(p), &r) == SCHEMA_OK);
+    TCHECK(result_get_int(&r, "lo", -1) == 2);
+    TCHECK(result_get_int(&r, "hi", -1) == 3);
+    TCHECK(result_get_field(&r, "a") == NULL);
+    TCHECK(result_get_int(&r, "b", -1) == 7);
+}
+
 static void test_a_byte_group_encodes_as_decoded(void) {
     schema_t s;
     encode_inputs_t in;
@@ -1904,6 +1934,7 @@ void selftest_schema(void) {
     test_a_byte_group_reads_one_value();
     test_a_byte_group_is_checked();
     test_a_byte_group_in_a_tlv_case();
+    test_a_byte_group_member_binds_its_var();
     test_a_byte_group_encodes_as_decoded();
     test_a_nameless_schema_encodes_text_and_group_members_by_index();
     test_a_wide_bit_range_reads_its_base();

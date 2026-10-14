@@ -1273,11 +1273,11 @@
         "Add more test vectors (recommend at least 3)",
         "No test vector declares an independent source; add `source: vendor-doc|vendor-codec|field-capture` so the score reflects verification rather than self-consistency",
         "Add IPSO object mappings for standard sensors (2 fields)",
-        "  \u2192 latitude: add ipso: {object: 3336}",
-        "  \u2192 longitude: add ipso: {object: 3336}",
+        "  → latitude: add ipso: {object: 3336}",
+        "  → longitude: add ipso: {object: 3336}",
         "Add SenML units for standard sensors (2 fields)",
-        "  \u2192 latitude: add senml: {unit: \"lat\"}",
-        "  \u2192 longitude: add senml: {unit: \"lon\"}"
+        "  → latitude: add senml: {unit: \"lat\"}",
+        "  → longitude: add senml: {unit: \"lon\"}"
       ]
     },
     {
@@ -3560,11 +3560,11 @@
       },
       "recommendations": [
         "Add IPSO object mappings for standard sensors (3 fields)",
-        "  \u2192 precipitation: add ipso: {object: 3300}",
-        "  \u2192 vapor_pressure: add ipso: {object: 3323}",
+        "  → precipitation: add ipso: {object: 3300}",
+        "  → vapor_pressure: add ipso: {object: 3323}",
         "Add SenML units for standard sensors (3 fields)",
-        "  \u2192 precipitation: field is in 'mm'; SenML wants 'm' -- convert the value or declare the real unit before annotating",
-        "  \u2192 vapor_pressure: field is in 'kPa'; SenML wants 'Pa' -- convert the value or declare the real unit before annotating"
+        "  → precipitation: field is in 'mm'; SenML wants 'm' -- convert the value or declare the real unit before annotating",
+        "  → vapor_pressure: field is in 'kPa'; SenML wants 'Pa' -- convert the value or declare the real unit before annotating"
       ]
     },
     {
@@ -3646,11 +3646,11 @@
         "Add test vector for negative values",
         "Add test vectors covering all switch/flagged branches",
         "Add IPSO object mappings for standard sensors (9 fields)",
-        "  \u2192 lightning_average_distance: add ipso: {object: 3330}",
-        "  \u2192 wind_direction: add ipso: {object: 3332}",
+        "  → lightning_average_distance: add ipso: {object: 3330}",
+        "  → wind_direction: add ipso: {object: 3332}",
         "Add SenML units for standard sensors (8 fields)",
-        "  \u2192 lightning_average_distance: field is in 'km'; SenML wants 'm' -- convert the value or declare the real unit before annotating",
-        "  \u2192 wind_direction: add senml: {unit: \"deg\"}"
+        "  → lightning_average_distance: field is in 'km'; SenML wants 'm' -- convert the value or declare the real unit before annotating",
+        "  → wind_direction: add senml: {unit: \"deg\"}"
       ]
     },
     {
@@ -3721,11 +3721,11 @@
         "Add test vector for maximum values",
         "Add test vector for negative values",
         "Add IPSO object mappings for standard sensors (3 fields)",
-        "  \u2192 voltage_ratio: add ipso: {object: 3316}",
-        "  \u2192 temperature: add ipso: {object: 3303}",
+        "  → voltage_ratio: add ipso: {object: 3316}",
+        "  → temperature: add ipso: {object: 3303}",
         "Add SenML units for standard sensors (3 fields)",
-        "  \u2192 voltage_ratio: add senml: {unit: \"V\"}",
-        "  \u2192 temperature: add senml: {unit: \"Cel\"}"
+        "  → voltage_ratio: add senml: {unit: \"V\"}",
+        "  → temperature: add senml: {unit: \"Cel\"}"
       ]
     },
     {
@@ -3848,11 +3848,11 @@
         "Add test vector for negative values",
         "Add test vectors covering all switch/flagged branches",
         "Add IPSO object mappings for standard sensors (5 fields)",
-        "  \u2192 surface_temperature: add ipso: {object: 3303}",
-        "  \u2192 air_temperature: add ipso: {object: 3303}",
+        "  → surface_temperature: add ipso: {object: 3303}",
+        "  → air_temperature: add ipso: {object: 3303}",
         "Add SenML units for standard sensors (5 fields)",
-        "  \u2192 surface_temperature: add senml: {unit: \"Cel\"}",
-        "  \u2192 air_temperature: add senml: {unit: \"Cel\"}"
+        "  → surface_temperature: add senml: {unit: \"Cel\"}",
+        "  → air_temperature: add senml: {unit: \"Cel\"}"
       ]
     },
     {
@@ -3931,11 +3931,11 @@
         "Add test vector for negative values",
         "Add test vectors covering all switch/flagged branches",
         "Add IPSO object mappings for standard sensors (7 fields)",
-        "  \u2192 air_temperature_radiation_shield: add ipso: {object: 3303}",
-        "  \u2192 air_humidity_radiation_shield: add ipso: {object: 3304}",
+        "  → air_temperature_radiation_shield: add ipso: {object: 3303}",
+        "  → air_humidity_radiation_shield: add ipso: {object: 3304}",
         "Add SenML units for standard sensors (7 fields)",
-        "  \u2192 air_temperature_radiation_shield: add senml: {unit: \"Cel\"}",
-        "  \u2192 air_humidity_radiation_shield: add senml: {unit: \"%RH\"}"
+        "  → air_temperature_radiation_shield: add senml: {unit: \"Cel\"}",
+        "  → air_humidity_radiation_shield: add senml: {unit: \"%RH\"}"
       ]
     },
     {
@@ -4002,9 +4002,9 @@
         "Add test vector for negative values",
         "Add test vectors covering all switch/flagged branches",
         "Add IPSO object mappings for standard sensors (1 fields)",
-        "  \u2192 battery_voltage: add ipso: {object: 3316}",
+        "  → battery_voltage: add ipso: {object: 3316}",
         "Add SenML units for standard sensors (1 fields)",
-        "  \u2192 battery_voltage: add senml: {unit: \"V\"}"
+        "  → battery_voltage: add senml: {unit: \"V\"}"
       ]
     },
     {
@@ -4182,11 +4182,11 @@
         "Add test vector for negative values",
         "Add test vectors covering all switch/flagged branches",
         "Add IPSO object mappings for standard sensors (2 fields)",
-        "  \u2192 voltage: add ipso: {object: 3316}",
-        "  \u2192 battery_voltage: add ipso: {object: 3316}",
+        "  → voltage: add ipso: {object: 3316}",
+        "  → battery_voltage: add ipso: {object: 3316}",
         "Add SenML units for standard sensors (2 fields)",
-        "  \u2192 voltage: add senml: {unit: \"V\"}",
-        "  \u2192 battery_voltage: add senml: {unit: \"V\"}"
+        "  → voltage: add senml: {unit: \"V\"}",
+        "  → battery_voltage: add senml: {unit: \"V\"}"
       ]
     },
     {
@@ -4253,9 +4253,9 @@
         "Add test vector for negative values",
         "Add test vectors covering all switch/flagged branches",
         "Add IPSO object mappings for standard sensors (1 fields)",
-        "  \u2192 battery_voltage: add ipso: {object: 3316}",
+        "  → battery_voltage: add ipso: {object: 3316}",
         "Add SenML units for standard sensors (1 fields)",
-        "  \u2192 battery_voltage: add senml: {unit: \"V\"}"
+        "  → battery_voltage: add senml: {unit: \"V\"}"
       ]
     },
     {
@@ -4324,11 +4324,11 @@
         "Add test vector for negative values",
         "Add test vectors covering all switch/flagged branches",
         "Add IPSO object mappings for standard sensors (2 fields)",
-        "  \u2192 temperature: add ipso: {object: 3303}",
-        "  \u2192 battery_voltage: add ipso: {object: 3316}",
+        "  → temperature: add ipso: {object: 3303}",
+        "  → battery_voltage: add ipso: {object: 3316}",
         "Add SenML units for standard sensors (2 fields)",
-        "  \u2192 temperature: add senml: {unit: \"Cel\"}",
-        "  \u2192 battery_voltage: add senml: {unit: \"V\"}"
+        "  → temperature: add senml: {unit: \"Cel\"}",
+        "  → battery_voltage: add senml: {unit: \"V\"}"
       ]
     },
     {
@@ -4397,11 +4397,11 @@
         "Add test vector for negative values",
         "Add test vectors covering all switch/flagged branches",
         "Add IPSO object mappings for standard sensors (2 fields)",
-        "  \u2192 temperature: add ipso: {object: 3303}",
-        "  \u2192 battery_voltage: add ipso: {object: 3316}",
+        "  → temperature: add ipso: {object: 3303}",
+        "  → battery_voltage: add ipso: {object: 3316}",
         "Add SenML units for standard sensors (2 fields)",
-        "  \u2192 temperature: add senml: {unit: \"Cel\"}",
-        "  \u2192 battery_voltage: add senml: {unit: \"V\"}"
+        "  → temperature: add senml: {unit: \"Cel\"}",
+        "  → battery_voltage: add senml: {unit: \"V\"}"
       ]
     },
     {
@@ -4468,9 +4468,9 @@
         "Add test vector for negative values",
         "Add test vectors covering all switch/flagged branches",
         "Add IPSO object mappings for standard sensors (1 fields)",
-        "  \u2192 battery_voltage: add ipso: {object: 3316}",
+        "  → battery_voltage: add ipso: {object: 3316}",
         "Add SenML units for standard sensors (1 fields)",
-        "  \u2192 battery_voltage: add senml: {unit: \"V\"}"
+        "  → battery_voltage: add senml: {unit: \"V\"}"
       ]
     },
     {
@@ -4585,9 +4585,9 @@
         "Add test vector for negative values",
         "Add test vectors covering all switch/flagged branches",
         "Add IPSO object mappings for standard sensors (1 fields)",
-        "  \u2192 battery_voltage: add ipso: {object: 3316}",
+        "  → battery_voltage: add ipso: {object: 3316}",
         "Add SenML units for standard sensors (1 fields)",
-        "  \u2192 battery_voltage: add senml: {unit: \"V\"}"
+        "  → battery_voltage: add senml: {unit: \"V\"}"
       ]
     },
     {
@@ -4753,11 +4753,11 @@
       },
       "recommendations": [
         "Add IPSO object mappings for standard sensors (2 fields)",
-        "  \u2192 atmospheric_pressure: add ipso: {object: 3323}",
-        "  \u2192 vapor_pressure_deficit: add ipso: {object: 3323}",
+        "  → atmospheric_pressure: add ipso: {object: 3323}",
+        "  → vapor_pressure_deficit: add ipso: {object: 3323}",
         "Add SenML units for standard sensors (2 fields)",
-        "  \u2192 atmospheric_pressure: field is in 'kPa'; SenML wants 'Pa' -- convert the value or declare the real unit before annotating",
-        "  \u2192 vapor_pressure_deficit: field is in 'kPa'; SenML wants 'Pa' -- convert the value or declare the real unit before annotating"
+        "  → atmospheric_pressure: field is in 'kPa'; SenML wants 'Pa' -- convert the value or declare the real unit before annotating",
+        "  → vapor_pressure_deficit: field is in 'kPa'; SenML wants 'Pa' -- convert the value or declare the real unit before annotating"
       ]
     },
     {
@@ -4840,11 +4840,11 @@
         "Add test vector for negative values",
         "Add test vectors covering all switch/flagged branches",
         "Add IPSO object mappings for standard sensors (9 fields)",
-        "  \u2192 battery_voltage: add ipso: {object: 3316}",
-        "  \u2192 air_temperature: add ipso: {object: 3303}",
+        "  → battery_voltage: add ipso: {object: 3316}",
+        "  → air_temperature: add ipso: {object: 3303}",
         "Add SenML units for standard sensors (9 fields)",
-        "  \u2192 battery_voltage: add senml: {unit: \"V\"}",
-        "  \u2192 air_temperature: add senml: {unit: \"Cel\"}"
+        "  → battery_voltage: add senml: {unit: \"V\"}",
+        "  → air_temperature: add senml: {unit: \"Cel\"}"
       ]
     },
     {
@@ -5061,11 +5061,11 @@
         "Add test vector for negative values",
         "Add test vectors covering all switch/flagged branches",
         "Add IPSO object mappings for standard sensors (4 fields)",
-        "  \u2192 temperature_outer: add ipso: {object: 3303}",
-        "  \u2192 max_voltage: add ipso: {object: 3316}",
+        "  → temperature_outer: add ipso: {object: 3303}",
+        "  → max_voltage: add ipso: {object: 3316}",
         "Add SenML units for standard sensors (4 fields)",
-        "  \u2192 temperature_outer: add senml: {unit: \"Cel\"}",
-        "  \u2192 max_voltage: add senml: {unit: \"V\"}"
+        "  → temperature_outer: add senml: {unit: \"Cel\"}",
+        "  → max_voltage: add senml: {unit: \"V\"}"
       ]
     },
     {
@@ -5136,11 +5136,11 @@
         "Add test vector for negative values",
         "Add test vectors covering all switch/flagged branches",
         "Add IPSO object mappings for standard sensors (3 fields)",
-        "  \u2192 temperature_target: add ipso: {object: 3303}",
-        "  \u2192 temperature_head: add ipso: {object: 3303}",
+        "  → temperature_target: add ipso: {object: 3303}",
+        "  → temperature_head: add ipso: {object: 3303}",
         "Add SenML units for standard sensors (3 fields)",
-        "  \u2192 temperature_target: add senml: {unit: \"Cel\"}",
-        "  \u2192 temperature_head: add senml: {unit: \"Cel\"}"
+        "  → temperature_target: add senml: {unit: \"Cel\"}",
+        "  → temperature_head: add senml: {unit: \"Cel\"}"
       ]
     },
     {
@@ -5336,11 +5336,11 @@
         "Add test vector for negative values",
         "Add test vectors covering all switch/flagged branches",
         "Add IPSO object mappings for standard sensors (11 fields)",
-        "  \u2192 air_temperature: add ipso: {object: 3303}",
-        "  \u2192 air_humidity: add ipso: {object: 3304}",
+        "  → air_temperature: add ipso: {object: 3303}",
+        "  → air_humidity: add ipso: {object: 3304}",
         "Add SenML units for standard sensors (11 fields)",
-        "  \u2192 air_temperature: add senml: {unit: \"Cel\"}",
-        "  \u2192 air_humidity: add senml: {unit: \"%RH\"}"
+        "  → air_temperature: add senml: {unit: \"Cel\"}",
+        "  → air_humidity: add senml: {unit: \"%RH\"}"
       ]
     },
     {
@@ -5407,9 +5407,9 @@
         "Add test vector for negative values",
         "Add test vectors covering all switch/flagged branches",
         "Add IPSO object mappings for standard sensors (1 fields)",
-        "  \u2192 battery_voltage: add ipso: {object: 3316}",
+        "  → battery_voltage: add ipso: {object: 3316}",
         "Add SenML units for standard sensors (1 fields)",
-        "  \u2192 battery_voltage: add senml: {unit: \"V\"}"
+        "  → battery_voltage: add senml: {unit: \"V\"}"
       ]
     },
     {
@@ -5476,9 +5476,9 @@
         "Add test vector for negative values",
         "Add test vectors covering all switch/flagged branches",
         "Add IPSO object mappings for standard sensors (1 fields)",
-        "  \u2192 battery_voltage: add ipso: {object: 3316}",
+        "  → battery_voltage: add ipso: {object: 3316}",
         "Add SenML units for standard sensors (1 fields)",
-        "  \u2192 battery_voltage: add senml: {unit: \"V\"}"
+        "  → battery_voltage: add senml: {unit: \"V\"}"
       ]
     },
     {
@@ -5660,7 +5660,7 @@
           ],
           "senml_mapped": 3,
           "senml_missing": [
-            "oxygen_concentration: field is in 'mg\u22c5L\u207b\u00b9'; SenML wants 'ppm' -- convert the value or declare the real unit before annotating"
+            "oxygen_concentration: field is in 'mg⋅L⁻¹'; SenML wants 'ppm' -- convert the value or declare the real unit before annotating"
           ],
           "semantic_mapped": 3,
           "detectable_sensors": 4,
@@ -5677,9 +5677,9 @@
       },
       "recommendations": [
         "Add IPSO object mappings for standard sensors (1 fields)",
-        "  \u2192 oxygen_concentration: add ipso: {object: 3325}",
+        "  → oxygen_concentration: add ipso: {object: 3325}",
         "Add SenML units for standard sensors (1 fields)",
-        "  \u2192 oxygen_concentration: field is in 'mg\u22c5L\u207b\u00b9'; SenML wants 'ppm' -- convert the value or declare the real unit before annotating"
+        "  → oxygen_concentration: field is in 'mg⋅L⁻¹'; SenML wants 'ppm' -- convert the value or declare the real unit before annotating"
       ]
     },
     {
@@ -5879,11 +5879,11 @@
         "Add test vector for negative values",
         "Add test vectors covering all switch/flagged branches",
         "Add IPSO object mappings for standard sensors (13 fields)",
-        "  \u2192 battery_voltage: add ipso: {object: 3316}",
-        "  \u2192 pm1_0_mass_concentration: add ipso: {object: 3325}",
+        "  → battery_voltage: add ipso: {object: 3316}",
+        "  → pm1_0_mass_concentration: add ipso: {object: 3325}",
         "Add SenML units for standard sensors (13 fields)",
-        "  \u2192 battery_voltage: add senml: {unit: \"V\"}",
-        "  \u2192 pm1_0_mass_concentration: add senml: {unit: \"ppm\"}"
+        "  → battery_voltage: add senml: {unit: \"V\"}",
+        "  → pm1_0_mass_concentration: add senml: {unit: \"ppm\"}"
       ]
     },
     {
@@ -5954,11 +5954,11 @@
         "Add test vector for negative values",
         "Add test vectors covering all switch/flagged branches",
         "Add IPSO object mappings for standard sensors (3 fields)",
-        "  \u2192 pressure: add ipso: {object: 3323}",
-        "  \u2192 temperature: add ipso: {object: 3303}",
+        "  → pressure: add ipso: {object: 3323}",
+        "  → temperature: add ipso: {object: 3303}",
         "Add SenML units for standard sensors (3 fields)",
-        "  \u2192 pressure: field is in 'bar'; SenML wants 'Pa' -- convert the value or declare the real unit before annotating",
-        "  \u2192 temperature: add senml: {unit: \"Cel\"}"
+        "  → pressure: field is in 'bar'; SenML wants 'Pa' -- convert the value or declare the real unit before annotating",
+        "  → temperature: add senml: {unit: \"Cel\"}"
       ]
     },
     {
@@ -6029,11 +6029,11 @@
         "Add test vector for negative values",
         "Add test vectors covering all switch/flagged branches",
         "Add IPSO object mappings for standard sensors (3 fields)",
-        "  \u2192 pressure: add ipso: {object: 3323}",
-        "  \u2192 temperature: add ipso: {object: 3303}",
+        "  → pressure: add ipso: {object: 3323}",
+        "  → temperature: add ipso: {object: 3303}",
         "Add SenML units for standard sensors (3 fields)",
-        "  \u2192 pressure: field is in 'bar'; SenML wants 'Pa' -- convert the value or declare the real unit before annotating",
-        "  \u2192 temperature: add senml: {unit: \"Cel\"}"
+        "  → pressure: field is in 'bar'; SenML wants 'Pa' -- convert the value or declare the real unit before annotating",
+        "  → temperature: add senml: {unit: \"Cel\"}"
       ]
     },
     {
@@ -6104,11 +6104,11 @@
         "Add test vector for negative values",
         "Add test vectors covering all switch/flagged branches",
         "Add IPSO object mappings for standard sensors (3 fields)",
-        "  \u2192 pressure: add ipso: {object: 3323}",
-        "  \u2192 temperature: add ipso: {object: 3303}",
+        "  → pressure: add ipso: {object: 3323}",
+        "  → temperature: add ipso: {object: 3303}",
         "Add SenML units for standard sensors (3 fields)",
-        "  \u2192 pressure: field is in 'bar'; SenML wants 'Pa' -- convert the value or declare the real unit before annotating",
-        "  \u2192 temperature: add senml: {unit: \"Cel\"}"
+        "  → pressure: field is in 'bar'; SenML wants 'Pa' -- convert the value or declare the real unit before annotating",
+        "  → temperature: add senml: {unit: \"Cel\"}"
       ]
     },
     {
@@ -6182,11 +6182,11 @@
         "Add test vector for negative values",
         "Add test vectors covering all switch/flagged branches",
         "Add IPSO object mappings for standard sensors (5 fields)",
-        "  \u2192 pressure: add ipso: {object: 3323}",
-        "  \u2192 temperature_electronics: add ipso: {object: 3303}",
+        "  → pressure: add ipso: {object: 3323}",
+        "  → temperature_electronics: add ipso: {object: 3303}",
         "Add SenML units for standard sensors (4 fields)",
-        "  \u2192 pressure: field is in 'bar'; SenML wants 'Pa' -- convert the value or declare the real unit before annotating",
-        "  \u2192 temperature_electronics: add senml: {unit: \"Cel\"}"
+        "  → pressure: field is in 'bar'; SenML wants 'Pa' -- convert the value or declare the real unit before annotating",
+        "  → temperature_electronics: add senml: {unit: \"Cel\"}"
       ]
     },
     {
@@ -6253,9 +6253,9 @@
         "Add test vector for negative values",
         "Add test vectors covering all switch/flagged branches",
         "Add IPSO object mappings for standard sensors (1 fields)",
-        "  \u2192 battery_voltage: add ipso: {object: 3316}",
+        "  → battery_voltage: add ipso: {object: 3316}",
         "Add SenML units for standard sensors (1 fields)",
-        "  \u2192 battery_voltage: add senml: {unit: \"V\"}"
+        "  → battery_voltage: add senml: {unit: \"V\"}"
       ]
     },
     {
@@ -6374,11 +6374,11 @@
         "Add test vector for negative values",
         "Add test vectors covering all switch/flagged branches",
         "Add IPSO object mappings for standard sensors (3 fields)",
-        "  \u2192 air_humidity: add ipso: {object: 3304}",
-        "  \u2192 air_temperature: add ipso: {object: 3303}",
+        "  → air_humidity: add ipso: {object: 3304}",
+        "  → air_temperature: add ipso: {object: 3303}",
         "Add SenML units for standard sensors (3 fields)",
-        "  \u2192 air_humidity: add senml: {unit: \"%RH\"}",
-        "  \u2192 air_temperature: add senml: {unit: \"Cel\"}"
+        "  → air_humidity: add senml: {unit: \"%RH\"}",
+        "  → air_temperature: add senml: {unit: \"Cel\"}"
       ]
     },
     {
@@ -6517,11 +6517,11 @@
         "Add test vector for negative values",
         "Add test vectors covering all switch/flagged branches",
         "Add IPSO object mappings for standard sensors (37 fields)",
-        "  \u2192 moisture_at_level_0: add ipso: {object: 3319}",
-        "  \u2192 moisture_at_level_1: add ipso: {object: 3319}",
+        "  → moisture_at_level_0: add ipso: {object: 3319}",
+        "  → moisture_at_level_1: add ipso: {object: 3319}",
         "Add SenML units for standard sensors (37 fields)",
-        "  \u2192 moisture_at_level_0: add senml: {unit: \"m\"}",
-        "  \u2192 moisture_at_level_1: add senml: {unit: \"m\"}"
+        "  → moisture_at_level_0: add senml: {unit: \"m\"}",
+        "  → moisture_at_level_1: add senml: {unit: \"m\"}"
       ]
     },
     {
@@ -6592,11 +6592,11 @@
         "Add test vector for negative values",
         "Add test vectors covering all switch/flagged branches",
         "Add IPSO object mappings for standard sensors (3 fields)",
-        "  \u2192 air_temperature: add ipso: {object: 3303}",
-        "  \u2192 air_humidity: add ipso: {object: 3304}",
+        "  → air_temperature: add ipso: {object: 3303}",
+        "  → air_humidity: add ipso: {object: 3304}",
         "Add SenML units for standard sensors (3 fields)",
-        "  \u2192 air_temperature: add senml: {unit: \"Cel\"}",
-        "  \u2192 air_humidity: add senml: {unit: \"%RH\"}"
+        "  → air_temperature: add senml: {unit: \"Cel\"}",
+        "  → air_humidity: add senml: {unit: \"%RH\"}"
       ]
     },
     {
@@ -6695,11 +6695,11 @@
         "Add test vector for negative values",
         "Add test vectors covering all switch/flagged branches",
         "Add IPSO object mappings for standard sensors (17 fields)",
-        "  \u2192 soil_moisture_at_depth_0: add ipso: {object: 3319}",
-        "  \u2192 soil_temperature_at_depth_0: add ipso: {object: 3303}",
+        "  → soil_moisture_at_depth_0: add ipso: {object: 3319}",
+        "  → soil_temperature_at_depth_0: add ipso: {object: 3303}",
         "Add SenML units for standard sensors (17 fields)",
-        "  \u2192 soil_moisture_at_depth_0: add senml: {unit: \"m\"}",
-        "  \u2192 soil_temperature_at_depth_0: add senml: {unit: \"Cel\"}"
+        "  → soil_moisture_at_depth_0: add senml: {unit: \"m\"}",
+        "  → soil_temperature_at_depth_0: add senml: {unit: \"Cel\"}"
       ]
     },
     {
@@ -6766,16 +6766,16 @@
         "Add test vector for negative values",
         "Add test vectors covering all switch/flagged branches",
         "Add IPSO object mappings for standard sensors (1 fields)",
-        "  \u2192 battery_voltage: add ipso: {object: 3316}",
+        "  → battery_voltage: add ipso: {object: 3316}",
         "Add SenML units for standard sensors (1 fields)",
-        "  \u2192 battery_voltage: add senml: {unit: \"V\"}"
+        "  → battery_voltage: add senml: {unit: \"V\"}"
       ]
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-tp.yaml",
-      "timestamp": "2026-08-11T08:41:52.893392-05:00",
-      "score": 100.0,
-      "tier": "PLATINUM",
+      "timestamp": "2026-10-14T09:38:13.399505-05:00",
+      "score": 94.0,
+      "tier": "GOLD",
       "details": {
         "schema_valid": true,
         "schema_errors": [],
@@ -6800,12 +6800,12 @@
         "edge_cases_missing": [],
         "semantic_annotations": {
           "total_fields": 20,
-          "ipso_mapped": 17,
+          "ipso_mapped": 16,
           "ipso_missing": [],
-          "senml_mapped": 17,
+          "senml_mapped": 16,
           "senml_missing": [],
-          "semantic_mapped": 17,
-          "detectable_sensors": 17,
+          "semantic_mapped": 0,
+          "detectable_sensors": 16,
           "annotation_errors": []
         },
         "provenance": {
@@ -6885,11 +6885,11 @@
         "Add test vector for negative values",
         "Add test vectors covering all switch/flagged branches",
         "Add IPSO object mappings for standard sensors (2 fields)",
-        "  \u2192 soil_temperature: add ipso: {object: 3303}",
-        "  \u2192 battery_voltage: add ipso: {object: 3316}",
+        "  → soil_temperature: add ipso: {object: 3303}",
+        "  → battery_voltage: add ipso: {object: 3316}",
         "Add SenML units for standard sensors (2 fields)",
-        "  \u2192 soil_temperature: add senml: {unit: \"Cel\"}",
-        "  \u2192 battery_voltage: add senml: {unit: \"V\"}"
+        "  → soil_temperature: add senml: {unit: \"Cel\"}",
+        "  → battery_voltage: add senml: {unit: \"V\"}"
       ]
     },
     {
@@ -6959,11 +6959,11 @@
         "Add test vector for negative values",
         "Add test vectors covering all switch/flagged branches",
         "Add IPSO object mappings for standard sensors (3 fields)",
-        "  \u2192 soil_temperature: add ipso: {object: 3303}",
-        "  \u2192 electrical_conductivity: add ipso: {object: 3327}",
+        "  → soil_temperature: add ipso: {object: 3303}",
+        "  → electrical_conductivity: add ipso: {object: 3327}",
         "Add SenML units for standard sensors (2 fields)",
-        "  \u2192 soil_temperature: add senml: {unit: \"Cel\"}",
-        "  \u2192 battery_voltage: add senml: {unit: \"V\"}"
+        "  → soil_temperature: add senml: {unit: \"Cel\"}",
+        "  → battery_voltage: add senml: {unit: \"V\"}"
       ]
     },
     {
@@ -7032,11 +7032,11 @@
         "Add test vector for negative values",
         "Add test vectors covering all switch/flagged branches",
         "Add IPSO object mappings for standard sensors (2 fields)",
-        "  \u2192 soil_temperature: add ipso: {object: 3303}",
-        "  \u2192 battery_voltage: add ipso: {object: 3316}",
+        "  → soil_temperature: add ipso: {object: 3303}",
+        "  → battery_voltage: add ipso: {object: 3316}",
         "Add SenML units for standard sensors (2 fields)",
-        "  \u2192 soil_temperature: add senml: {unit: \"Cel\"}",
-        "  \u2192 battery_voltage: add senml: {unit: \"V\"}"
+        "  → soil_temperature: add senml: {unit: \"Cel\"}",
+        "  → battery_voltage: add senml: {unit: \"V\"}"
       ]
     },
     {
@@ -7111,11 +7111,11 @@
         "Add test vector for negative values",
         "Add test vectors covering all switch/flagged branches",
         "Add IPSO object mappings for standard sensors (5 fields)",
-        "  \u2192 air_temperature: add ipso: {object: 3303}",
-        "  \u2192 air_humidity: add ipso: {object: 3304}",
+        "  → air_temperature: add ipso: {object: 3303}",
+        "  → air_humidity: add ipso: {object: 3304}",
         "Add SenML units for standard sensors (5 fields)",
-        "  \u2192 air_temperature: add senml: {unit: \"Cel\"}",
-        "  \u2192 air_humidity: add senml: {unit: \"%RH\"}"
+        "  → air_temperature: add senml: {unit: \"Cel\"}",
+        "  → air_humidity: add senml: {unit: \"%RH\"}"
       ]
     },
     {
@@ -7182,9 +7182,9 @@
         "Add test vector for negative values",
         "Add test vectors covering all switch/flagged branches",
         "Add IPSO object mappings for standard sensors (1 fields)",
-        "  \u2192 battery_voltage: add ipso: {object: 3316}",
+        "  → battery_voltage: add ipso: {object: 3316}",
         "Add SenML units for standard sensors (1 fields)",
-        "  \u2192 battery_voltage: add senml: {unit: \"V\"}"
+        "  → battery_voltage: add senml: {unit: \"V\"}"
       ]
     },
     {
@@ -7251,9 +7251,9 @@
         "Add test vector for negative values",
         "Add test vectors covering all switch/flagged branches",
         "Add IPSO object mappings for standard sensors (1 fields)",
-        "  \u2192 battery_voltage: add ipso: {object: 3316}",
+        "  → battery_voltage: add ipso: {object: 3316}",
         "Add SenML units for standard sensors (1 fields)",
-        "  \u2192 battery_voltage: add senml: {unit: \"V\"}"
+        "  → battery_voltage: add senml: {unit: \"V\"}"
       ]
     },
     {
@@ -7454,11 +7454,11 @@
         "Add test vector for zero values",
         "Add test vector for negative values",
         "Add IPSO object mappings for standard sensors (16 fields)",
-        "  \u2192 temperature: add ipso: {object: 3303}",
-        "  \u2192 humidity: add ipso: {object: 3304}",
+        "  → temperature: add ipso: {object: 3303}",
+        "  → humidity: add ipso: {object: 3304}",
         "Add SenML units for standard sensors (11 fields)",
-        "  \u2192 temperature: add senml: {unit: \"Cel\"}",
-        "  \u2192 humidity: add senml: {unit: \"%RH\"}"
+        "  → temperature: add senml: {unit: \"Cel\"}",
+        "  → humidity: add senml: {unit: \"%RH\"}"
       ]
     },
     {
@@ -7528,11 +7528,11 @@
         "Add test vector for minimum payload length",
         "Add test vectors covering all switch/flagged branches",
         "Add IPSO object mappings for standard sensors (2 fields)",
-        "  \u2192 battery_voltage: add ipso: {object: 3316}",
-        "  \u2192 board_temperature: add ipso: {object: 3303}",
+        "  → battery_voltage: add ipso: {object: 3316}",
+        "  → board_temperature: add ipso: {object: 3303}",
         "Add SenML units for standard sensors (2 fields)",
-        "  \u2192 battery_voltage: field is in 'mV'; SenML wants 'V' -- convert the value or declare the real unit before annotating",
-        "  \u2192 board_temperature: add senml: {unit: \"Cel\"}"
+        "  → battery_voltage: field is in 'mV'; SenML wants 'V' -- convert the value or declare the real unit before annotating",
+        "  → board_temperature: add senml: {unit: \"Cel\"}"
       ]
     },
     {
@@ -7665,11 +7665,11 @@
         "Add test vector for negative values",
         "Add test vectors covering all switch/flagged branches",
         "Add IPSO object mappings for standard sensors (3 fields)",
-        "  \u2192 battery: add ipso: {object: 3316}",
-        "  \u2192 humidity: add ipso: {object: 3304}",
+        "  → battery: add ipso: {object: 3316}",
+        "  → humidity: add ipso: {object: 3304}",
         "Add SenML units for standard sensors (3 fields)",
-        "  \u2192 battery: add senml: {unit: \"V\"}",
-        "  \u2192 humidity: add senml: {unit: \"%RH\"}"
+        "  → battery: add senml: {unit: \"V\"}",
+        "  → humidity: add senml: {unit: \"%RH\"}"
       ]
     },
     {
@@ -7802,11 +7802,11 @@
         "Add test vector for negative values",
         "Add test vectors covering all switch/flagged branches",
         "Add IPSO object mappings for standard sensors (3 fields)",
-        "  \u2192 battery: add ipso: {object: 3316}",
-        "  \u2192 humidity: add ipso: {object: 3304}",
+        "  → battery: add ipso: {object: 3316}",
+        "  → humidity: add ipso: {object: 3304}",
         "Add SenML units for standard sensors (3 fields)",
-        "  \u2192 battery: add senml: {unit: \"V\"}",
-        "  \u2192 humidity: add senml: {unit: \"%RH\"}"
+        "  → battery: add senml: {unit: \"V\"}",
+        "  → humidity: add senml: {unit: \"%RH\"}"
       ]
     },
     {
@@ -7876,11 +7876,11 @@
         "Add test vector for minimum payload length",
         "Add test vectors covering all switch/flagged branches",
         "Add IPSO object mappings for standard sensors (2 fields)",
-        "  \u2192 battery: add ipso: {object: 3316}",
-        "  \u2192 volt_pressure: add ipso: {object: 3323}",
+        "  → battery: add ipso: {object: 3316}",
+        "  → volt_pressure: add ipso: {object: 3323}",
         "Add SenML units for standard sensors (2 fields)",
-        "  \u2192 battery: add senml: {unit: \"V\"}",
-        "  \u2192 volt_pressure: add senml: {unit: \"Pa\"}"
+        "  → battery: add senml: {unit: \"V\"}",
+        "  → volt_pressure: add senml: {unit: \"Pa\"}"
       ]
     },
     {
@@ -7952,11 +7952,11 @@
         "Add test vector for negative values",
         "Add test vectors covering all switch/flagged branches",
         "Add IPSO object mappings for standard sensors (4 fields)",
-        "  \u2192 battery: add ipso: {object: 3316}",
-        "  \u2192 humidity: add ipso: {object: 3304}",
+        "  → battery: add ipso: {object: 3316}",
+        "  → humidity: add ipso: {object: 3304}",
         "Add SenML units for standard sensors (3 fields)",
-        "  \u2192 battery: add senml: {unit: \"V\"}",
-        "  \u2192 humidity: add senml: {unit: \"%RH\"}"
+        "  → battery: add senml: {unit: \"V\"}",
+        "  → humidity: add senml: {unit: \"%RH\"}"
       ]
     },
     {
@@ -8026,11 +8026,11 @@
         "Add test vector for minimum payload length",
         "Add test vectors covering all switch/flagged branches",
         "Add IPSO object mappings for standard sensors (2 fields)",
-        "  \u2192 battery: add ipso: {object: 3316}",
-        "  \u2192 temperature: add ipso: {object: 3303}",
+        "  → battery: add ipso: {object: 3316}",
+        "  → temperature: add ipso: {object: 3303}",
         "Add SenML units for standard sensors (2 fields)",
-        "  \u2192 battery: add senml: {unit: \"V\"}",
-        "  \u2192 temperature: add senml: {unit: \"Cel\"}"
+        "  → battery: add senml: {unit: \"V\"}",
+        "  → temperature: add senml: {unit: \"Cel\"}"
       ]
     },
     {
@@ -8204,8 +8204,8 @@
       },
       "recommendations": [
         "Add IPSO object mappings for standard sensors (2 fields)",
-        "  \u2192 history.temperature: add ipso: {object: 3303}",
-        "  \u2192 history.humidity: add ipso: {object: 3304}"
+        "  → history.temperature: add ipso: {object: 3303}",
+        "  → history.humidity: add ipso: {object: 3304}"
       ]
     },
     {
@@ -8260,8 +8260,8 @@
       },
       "recommendations": [
         "Add IPSO object mappings for standard sensors (2 fields)",
-        "  \u2192 history.temperature: add ipso: {object: 3303}",
-        "  \u2192 history.humidity: add ipso: {object: 3304}"
+        "  → history.temperature: add ipso: {object: 3303}",
+        "  → history.humidity: add ipso: {object: 3304}"
       ]
     },
     {
@@ -8317,9 +8317,9 @@
       },
       "recommendations": [
         "Add IPSO object mappings for standard sensors (1 fields)",
-        "  \u2192 pressure: add ipso: {object: 3323}",
+        "  → pressure: add ipso: {object: 3323}",
         "Add SenML units for standard sensors (1 fields)",
-        "  \u2192 pressure: field is in 'hPa'; SenML wants 'Pa' -- convert the value or declare the real unit before annotating"
+        "  → pressure: field is in 'hPa'; SenML wants 'Pa' -- convert the value or declare the real unit before annotating"
       ]
     },
     {
@@ -8375,9 +8375,9 @@
       },
       "recommendations": [
         "Add IPSO object mappings for standard sensors (1 fields)",
-        "  \u2192 pressure: add ipso: {object: 3323}",
+        "  → pressure: add ipso: {object: 3323}",
         "Add SenML units for standard sensors (1 fields)",
-        "  \u2192 pressure: field is in 'hPa'; SenML wants 'Pa' -- convert the value or declare the real unit before annotating"
+        "  → pressure: field is in 'hPa'; SenML wants 'Pa' -- convert the value or declare the real unit before annotating"
       ]
     },
     {
@@ -8482,9 +8482,9 @@
       },
       "recommendations": [
         "Add IPSO object mappings for standard sensors (1 fields)",
-        "  \u2192 pressure: add ipso: {object: 3323}",
+        "  → pressure: add ipso: {object: 3323}",
         "Add SenML units for standard sensors (1 fields)",
-        "  \u2192 pressure: field is in 'hPa'; SenML wants 'Pa' -- convert the value or declare the real unit before annotating"
+        "  → pressure: field is in 'hPa'; SenML wants 'Pa' -- convert the value or declare the real unit before annotating"
       ]
     },
     {
@@ -8540,9 +8540,9 @@
       },
       "recommendations": [
         "Add IPSO object mappings for standard sensors (1 fields)",
-        "  \u2192 pressure: add ipso: {object: 3323}",
+        "  → pressure: add ipso: {object: 3323}",
         "Add SenML units for standard sensors (1 fields)",
-        "  \u2192 pressure: field is in 'hPa'; SenML wants 'Pa' -- convert the value or declare the real unit before annotating"
+        "  → pressure: field is in 'hPa'; SenML wants 'Pa' -- convert the value or declare the real unit before annotating"
       ]
     },
     {
@@ -8598,9 +8598,9 @@
       },
       "recommendations": [
         "Add IPSO object mappings for standard sensors (1 fields)",
-        "  \u2192 pressure: add ipso: {object: 3323}",
+        "  → pressure: add ipso: {object: 3323}",
         "Add SenML units for standard sensors (1 fields)",
-        "  \u2192 pressure: field is in 'hPa'; SenML wants 'Pa' -- convert the value or declare the real unit before annotating"
+        "  → pressure: field is in 'hPa'; SenML wants 'Pa' -- convert the value or declare the real unit before annotating"
       ]
     },
     {
@@ -8656,9 +8656,9 @@
       },
       "recommendations": [
         "Add IPSO object mappings for standard sensors (1 fields)",
-        "  \u2192 pressure: add ipso: {object: 3323}",
+        "  → pressure: add ipso: {object: 3323}",
         "Add SenML units for standard sensors (1 fields)",
-        "  \u2192 pressure: field is in 'hPa'; SenML wants 'Pa' -- convert the value or declare the real unit before annotating"
+        "  → pressure: field is in 'hPa'; SenML wants 'Pa' -- convert the value or declare the real unit before annotating"
       ]
     },
     {
@@ -8714,9 +8714,9 @@
       },
       "recommendations": [
         "Add IPSO object mappings for standard sensors (1 fields)",
-        "  \u2192 pressure: add ipso: {object: 3323}",
+        "  → pressure: add ipso: {object: 3323}",
         "Add SenML units for standard sensors (1 fields)",
-        "  \u2192 pressure: field is in 'hPa'; SenML wants 'Pa' -- convert the value or declare the real unit before annotating"
+        "  → pressure: field is in 'hPa'; SenML wants 'Pa' -- convert the value or declare the real unit before annotating"
       ]
     },
     {
@@ -8772,9 +8772,9 @@
       },
       "recommendations": [
         "Add IPSO object mappings for standard sensors (1 fields)",
-        "  \u2192 pressure: add ipso: {object: 3323}",
+        "  → pressure: add ipso: {object: 3323}",
         "Add SenML units for standard sensors (1 fields)",
-        "  \u2192 pressure: field is in 'hPa'; SenML wants 'Pa' -- convert the value or declare the real unit before annotating"
+        "  → pressure: field is in 'hPa'; SenML wants 'Pa' -- convert the value or declare the real unit before annotating"
       ]
     },
     {
@@ -8830,9 +8830,9 @@
       },
       "recommendations": [
         "Add IPSO object mappings for standard sensors (1 fields)",
-        "  \u2192 pressure: add ipso: {object: 3323}",
+        "  → pressure: add ipso: {object: 3323}",
         "Add SenML units for standard sensors (1 fields)",
-        "  \u2192 pressure: field is in 'hPa'; SenML wants 'Pa' -- convert the value or declare the real unit before annotating"
+        "  → pressure: field is in 'hPa'; SenML wants 'Pa' -- convert the value or declare the real unit before annotating"
       ]
     },
     {
@@ -8993,11 +8993,11 @@
       "recommendations": [
         "Add test vector for negative values",
         "Add IPSO object mappings for standard sensors (5 fields)",
-        "  \u2192 total_current: add ipso: {object: 3317}",
-        "  \u2192 current_max: add ipso: {object: 3317}",
+        "  → total_current: add ipso: {object: 3317}",
+        "  → current_max: add ipso: {object: 3317}",
         "Add SenML units for standard sensors (5 fields)",
-        "  \u2192 total_current: add senml: {unit: \"A\"}",
-        "  \u2192 current_max: add senml: {unit: \"A\"}"
+        "  → total_current: add senml: {unit: \"A\"}",
+        "  → current_max: add senml: {unit: \"A\"}"
       ]
     },
     {
@@ -9062,11 +9062,11 @@
       "recommendations": [
         "Add test vector for negative values",
         "Add IPSO object mappings for standard sensors (5 fields)",
-        "  \u2192 total_current: add ipso: {object: 3317}",
-        "  \u2192 current_max: add ipso: {object: 3317}",
+        "  → total_current: add ipso: {object: 3317}",
+        "  → current_max: add ipso: {object: 3317}",
         "Add SenML units for standard sensors (5 fields)",
-        "  \u2192 total_current: add senml: {unit: \"A\"}",
-        "  \u2192 current_max: add senml: {unit: \"A\"}"
+        "  → total_current: add senml: {unit: \"A\"}",
+        "  → current_max: add senml: {unit: \"A\"}"
       ]
     },
     {
@@ -9131,11 +9131,11 @@
       "recommendations": [
         "Add test vector for negative values",
         "Add IPSO object mappings for standard sensors (5 fields)",
-        "  \u2192 total_current: add ipso: {object: 3317}",
-        "  \u2192 current_max: add ipso: {object: 3317}",
+        "  → total_current: add ipso: {object: 3317}",
+        "  → current_max: add ipso: {object: 3317}",
         "Add SenML units for standard sensors (5 fields)",
-        "  \u2192 total_current: add senml: {unit: \"A\"}",
-        "  \u2192 current_max: add senml: {unit: \"A\"}"
+        "  → total_current: add senml: {unit: \"A\"}",
+        "  → current_max: add senml: {unit: \"A\"}"
       ]
     },
     {
@@ -9232,11 +9232,11 @@
       "recommendations": [
         "Add test vector for negative values",
         "Add IPSO object mappings for standard sensors (21 fields)",
-        "  \u2192 current_chn1_total: add ipso: {object: 3317}",
-        "  \u2192 current_chn1_max: add ipso: {object: 3317}",
+        "  → current_chn1_total: add ipso: {object: 3317}",
+        "  → current_chn1_max: add ipso: {object: 3317}",
         "Add SenML units for standard sensors (21 fields)",
-        "  \u2192 current_chn1_total: add senml: {unit: \"A\"}",
-        "  \u2192 current_chn1_max: add senml: {unit: \"A\"}"
+        "  → current_chn1_total: add senml: {unit: \"A\"}",
+        "  → current_chn1_max: add senml: {unit: \"A\"}"
       ]
     },
     {
@@ -9333,11 +9333,11 @@
       "recommendations": [
         "Add test vector for negative values",
         "Add IPSO object mappings for standard sensors (21 fields)",
-        "  \u2192 current_chn1_total: add ipso: {object: 3317}",
-        "  \u2192 current_chn1_max: add ipso: {object: 3317}",
+        "  → current_chn1_total: add ipso: {object: 3317}",
+        "  → current_chn1_max: add ipso: {object: 3317}",
         "Add SenML units for standard sensors (21 fields)",
-        "  \u2192 current_chn1_total: add senml: {unit: \"A\"}",
-        "  \u2192 current_chn1_max: add senml: {unit: \"A\"}"
+        "  → current_chn1_total: add senml: {unit: \"A\"}",
+        "  → current_chn1_max: add senml: {unit: \"A\"}"
       ]
     },
     {
@@ -9434,11 +9434,11 @@
       "recommendations": [
         "Add test vector for negative values",
         "Add IPSO object mappings for standard sensors (21 fields)",
-        "  \u2192 current_chn1_total: add ipso: {object: 3317}",
-        "  \u2192 current_chn1_max: add ipso: {object: 3317}",
+        "  → current_chn1_total: add ipso: {object: 3317}",
+        "  → current_chn1_max: add ipso: {object: 3317}",
         "Add SenML units for standard sensors (21 fields)",
-        "  \u2192 current_chn1_total: add senml: {unit: \"A\"}",
-        "  \u2192 current_chn1_max: add senml: {unit: \"A\"}"
+        "  → current_chn1_total: add senml: {unit: \"A\"}",
+        "  → current_chn1_max: add senml: {unit: \"A\"}"
       ]
     },
     {
@@ -10001,9 +10001,9 @@
       "recommendations": [
         "Generated JS codec disagrees with the test vectors",
         "Add IPSO object mappings for standard sensors (1 fields)",
-        "  \u2192 temperature_abnormal: add ipso: {object: 3303}",
+        "  → temperature_abnormal: add ipso: {object: 3303}",
         "Add SenML units for standard sensors (1 fields)",
-        "  \u2192 temperature_abnormal: add senml: {unit: \"Cel\"}"
+        "  → temperature_abnormal: add senml: {unit: \"Cel\"}"
       ]
     },
     {
@@ -10065,9 +10065,9 @@
       "recommendations": [
         "Generated JS codec disagrees with the test vectors",
         "Add IPSO object mappings for standard sensors (1 fields)",
-        "  \u2192 temperature_abnormal: add ipso: {object: 3303}",
+        "  → temperature_abnormal: add ipso: {object: 3303}",
         "Add SenML units for standard sensors (1 fields)",
-        "  \u2192 temperature_abnormal: add senml: {unit: \"Cel\"}"
+        "  → temperature_abnormal: add senml: {unit: \"Cel\"}"
       ]
     },
     {
@@ -10129,9 +10129,9 @@
       "recommendations": [
         "Generated JS codec disagrees with the test vectors",
         "Add IPSO object mappings for standard sensors (1 fields)",
-        "  \u2192 temperature_abnormal: add ipso: {object: 3303}",
+        "  → temperature_abnormal: add ipso: {object: 3303}",
         "Add SenML units for standard sensors (1 fields)",
-        "  \u2192 temperature_abnormal: add senml: {unit: \"Cel\"}"
+        "  → temperature_abnormal: add senml: {unit: \"Cel\"}"
       ]
     },
     {
@@ -10247,9 +10247,9 @@
         "Add test vector for negative values",
         "Add test vectors covering all switch/flagged branches",
         "Add IPSO object mappings for standard sensors (1 fields)",
-        "  \u2192 pressure: add ipso: {object: 3323}",
+        "  → pressure: add ipso: {object: 3323}",
         "Add SenML units for standard sensors (1 fields)",
-        "  \u2192 pressure: field is in 'hPa'; SenML wants 'Pa' -- convert the value or declare the real unit before annotating"
+        "  → pressure: field is in 'hPa'; SenML wants 'Pa' -- convert the value or declare the real unit before annotating"
       ]
     },
     {
@@ -10354,9 +10354,9 @@
       },
       "recommendations": [
         "Add IPSO object mappings for standard sensors (1 fields)",
-        "  \u2192 pressure: add ipso: {object: 3323}",
+        "  → pressure: add ipso: {object: 3323}",
         "Add SenML units for standard sensors (1 fields)",
-        "  \u2192 pressure: field is in 'hPa'; SenML wants 'Pa' -- convert the value or declare the real unit before annotating"
+        "  → pressure: field is in 'hPa'; SenML wants 'Pa' -- convert the value or declare the real unit before annotating"
       ]
     },
     {
@@ -10618,9 +10618,9 @@
         "Add test vector for negative values",
         "Add test vectors covering all switch/flagged branches",
         "Add IPSO object mappings for standard sensors (1 fields)",
-        "  \u2192 distance: add ipso: {object: 3330}",
+        "  → distance: add ipso: {object: 3330}",
         "Add SenML units for standard sensors (1 fields)",
-        "  \u2192 distance: field is in 'mm'; SenML wants 'm' -- convert the value or declare the real unit before annotating"
+        "  → distance: field is in 'mm'; SenML wants 'm' -- convert the value or declare the real unit before annotating"
       ]
     },
     {
@@ -10688,9 +10688,9 @@
         "Add test vector for minimum payload length",
         "Add test vectors covering all switch/flagged branches",
         "Add IPSO object mappings for standard sensors (1 fields)",
-        "  \u2192 valve: add ipso: {object: 3337}",
+        "  → valve: add ipso: {object: 3337}",
         "Add SenML units for standard sensors (1 fields)",
-        "  \u2192 valve: add senml: {unit: \"%\"}"
+        "  → valve: add senml: {unit: \"%\"}"
       ]
     },
     {
@@ -10798,11 +10798,11 @@
       },
       "recommendations": [
         "Add IPSO object mappings for standard sensors (3 fields)",
-        "  \u2192 temperature_alert: add ipso: {object: 3303}",
-        "  \u2192 temperature_change: add ipso: {object: 3303}",
+        "  → temperature_alert: add ipso: {object: 3303}",
+        "  → temperature_change: add ipso: {object: 3303}",
         "Add SenML units for standard sensors (3 fields)",
-        "  \u2192 temperature_alert: add senml: {unit: \"Cel\"}",
-        "  \u2192 temperature_change: add senml: {unit: \"Cel\"}"
+        "  → temperature_alert: add senml: {unit: \"Cel\"}",
+        "  → temperature_change: add senml: {unit: \"Cel\"}"
       ]
     },
     {
@@ -10903,7 +10903,7 @@
       },
       "recommendations": [
         "Add IPSO object mappings for standard sensors (1 fields)",
-        "  \u2192 event.humidity: add ipso: {object: 3304}"
+        "  → event.humidity: add ipso: {object: 3304}"
       ]
     },
     {
@@ -10973,11 +10973,11 @@
       },
       "recommendations": [
         "Add IPSO object mappings for standard sensors (8 fields)",
-        "  \u2192 temperature_chn1: add ipso: {object: 3303}",
-        "  \u2192 temperature_chn2: add ipso: {object: 3303}",
+        "  → temperature_chn1: add ipso: {object: 3303}",
+        "  → temperature_chn2: add ipso: {object: 3303}",
         "Add SenML units for standard sensors (8 fields)",
-        "  \u2192 temperature_chn1: add senml: {unit: \"Cel\"}",
-        "  \u2192 temperature_chn2: add senml: {unit: \"Cel\"}"
+        "  → temperature_chn1: add senml: {unit: \"Cel\"}",
+        "  → temperature_chn2: add senml: {unit: \"Cel\"}"
       ]
     },
     {
@@ -11309,11 +11309,11 @@
       },
       "recommendations": [
         "Add IPSO object mappings for standard sensors (2 fields)",
-        "  \u2192 pressure: add ipso: {object: 3323}",
-        "  \u2192 history.pressure: add ipso: {object: 3323}",
+        "  → pressure: add ipso: {object: 3323}",
+        "  → history.pressure: add ipso: {object: 3323}",
         "Add SenML units for standard sensors (2 fields)",
-        "  \u2192 pressure: field is in 'hPa'; SenML wants 'Pa' -- convert the value or declare the real unit before annotating",
-        "  \u2192 history.pressure: field is in 'hPa'; SenML wants 'Pa' -- convert the value or declare the real unit before annotating"
+        "  → pressure: field is in 'hPa'; SenML wants 'Pa' -- convert the value or declare the real unit before annotating",
+        "  → history.pressure: field is in 'hPa'; SenML wants 'Pa' -- convert the value or declare the real unit before annotating"
       ]
     },
     {
@@ -11680,9 +11680,9 @@
       },
       "recommendations": [
         "Add IPSO object mappings for standard sensors (1 fields)",
-        "  \u2192 temperature_alarm: add ipso: {object: 3303}",
+        "  → temperature_alarm: add ipso: {object: 3303}",
         "Add SenML units for standard sensors (1 fields)",
-        "  \u2192 temperature_alarm: add senml: {unit: \"Cel\"}"
+        "  → temperature_alarm: add senml: {unit: \"Cel\"}"
       ]
     },
     {
@@ -11738,9 +11738,9 @@
       },
       "recommendations": [
         "Add IPSO object mappings for standard sensors (1 fields)",
-        "  \u2192 temperature_alarm: add ipso: {object: 3303}",
+        "  → temperature_alarm: add ipso: {object: 3303}",
         "Add SenML units for standard sensors (1 fields)",
-        "  \u2192 temperature_alarm: add senml: {unit: \"Cel\"}"
+        "  → temperature_alarm: add senml: {unit: \"Cel\"}"
       ]
     },
     {
@@ -11951,7 +11951,7 @@
         "Add test vector for minimum payload length",
         "Add test vectors covering all switch/flagged branches",
         "Add IPSO object mappings for standard sensors (1 fields)",
-        "  \u2192 button: add ipso: {object: 3347}"
+        "  → button: add ipso: {object: 3347}"
       ]
     },
     {
@@ -12341,11 +12341,11 @@
         "Add test vector for minimum payload length",
         "Add test vectors covering all switch/flagged branches",
         "Add IPSO object mappings for standard sensors (2 fields)",
-        "  \u2192 freq_weight: add ipso: {object: 3322}",
-        "  \u2192 time_weight: add ipso: {object: 3322}",
+        "  → freq_weight: add ipso: {object: 3322}",
+        "  → time_weight: add ipso: {object: 3322}",
         "Add SenML units for standard sensors (2 fields)",
-        "  \u2192 freq_weight: add senml: {unit: \"kg\"}",
-        "  \u2192 time_weight: add senml: {unit: \"kg\"}"
+        "  → freq_weight: add senml: {unit: \"kg\"}",
+        "  → time_weight: add senml: {unit: \"kg\"}"
       ]
     },
     {
@@ -12517,11 +12517,11 @@
       "recommendations": [
         "Add test vector for negative values",
         "Add IPSO object mappings for standard sensors (6 fields)",
-        "  \u2192 voltage: add ipso: {object: 3316}",
-        "  \u2192 active_power: add ipso: {object: 3328}",
+        "  → voltage: add ipso: {object: 3316}",
+        "  → active_power: add ipso: {object: 3328}",
         "Add SenML units for standard sensors (6 fields)",
-        "  \u2192 voltage: add senml: {unit: \"V\"}",
-        "  \u2192 active_power: add senml: {unit: \"W\"}"
+        "  → voltage: add senml: {unit: \"V\"}",
+        "  → active_power: add senml: {unit: \"W\"}"
       ]
     },
     {
@@ -12733,11 +12733,11 @@
       },
       "recommendations": [
         "Add IPSO object mappings for standard sensors (6 fields)",
-        "  \u2192 target_temperature: add ipso: {object: 3303}",
-        "  \u2192 temperature_control_support_mode: add ipso: {object: 3303}",
+        "  → target_temperature: add ipso: {object: 3303}",
+        "  → temperature_control_support_mode: add ipso: {object: 3303}",
         "Add SenML units for standard sensors (6 fields)",
-        "  \u2192 target_temperature: add senml: {unit: \"Cel\"}",
-        "  \u2192 temperature_control_support_mode: add senml: {unit: \"Cel\"}"
+        "  → target_temperature: add senml: {unit: \"Cel\"}",
+        "  → temperature_control_support_mode: add senml: {unit: \"Cel\"}"
       ]
     },
     {
@@ -12804,11 +12804,11 @@
       },
       "recommendations": [
         "Add IPSO object mappings for standard sensors (7 fields)",
-        "  \u2192 target_temperature: add ipso: {object: 3303}",
-        "  \u2192 target_temperature_2: add ipso: {object: 3303}",
+        "  → target_temperature: add ipso: {object: 3303}",
+        "  → target_temperature_2: add ipso: {object: 3303}",
         "Add SenML units for standard sensors (7 fields)",
-        "  \u2192 target_temperature: add senml: {unit: \"Cel\"}",
-        "  \u2192 target_temperature_2: add senml: {unit: \"Cel\"}"
+        "  → target_temperature: add senml: {unit: \"Cel\"}",
+        "  → target_temperature_2: add senml: {unit: \"Cel\"}"
       ]
     },
     {
@@ -12866,11 +12866,11 @@
       },
       "recommendations": [
         "Add IPSO object mappings for standard sensors (2 fields)",
-        "  \u2192 wind_direction: add ipso: {object: 3332}",
-        "  \u2192 pressure: add ipso: {object: 3323}",
+        "  → wind_direction: add ipso: {object: 3332}",
+        "  → pressure: add ipso: {object: 3323}",
         "Add SenML units for standard sensors (2 fields)",
-        "  \u2192 wind_direction: add senml: {unit: \"deg\"}",
-        "  \u2192 pressure: field is in 'hPa'; SenML wants 'Pa' -- convert the value or declare the real unit before annotating"
+        "  → wind_direction: add senml: {unit: \"deg\"}",
+        "  → pressure: field is in 'hPa'; SenML wants 'Pa' -- convert the value or declare the real unit before annotating"
       ]
     },
     {
@@ -12928,11 +12928,11 @@
       },
       "recommendations": [
         "Add IPSO object mappings for standard sensors (2 fields)",
-        "  \u2192 wind_direction: add ipso: {object: 3332}",
-        "  \u2192 pressure: add ipso: {object: 3323}",
+        "  → wind_direction: add ipso: {object: 3332}",
+        "  → pressure: add ipso: {object: 3323}",
         "Add SenML units for standard sensors (2 fields)",
-        "  \u2192 wind_direction: add senml: {unit: \"deg\"}",
-        "  \u2192 pressure: field is in 'hPa'; SenML wants 'Pa' -- convert the value or declare the real unit before annotating"
+        "  → wind_direction: add senml: {unit: \"deg\"}",
+        "  → pressure: field is in 'hPa'; SenML wants 'Pa' -- convert the value or declare the real unit before annotating"
       ]
     },
     {
@@ -12990,11 +12990,11 @@
       },
       "recommendations": [
         "Add IPSO object mappings for standard sensors (2 fields)",
-        "  \u2192 wind_direction: add ipso: {object: 3332}",
-        "  \u2192 pressure: add ipso: {object: 3323}",
+        "  → wind_direction: add ipso: {object: 3332}",
+        "  → pressure: add ipso: {object: 3323}",
         "Add SenML units for standard sensors (2 fields)",
-        "  \u2192 wind_direction: add senml: {unit: \"deg\"}",
-        "  \u2192 pressure: field is in 'hPa'; SenML wants 'Pa' -- convert the value or declare the real unit before annotating"
+        "  → wind_direction: add senml: {unit: \"deg\"}",
+        "  → pressure: field is in 'hPa'; SenML wants 'Pa' -- convert the value or declare the real unit before annotating"
       ]
     },
     {
@@ -13057,11 +13057,11 @@
       },
       "recommendations": [
         "Add IPSO object mappings for standard sensors (6 fields)",
-        "  \u2192 temperature_event: add ipso: {object: 3303}",
-        "  \u2192 temperature: add ipso: {object: 3303}",
+        "  → temperature_event: add ipso: {object: 3303}",
+        "  → temperature: add ipso: {object: 3303}",
         "Add SenML units for standard sensors (3 fields)",
-        "  \u2192 temperature_event: add senml: {unit: \"Cel\"}",
-        "  \u2192 humidity_whole: add senml: {unit: \"%RH\"}"
+        "  → temperature_event: add senml: {unit: \"Cel\"}",
+        "  → humidity_whole: add senml: {unit: \"%RH\"}"
       ]
     },
     {
@@ -13189,16 +13189,16 @@
         "Add test vector for maximum values",
         "Add test vector for negative values",
         "Add IPSO object mappings for standard sensors (1 fields)",
-        "  \u2192 battery: add ipso: {object: 3316}",
+        "  → battery: add ipso: {object: 3316}",
         "Add SenML units for standard sensors (2 fields)",
-        "  \u2192 co2: add senml: {unit: \"ppm\"}",
-        "  \u2192 battery: add senml: {unit: \"V\"}"
+        "  → co2: add senml: {unit: \"ppm\"}",
+        "  → battery: add senml: {unit: \"V\"}"
       ]
     },
     {
       "schema_path": "schemas/devices/volley-boast/vobo.yaml",
-      "timestamp": "2026-10-11T18:41:06.775442-05:00",
-      "score": 89.0,
+      "timestamp": "2026-10-14T09:38:13.493486-05:00",
+      "score": 86.0,
       "tier": "GOLD",
       "details": {
         "schema_valid": true,
@@ -13232,7 +13232,7 @@
           "senml_missing": [
             "port70.adcTemperatureTransmitEnable: add senml: {unit: \"Cel\"}"
           ],
-          "semantic_mapped": 1,
+          "semantic_mapped": 0,
           "detectable_sensors": 2,
           "annotation_errors": []
         },
@@ -13247,9 +13247,9 @@
       },
       "recommendations": [
         "Add IPSO object mappings for standard sensors (1 fields)",
-        "  \u2192 port70.adcTemperatureTransmitEnable: add ipso: {object: 3303}",
+        "  → port70.adcTemperatureTransmitEnable: add ipso: {object: 3303}",
         "Add SenML units for standard sensors (1 fields)",
-        "  \u2192 port70.adcTemperatureTransmitEnable: add senml: {unit: \"Cel\"}"
+        "  → port70.adcTemperatureTransmitEnable: add senml: {unit: \"Cel\"}"
       ]
     }
   ]

@@ -17,12 +17,14 @@ fields:
         - bit: 0
           fields:
             - name: photosynthetically_active_radiation
+              description: "Photosynthetically active radiation"
               type: u16
               transform:
                 - add: -32768
                 - div: 10
               unit: "µmol⋅m⁻²⋅s⁻¹"
             - name: air_temperature
+              description: "Air temperature"
               type: u16
               transform:
                 - add: -32768
@@ -32,6 +34,7 @@ fields:
               senml: {name: "air_temperature", unit: "Cel"}
               semantic: "air.temperature"
             - name: air_humidity
+              description: "Air humidity"
               type: u16
               transform:
                 - add: -32768
@@ -39,8 +42,9 @@ fields:
               unit: "%"
               ipso: {object: 3304, instance: 0, resource: 5700}
               senml: {name: "air_humidity", unit: "%RH"}
-              semantic: "air.humidity"
+              semantic: "air.relativeHumidity"
             - name: co2_concentration
+              description: "CO2 concentration"
               type: u16
               transform:
                 - add: -32768
@@ -48,20 +52,24 @@ fields:
               unit: "ppm"
               ipso: {object: 3325, instance: 0, resource: 5700}
               senml: {name: "co2_concentration", unit: "ppm"}
-              semantic: "co2.concentration"
+              semantic: "air.co2"
             - name: atmospheric_pressure
+              description: "Atmospheric pressure"
               type: u16
               transform:
                 - add: -32768
                 - div: 100
               unit: "kPa"
+              semantic: "air.pressure"
             - name: vapor_pressure_deficit
+              description: "Vapor pressure deficit"
               type: u16
               transform:
                 - add: -32768
                 - div: 100
               unit: "kPa"
             - name: dew_point
+              description: "Dew point"
               type: u16
               transform:
                 - add: -32768
@@ -71,13 +79,14 @@ fields:
         - bit: 1
           fields:
             - name: battery_voltage
+              description: "Battery voltage"
               type: u16
               div: 1000
               unit: "V"
 
               ipso: {object: 3316, instance: 0, resource: 5700}
               senml: {name: "battery_voltage", unit: "V"}
-              semantic: "battery.voltage"
+              semantic: "battery"
 test_vectors:
   - name: min_payload_vendor_1
     description: "Vendor-published test payload, decoded by the vendor's own decoder"

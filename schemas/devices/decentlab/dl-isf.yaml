@@ -17,67 +17,80 @@ fields:
         - bit: 0
           fields:
             - name: sap_flow
+              description: "Sap flow"
               type: u16
               transform:
                 - mult: 0.016
                 - add: -50
               unit: "l⋅h⁻¹"
             - name: heat_velocity_outer
+              description: "Heat velocity (outer)"
               type: u16
               transform:
                 - mult: 0.016
                 - add: -50
               unit: "cm⋅h⁻¹"
             - name: heat_velocity_inner
+              description: "Heat velocity (inner)"
               type: u16
               transform:
                 - mult: 0.016
                 - add: -50
               unit: "cm⋅h⁻¹"
             - name: alpha_outer
+              description: "Alpha (outer)"
               type: u16
               transform:
                 - mult: 0.00032
                 - add: -10
             - name: alpha_inner
+              description: "Alpha (inner)"
               type: u16
               transform:
                 - mult: 0.00032
                 - add: -10
             - name: beta_outer
+              description: "Beta (outer)"
               type: u16
               transform:
                 - mult: 0.00032
                 - add: -10
             - name: beta_inner
+              description: "Beta (inner)"
               type: u16
               transform:
                 - mult: 0.00032
                 - add: -10
             - name: tmax_outer
+              description: "Tmax (outer)"
               type: u16
               transform:
                 - div: 500
               unit: "s"
             - name: tmax_inner
+              description: "Tmax (inner)"
               type: u16
               transform:
                 - div: 500
               unit: "s"
             - name: temperature_outer
+              description: "Temperature (outer)"
               type: u16
               transform:
                 - div: 100
                 - add: -327.68
               unit: "°C"
               senml: {unit: Cel}
+              semantic: "air.temperature"
             - name: max_voltage
+              description: "Max voltage"
               type: u16
               transform:
                 - div: 1000
                 - add: -32.768
               unit: "V"
             - name: min_voltage
+              description: "Min voltage"
               type: u16
               transform:
                 - div: 1000
@@ -87,13 +100,16 @@ fields:
             # halves the wrong way round. The vendor's own test payload happens not
             # to expose the difference, so cross-validation passed either way.
             - name: diagnostic
+              description: "Diagnostic"
               type: u32le16
             - name: upstream_tmax_outer
+              description: "Upstream Tmax (outer)"
               type: u16
               transform:
                 - div: 500
               unit: "s"
             - name: upstream_tmax_inner
+              description: "Upstream Tmax (inner)"
               type: u16
               transform:
                 - div: 500
@@ -101,9 +117,11 @@ fields:
         - bit: 1
           fields:
             - name: battery_voltage
+              description: "Battery voltage"
               type: u16
               div: 1000
               unit: "V"
+              semantic: "battery"
 
 test_vectors:
   # The word-ordered field's bytes are the vendor-documented pair from
