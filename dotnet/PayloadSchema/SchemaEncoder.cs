@@ -3189,7 +3189,9 @@ public static class SchemaEncoder
                 packed |= (raw & mask) << bitOff;
             }
             int length = field.Length > 0 ? field.Length : 2;
-            return Helpers.EncodeUint(packed, length, _endian);
+            // PS-050a: the field's own byte order, as it is decoded; this wrote the schema's.
+            return Helpers.EncodeUint(packed, length,
+                string.IsNullOrEmpty(field.Endian) ? _endian : field.Endian!);
         }
 
         // --- primitives --------------------------------------------------------------

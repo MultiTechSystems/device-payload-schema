@@ -867,7 +867,8 @@ function encBitfieldString(out, f, value, ctx) {      // _encode_bitfield_string
     }
     packed = encPlace(packed, v, Number(p[0]), Number(p[1]));
   }
-  encPacked(out, packed, length, ctx.endian);
+  // PS-050a: the field's own byte order, as it is decoded; this wrote the document's.
+  encPacked(out, packed, length, f.endian === "little" || f.endian === "big" ? f.endian : ctx.endian);
 }
 
 function encGroupGiven(group, data) {                 // _flagged_group_given
@@ -4695,7 +4696,10 @@ function writeS(buf, pos, size, value, endian) {
 
         # The value's bytes, most significant first. Reading it as one number and
         # shifting broke above bit 31, where JavaScript's bit operators wrap.
-        lines.append(f'{i}  var {name}_raw = orderedBytes(buf, pos, {length}, endian);')
+        # PS-050a: the field's own `endian` wins; this read the document's order alone.
+        eo = field_endian_override('bitfield_string', field)
+        endian_arg = f'"{eo}"' if eo else 'endian'
+        lines.append(f'{i}  var {name}_raw = orderedBytes(buf, pos, {length}, {endian_arg});')
         lines.append(f'{i}  pos += {length};')
         seg_exprs = []
         for part in parts:

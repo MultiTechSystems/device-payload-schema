@@ -1,0 +1,29 @@
+# The mirror of bitfield-string-field-endian.yaml: a field's own `endian: big` under a
+# little-endian document (PS-050a, PS-090).
+#
+# Payload 1203 read big-endian is 0x1203: major 1, minor 2, patch 3. Read in the
+# document's order it would be 0x0312, "0.3.18".
+#
+# Each vector round-trips, so the encode side is held to the same order.
+name: probe_version_be_in_le
+endian: little
+fields:
+- name: version
+  type: bitfield_string
+  length: 2
+  endian: big
+  parts:
+  - [12, 4]
+  - [8, 4]
+  - [0, 8]
+test_vectors:
+- name: big_field_in_little_document
+  payload: '1203'
+  source: generated
+  expected:
+    version: 1.2.3
+- name: big_field_wide_patch
+  payload: '5678'
+  source: generated
+  expected:
+    version: 5.6.120

@@ -3241,7 +3241,9 @@ final class Encoder {
             }
         }
         int length = field.getLength() > 0 ? field.getLength() : 2;
-        return writeInt(packed, length, false);
+        // PS-050a: the field's own byte order, as it is decoded; this wrote the schema's.
+        return writeInt(packed, length, false,
+                "little".equalsIgnoreCase(field.getEffectiveEndian(schema.getEndian())));
     }
 
     // --- primitives ----------------------------------------------------------------

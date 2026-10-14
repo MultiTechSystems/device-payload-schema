@@ -1,0 +1,32 @@
+# A field's own `endian:` selects the byte order of a version string's packed value
+# (PS-050a, PS-090), here little under a big-endian document.
+#
+# The packed value is read as an unsigned integer of `length` bytes in the field's
+# effective byte order, and the parts are taken from that integer. Payload 0312 read
+# little-endian is 0x1203: major 1, minor 2, patch 3. Read in the document's order it
+# would be 0x0312, "0.3.18". The reference and the generated codec read and wrote the
+# document's order, and the Java and C# encoders wrote it; Go alone honoured the key.
+#
+# Each vector round-trips, so the encode side is held to the same order.
+name: probe_version_le_in_be
+endian: big
+fields:
+- name: version
+  type: bitfield_string
+  length: 2
+  endian: little
+  parts:
+  - [12, 4]
+  - [8, 4]
+  - [0, 8]
+test_vectors:
+- name: little_field_in_big_document
+  payload: '0312'
+  source: generated
+  expected:
+    version: 1.2.3
+- name: little_field_wide_patch
+  payload: '7856'
+  source: generated
+  expected:
+    version: 5.6.120

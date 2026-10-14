@@ -5469,6 +5469,16 @@ class SchemaInterpreter:
             return value
         return self._apply_modifiers(value, field_def)
     
+    def _bitfield_string_order(self, field_def: Dict[str, Any]) -> str:
+        """The byte order of a bitfield_string's packed value (PS-050a, PS-090)."""
+        declared = field_def.get('endian')
+        if declared is None:
+            return 'little' if self.endian == Endian.LITTLE else 'big'
+        try:
+            return Endian(declared).value
+        except ValueError:
+            raise ValueError(f"field 'endian' must be 'big' or 'little', got {declared!r}")
+
     def _decode_bitfield_string(self, field_def: Dict[str, Any], buf: bytes, pos: int) -> Tuple[str, int]:
         """Decode a bitfield_string field (e.g., firmware version)."""
         self._produced(field_def)
@@ -5481,10 +5491,9 @@ class SchemaInterpreter:
             raise BufferUnderflow.need(length, pos, len(buf))
         
         data = buf[pos:pos + length]
-        if self.endian == Endian.LITTLE:
-            int_val = int.from_bytes(data, 'little')
-        else:
-            int_val = int.from_bytes(data, 'big')
+        # PS-050a: the field's own `endian` wins. This read the document's order alone,
+        # because the field-list path dispatches here without the override wrapper.
+        int_val = int.from_bytes(data, self._bitfield_string_order(field_def))
         pos += length
         
         part_strs = []
@@ -7526,7 +7535,8 @@ class SchemaInterpreter:
             mask = (1 << bit_len) - 1
             int_val |= (val & mask) << bit_off
         
-        return self._write_int(int_val, length, signed=False)
+        # PS-050a: in the field's own byte order, as it is decoded.
+        return int_val.to_bytes(length, self._bitfield_string_order(field_def), signed=False)
     
     def _encode_byte_group(self, field_def: Dict[str, Any], data: Dict[str, Any]) -> bytes:
         """Pack a ``byte_group``'s bit ranges back into their shared byte(s).
