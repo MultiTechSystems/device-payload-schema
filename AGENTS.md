@@ -232,10 +232,10 @@ implementation has a runner that reads the same YAML and the same vectors:
 
 | Implementation | Runner | Decode floor | Re-encode floor |
 |---|---|---|---|
-| Python | `tests/test_corpus_conformance.py` | every vector | 2166 |
-| Go | `go/schema/corpus_conformance_test.go` | 2768 | 2184 (plain API 2156) |
-| C# | `dotnet/PayloadSchema.Tests/CorpusConformanceTests.cs` | 2768 | 2167 |
-| Java | `bindings/java/.../CorpusConformanceTest.java` | 2768 | 2166 |
+| Python | `tests/test_corpus_conformance.py` | every vector | 2188 |
+| Go | `go/schema/corpus_conformance_test.go` | 2790 | 2206 (plain API 2178) |
+| C# | `dotnet/PayloadSchema.Tests/CorpusConformanceTests.cs` | 2790 | 2189 |
+| Java | `bindings/java/.../CorpusConformanceTest.java` | 2790 | 2188 |
 | C | `tools/c-corpus-harness.py` (builds each expressible schema through the struct API) | 575 of 575 attempted | n/a |
 
 These figures move with every schema added. `make check-floors` prints each floor beside
@@ -824,10 +824,10 @@ exercised to the best-covered part of the project:
 
 | | Runner | Round-trips |
 |---|---|---|
-| Python | `tests/test_encode_round_trip.py` | 2166 |
-| Go | `go/schema/corpus_encode_test.go` | 2184 (plain 2156) |
-| Java | `bindings/java/.../CorpusEncodeRoundTripTest.java` | 2166 |
-| C# | `dotnet/.../CorpusEncodeRoundTripTests.cs` | 2167 |
+| Python | `tests/test_encode_round_trip.py` | 2188 |
+| Go | `go/schema/corpus_encode_test.go` | 2206 (plain 2178) |
+| Java | `bindings/java/.../CorpusEncodeRoundTripTest.java` | 2188 |
+| C# | `dotnet/.../CorpusEncodeRoundTripTests.cs` | 2189 |
 | C | `src/test_encoder.c`, built by `make test-c` (unit tests, not a corpus round trip) | n/a |
 
 - **A name may be an object under one tag and a scalar under another, and a tlv encoder
@@ -3850,6 +3850,17 @@ Known weaknesses, so you neither trip over them nor assume they are intentional:
   - *`ascii` trailing NULs* are stripped, as the reference does, and nothing else;
     the specification says nothing about padding. **Java removed every NUL and trimmed
     spaces**, so `"HC "` read as `"HC"`; it now strips trailing NULs only, like Go and C#.
+- **The generated codec never bound `var:` on a float field** (found by the registry's NU-02 batch,
+  MCCI model4841: `{type: uflt16, var: va}` then `{type: number, ref: $va}` reported nothing).
+  The decode paths for the minifloats, bf16, f16/f32/f64 and `udec`/`sdec` (and an `ascii`
+  `numeral`) called `_bind_js(..., False)`, which skips the `var`; only the field's own name
+  was bound, so `$name` worked and `var:` did not. Measured on 22 probes (11 types, each
+  through `var` and through its own name): Python, Go, Java and C# bound all 22, the codec
+  lost the 9 `var` ones (`f32le16`/`f32be16le` were fine, they take the integer path). C has
+  no minifloat or bf16. The four calls now bind the var;
+  `_language-conformance/minifloat-reference-binding.yaml` holds all five to it: decode +22
+  in Go, Java and C#, re-encode and `plain fixed` +22 everywhere (all 22 round-trip). A
+  byte_group member still binds no `var` in the codec (not measured here).
 - **The generated codec's encoder is a runtime port of the reference's**, not code
   unrolled per field. `ENCODER_RUNTIME_JS` in `tools/generate_ts013_codec.py` mirrors
   `encode`/`_encode_field_list` function by function, each marked with the reference
