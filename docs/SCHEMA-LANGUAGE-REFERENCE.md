@@ -226,6 +226,30 @@ none do (PS-402). Devices that append fields in later firmware are described by 
   that supplies one after omitting an earlier one (PS-405).
 - When encoding it contributes no fixed count; the value supplies its own length.
 
+#### Reporting a span again (`consume: 0`)
+
+A `bytes`, `hex` or `ascii` field declaring `consume: 0` reads and reports its span and
+leaves the read position where it was, so the fields after it read the same bytes again
+(PS-588). It reports the whole frame, or a command's bytes, beside the values decoded from
+them. Its `length` may be `remaining`, and it does not count toward the one `remaining`
+field a level may hold (PS-015).
+
+```yaml
+- name: raw              # the whole frame, reported first
+  type: bytes
+  length: remaining
+  consume: 0
+- {name: temperature, type: s16, div: 10}
+- {name: humidity, type: u8}
+# 00D7 5A -> {"raw": "00d75a", "temperature": 21.5, "humidity": 90}
+```
+
+- An encoder writes nothing for it and does not require it. A value given for it must
+  equal what the field decodes from the bytes the other fields write over its span (its
+  `format` and `separator`, or the trailing 0x00 removal, applied first), or the input is
+  rejected naming the field (PS-589).
+- On any other type than a bit range or `bool`, `consume: 0` is NOT RECOMMENDED (PS-453).
+
 ### Special Types
 
 | Type | Description |
@@ -467,7 +491,7 @@ plausible byte. The same applies to an `enum` `default` (PS-068).
 - name: ratio
   type: number
   compute:
-    op: div          # add, sub, mul, div, mod, idiv
+    op: div          # add, sub, mul, div, mod, idiv, pow
     a: $field1       # Field reference or literal
     b: $field2
 ```
@@ -482,6 +506,13 @@ plausible byte. The same applies to an `enum` `default` (PS-068).
 | `div` | Division | `a / b` |
 | `mod` | Modulo (remainder) | `int(a) % int(b)` |
 | `idiv` | Integer division | `int(a) // int(b)` |
+| `pow` | Power; `b` may be a field (PS-584) | `a ** b` |
+
+`pow` computes `a` raised to `b` in binary64, with `b` a literal or a field
+(`{op: pow, a: 10, b: $scale}`); a literal base of 2.718281828459045 gives `e^x`. A result
+that is not a finite real number - a negative `a` with a non-integer `b`, `0` with a negative
+`b`, an overflow - leaves the field absent, as a zero divisor does (PS-278, PS-584), and the
+rest of the payload still decodes.
 
 **Nibble Extraction Example:**
 
@@ -664,6 +695,35 @@ Parse bits into formatted string (e.g., version numbers):
     - [0, 8]             # [start_bit, width] → minor
 # Input: 0x0102 → Output: "v1.2"
 ```
+
+A part's third element is its format (PS-430): `decimal` (the default), `sdecimal`, `hex`
+(lower case) or `hex:upper`, optionally followed by `:N`, a minimum width from 1 to 32.
+With `:N` a part is zero-filled on the left to `N` digits; a part already that wide or wider
+is written in full, never cut. `sdecimal` reads the part's bits as two's complement of its
+width and writes a `-` before any padding, so -5 as `sdecimal:2` is `"-05"` (PS-582). Quote
+a format carrying `:N`.
+
+```yaml
+- name: mac_tail                   # 0x0A3F -> "0a:3f"
+  type: bitfield_string
+  length: 2
+  delimiter: ":"
+  parts:
+    - [8, 8, "hex:2"]
+    - [0, 8, "hex:2"]
+- name: ai_offsets                 # 0xFB03 -> "-5,3"
+  type: bitfield_string
+  length: 2
+  delimiter: ","
+  parts:
+    - [8, 8, sdecimal]
+    - [0, 8, sdecimal]
+```
+
+Encoding parses each segment by its format: leading zeros are accepted, hex in either case,
+and a `-` only on `sdecimal` (PS-096, PS-431). A segment the part's width cannot hold - 0 to
+2^w - 1, or -2^(w-1) to 2^(w-1) - 1 for `sdecimal` - is rejected naming the field and the
+segment, never masked (PS-583).
 
 ## Test Vectors
 
@@ -1811,7 +1871,7 @@ TRANSFORMS:   mult div add | sqrt abs pow log10 log | floor ceiling
               | {op: round, decimals: n, ties: even|away} - nothing else (PS-390)
               div 0 or log of x <= 0: the field is absent (PS-100, PS-117)
 
-COMPUTE OPS:  add sub mul div mod idiv
+COMPUTE OPS:  add sub mul div mod idiv pow
 
 GUARD OPS:    gt gte lt lte eq ne
 

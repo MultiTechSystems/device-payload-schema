@@ -1,0 +1,105 @@
+# CR-2026-172 (PS-119, PS-584): `compute` `pow`, a power whose exponent may be a field. A result
+# that is not a finite real number - a negative base with a fractional exponent, 0 to a negative
+# power, an overflow - omits the field, and decoding of the rest of the payload continues.
+#
+# One case list, read by the reference and the generated codec (tests/test_cr_2026_172_cases.py),
+# Go (go/schema/cr172_test.go), Java (CR2026172Test.java) and C# (CR2026_172Tests.cs). The C
+# interpreter has no `compute`; tools/schema_binary.py refuses it (PS-446).
+#
+# Each case gives `schema` (YAML text), the `payload` (hex) and `expected`, the decoded data as
+# JSON text. A number matches to a relative 1e-9; the keys must be exactly those listed.
+
+decode_cases:
+
+# The CR's Dingtek chain. The vendor divides the mantissa by 0x7fffff, not 2^23, so the value
+# is 10.0000002 rather than 10 (Implementation Record).
+- name: dingtek_float
+  schema: |
+    name: t
+    fields:
+      - {name: _e, type: "u32[23:30]"}
+      - {name: _m, type: "u32[0:22]", consume: 4}
+      - {name: _x, type: number, compute: {op: sub, a: $_e, b: 127}}
+      - {name: _scale, type: number, compute: {op: pow, a: 2, b: $_x}}
+      - {name: _f, type: number, compute: {op: div, a: $_m, b: 8388607}}
+      - {name: _g, type: number, compute: {op: add, a: $_f, b: 1}}
+      - {name: level, type: number, compute: {op: mul, a: $_g, b: $_scale}}
+  payload: "41200000"
+  expected: '{"level": 10.00000023841859}'
+
+- name: field_exponent_positive
+  schema: &field_exponent |
+    name: t
+    fields:
+      - {name: x, type: s8}
+      - {name: v, type: number, compute: {op: pow, a: 10, b: $x}}
+  payload: "02"
+  expected: '{"x": 2, "v": 100}'
+
+- name: field_exponent_negative
+  schema: *field_exponent
+  payload: "FE"
+  expected: '{"x": -2, "v": 0.01}'
+
+# A literal base of e gives exp(x).
+- name: literal_base_e
+  schema: |
+    name: t
+    fields:
+      - {name: x, type: u8}
+      - {name: v, type: number, compute: {op: pow, a: 2.718281828459045, b: $x}}
+  payload: "01"
+  expected: '{"x": 1, "v": 2.718281828459045}'
+
+# A field base with a literal exponent, and a negative base with an integer exponent.
+- name: negative_base_integer_exponent
+  schema: |
+    name: t
+    fields:
+      - {name: b, type: s8}
+      - {name: v, type: number, compute: {op: pow, a: $b, b: 3}}
+  payload: "FE"
+  expected: '{"b": -2, "v": -8}'
+
+# The three results that are not finite real numbers; the field after each still decodes.
+- name: negative_base_fractional_exponent
+  schema: |
+    name: t
+    fields:
+      - {name: b, type: s8}
+      - {name: r, type: number, compute: {op: pow, a: $b, b: 0.5}}
+      - {name: after, type: u8}
+  payload: "FE07"
+  expected: '{"b": -2, "after": 7}'
+
+- name: zero_to_a_negative_power
+  schema: |
+    name: t
+    fields:
+      - {name: b, type: s8}
+      - {name: r, type: number, compute: {op: pow, a: 0, b: $b}}
+      - {name: after, type: u8}
+  payload: "FE07"
+  expected: '{"b": -2, "after": 7}'
+
+- name: overflow
+  schema: |
+    name: t
+    fields:
+      - {name: b, type: s8}
+      - {name: r, type: number, compute: {op: pow, a: 10, b: 400}}
+      - {name: after, type: u8}
+  payload: "FE07"
+  expected: '{"b": -2, "after": 7}'
+
+# A computed field that reads an absent power is itself absent (PS-314).
+- name: a_reference_to_an_absent_power
+  schema: |
+    name: t
+    fields:
+      - {name: b, type: s8}
+      - {name: _r, type: number, compute: {op: pow, a: 0, b: $b}}
+      - {name: r2, type: number, compute: {op: add, a: $_r, b: 1}}
+      - {name: after, type: u8}
+  payload: "FE07"
+  expected: '{"b": -2, "after": 7}'

@@ -320,6 +320,11 @@ final class Encoder {
             // Derived from other fields: no bytes of its own.
             return EMPTY;
         }
+        if (field.isEcho()) {
+            // PS-589 (CR-2026-175): a byte string that does not consume writes nothing; the
+            // field lists record a value given for it (FrameBuffer.echo).
+            return EMPTY;
+        }
         if (type == FieldType.SKIP) {
             // `remaining` gives no count to pad on encode (PS-014).
             int length = field.getLength() > 0 ? field.getLength() : 0;
@@ -600,6 +605,18 @@ final class Encoder {
                         continue;
                     }
                 }
+                if (field.isEcho()) {
+                    // PS-589 (CR-2026-175): a byte string that does not consume re-reads
+                    // bytes the other fields write, so it writes none and is not required;
+                    // a value given for it is checked where the frame closes.
+                    try {
+                        out.echo(field, data);
+                    } catch (RuntimeException e) {
+                        if (!topLevel) throw e;
+                        errors.add("Error encoding " + describe(field) + ": " + e.getMessage());
+                    }
+                    continue;
+                }
                 byte[] savedPeek = peeked;
                 peeked = out.pending();
                 try {
@@ -652,7 +669,7 @@ final class Encoder {
         int tail = out.pendingLength();
         FrameMeta meta = out.meta();
         byte[] frame = carrying(out.frame(), tail);
-        if (frame.length > 0) frameMeta.put(frame, meta);
+        if (frame.length > 0 || !meta.echoes().isEmpty()) frameMeta.put(frame, meta);
         return frame;
     }
 
@@ -750,7 +767,92 @@ final class Encoder {
     }
 
     /** Per byte, the bits some field wrote (null: all), and the peeks placed. */
-    private record FrameMeta(byte[] covered, List<Peek> peeks) {}
+    private record FrameMeta(byte[] covered, List<Peek> peeks, List<Echo> echoes) {
+        FrameMeta(byte[] covered, List<Peek> peeks) { this(covered, peeks, List.of()); }
+    }
+
+    /**
+     * CR-2026-175 (PS-589): a non-consuming byte string given a value - where a decoder
+     * would read it in the frame, and its length from the input, null for `remaining`.
+     */
+    private record Echo(int pos, Field field, Object given, Integer length) {
+        Echo shifted(int by) { return new Echo(pos + by, field, given, length); }
+    }
+
+    /** The byte count of a non-consuming byte string, read from the input. */
+    private static Integer echoLength(Field field, Map<String, Object> data) {
+        if (field.getLengthRef() != null) {
+            String ref = field.getLengthRef();
+            if (ref.startsWith("$")) ref = ref.substring(1);
+            Object v = data.get(ref);
+            if (!(v instanceof Number n) || v instanceof Boolean || n.doubleValue() < 0
+                    || n.doubleValue() != Math.rint(n.doubleValue())) {
+                throw new MissingFieldException(ref);
+            }
+            return n.intValue();
+        }
+        if (field.getLength() < 0) return null;
+        return field.getEffectiveLength();
+    }
+
+    /** A value as a PS-589 message writes it (the reference's {@code echo_text}). */
+    private static String echoText(Object value) {
+        if (value instanceof List<?> list) {
+            List<String> parts = new ArrayList<>();
+            for (Object v : list) {
+                String t = echoText(v);
+                if (t.startsWith("'") && t.endsWith("'") && t.length() >= 2) {
+                    t = t.substring(1, t.length() - 1);
+                }
+                parts.add(t);
+            }
+            return "'[" + String.join(", ", parts) + "]'";
+        }
+        if (value instanceof Boolean b) return b ? "true" : "false";
+        if (value instanceof Number) return jsNumber(value);
+        return "'" + value + "'";
+    }
+
+    private static boolean echoEquals(Object a, Object b) {
+        if (a instanceof Number x && b instanceof Number y && !(a instanceof Boolean)
+                && !(b instanceof Boolean)) {
+            return x.doubleValue() == y.doubleValue();
+        }
+        if (a instanceof List<?> la && b instanceof List<?> lb) {
+            if (la.size() != lb.size()) return false;
+            for (int i = 0; i < la.size(); i++) if (!echoEquals(la.get(i), lb.get(i))) return false;
+            return true;
+        }
+        return java.util.Objects.equals(a, b);
+    }
+
+    /**
+     * PS-589, where a frame closes: a value given for a non-consuming byte string equals
+     * what the field decodes from the bytes the other fields wrote over its span - its
+     * format and separator, or PS-534's trailing 0x00 removal, applied first.
+     */
+    private void checkEchoes(byte[] frame, List<Echo> echoes) {
+        for (Echo e : echoes) {
+            int length = e.length() == null ? Math.max(0, frame.length - e.pos()) : e.length();
+            String written;
+            if (e.pos() + length > frame.length) {
+                written = "too few bytes";
+            } else {
+                Object found;
+                try {
+                    found = schema.echoValue(e.field(),
+                            java.util.Arrays.copyOfRange(frame, e.pos(), e.pos() + length));
+                } catch (RuntimeException x) {
+                    found = null;
+                }
+                if (found != null && echoEquals(found, e.given())) continue;
+                written = found != null ? echoText(found) : "too few bytes";
+            }
+            throw new SchemaException.EncodeException("Field '" + e.field().getName()
+                    + "' is given " + echoText(e.given()) + ", but the other fields write "
+                    + written + " over its span (PS-589)");
+        }
+    }
 
     /**
      * Each nested list's coverage and peeks, keyed by the array it returned, as
@@ -779,6 +881,11 @@ final class Encoder {
     private void checkPeeks(byte[] frame) {
         FrameMeta meta = frameMeta.remove(frame);
         if (meta == null) return;
+        checkBitPeeks(frame, meta);
+        checkEchoes(frame, meta.echoes());                  // PS-589 (CR-2026-175)
+    }
+
+    private void checkBitPeeks(byte[] frame, FrameMeta meta) {
         for (Peek p : meta.peeks()) {
             if (p.raw() == null) {
                 for (int i = 0; i < p.size(); i++) {
@@ -807,7 +914,9 @@ final class Encoder {
         }
         List<Peek> peeks = new ArrayList<>();
         for (Peek p : meta.peeks()) peeks.add(p.shifted(prefix));
-        frameMeta.put(result, new FrameMeta(covered, peeks));
+        List<Echo> echoes = new ArrayList<>();
+        for (Echo e : meta.echoes()) echoes.add(e.shifted(prefix));
+        frameMeta.put(result, new FrameMeta(covered, peeks, echoes));
         return result;
     }
 
@@ -2269,7 +2378,7 @@ final class Encoder {
                 matchClaims(f.getMatchInline(), out);
                 continue;
             }
-            if (claimName(f) != null && (isLiteral(f) || isComputed(f))) {
+            if (claimName(f) != null && (isLiteral(f) || isComputed(f) || f.isEcho())) {
                 // A literal or computed field writes no bytes, but only this case reports
                 // it, so it claims its name, never required: a literal where the input gives
                 // its value, a computed field so the case is chosen and what it is computed
@@ -3223,20 +3332,11 @@ final class Encoder {
                 Long bitOff = asLong(part.get(0));
                 Long bitLen = asLong(part.get(1));
                 if (bitOff == null || bitLen == null) continue;
-                String format = part.size() >= 3 ? String.valueOf(part.get(2)) : "decimal";
-                String segment = i < segments.length ? segments[i].trim() : "0";
-                long raw;
-                try {
-                    // PS-431: a hex segment is read without regard to case.
-                    // Unsigned: a 64-bit part past Long.MAX_VALUE is a valid segment.
-                    raw = "hex".equals(format) || "hex:upper".equals(format)
-                            ? Long.parseUnsignedLong(segment, 16)
-                            : Long.parseUnsignedLong(segment);
-                } catch (NumberFormatException e) {
-                    throw new SchemaException.EncodeException("bitfield_string field '"
-                            + field.getName() + "': segment '" + segment + "' is not "
-                            + format);
-                }
+                Object format = part.size() >= 3 ? part.get(2) : "decimal";
+                String segment = i < segments.length ? segments[i] : "0";
+                // PS-096, PS-431, PS-583: parsed by the part's format; a value the width
+                // cannot hold is rejected, never masked.
+                long raw = BitfieldParts.parseSegment(segment, bitLen.intValue(), format, field.getName());
                 long mask = bitLen >= 64 ? -1L : (1L << bitLen) - 1;
                 packed |= (raw & mask) << bitOff;
             }
@@ -3615,6 +3715,18 @@ final class Encoder {
         // each bit range or bool placed.
         private byte[] covered = new byte[0];
         private final List<Peek> peeks = new ArrayList<>();
+        private final List<Echo> echoes = new ArrayList<>();      // PS-589
+
+        /**
+         * PS-589 (CR-2026-175): a non-consuming byte string writes nothing and is not
+         * required; a value given for it is checked where the frame closes. It reads from
+         * where a decoder is, the start of any bytes still pending.
+         */
+        void echo(Field field, Map<String, Object> data) {
+            String name = field.getName();
+            if (name == null || data.get(name) == null) return;
+            echoes.add(new Echo(buf.size, field, data.get(name), echoLength(field, data)));
+        }
 
         private void cover(int at, int mask) {
             if (covered.length <= at) {
@@ -3625,7 +3737,8 @@ final class Encoder {
 
         FrameMeta meta() {
             int total = buf.size + pending.length;
-            return new FrameMeta(java.util.Arrays.copyOf(covered, total), new ArrayList<>(peeks));
+            return new FrameMeta(java.util.Arrays.copyOf(covered, total), new ArrayList<>(peeks),
+                    new ArrayList<>(echoes));
         }
 
         byte[] pending() {
@@ -3655,6 +3768,7 @@ final class Encoder {
          * older pending bytes beyond them.
          */
         void extend(byte[] data, int carried, FrameMeta meta) {
+            if (meta != null) for (Echo e : meta.echoes()) echoes.add(e.shifted(buf.size));
             if (data == null || data.length == 0) return;
             carried = Math.min(carried, data.length);
             int offset = buf.size;

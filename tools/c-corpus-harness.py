@@ -163,6 +163,11 @@ def field_source(field, schema_endian):
                 "    schema_add_field(s, &f);"], None
     if not name:
         return None, "field has no name"
+    if (ftype in SIZED_CTORS and "consume" in field and field.get("consume") == 0
+            and not isinstance(field.get("consume"), bool)):
+        # CR-2026-175: field_def_t's `consume` is a bit range's and a bool's; a byte
+        # string always advances, so a re-read (PS-588) is an interpreter gap.
+        return None, "the interpreter has no non-consuming byte string (PS-588)"
 
     # A field's own `endian:` wins over the schema's. The C interpreter has carried
     # this since it had a field struct (`field_def_t.endian`, applied in

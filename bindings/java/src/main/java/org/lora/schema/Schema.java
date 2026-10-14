@@ -35,6 +35,8 @@ public class Schema {
     private String direction;
     private List<Field> fields;
     private Map<String, PortDef> ports;
+    /** The document's top-level fPort (PS-458), 0 where it declares none. */
+    private int docFPort;
     /** Names declared only inside some repeat's elements (PS-368). */
     private Set<String> repeatOnlyNames = Set.of();
     /** The document's {@code name} as written, null where it has none (`_meta.schema`). */
@@ -163,6 +165,9 @@ public class Schema {
         schema.direction = (String) raw.get("direction");
         checkPortDeclarations(raw);
         Cr159.checkPorts(raw);             // CR-2026-159
+        for (String key : new String[] {"fPort", "fport"}) {
+            if (raw.get(key) instanceof Integer n) schema.docFPort = n;
+        }
 
         // Parse fields, splicing any `$ref` into the list first.
         Object fieldsRaw = raw.get("fields");
@@ -577,6 +582,7 @@ public class Schema {
             if (t == FieldType.NUMBER || t == FieldType.BOOLEAN
                     || (t == FieldType.STRING && f.getValue() != null)) continue;
             if (t == FieldType.BITS || t == FieldType.BOOL) { total += f.getConsume(); continue; }
+            if (f.isEcho()) continue;               // PS-588: it advances nothing
             if (t == FieldType.BYTES || t == FieldType.ASCII || t == FieldType.HEX
                     || t == FieldType.BASE64 || t == FieldType.SKIP) {
                 if (f.getLength() <= 0) return 0;
@@ -607,7 +613,7 @@ public class Schema {
 
     /**
      * PS-426: match_value is withdrawn. PS-422: `encoding` is a named code on a uN.
-     * PS-430: a bitfield_string part is decimal, hex or hex:upper. PS-364: a byte_group
+     * PS-430: a bitfield_string part is decimal, sdecimal, hex or hex:upper, with an optional :N. PS-364: a byte_group
      * member declares no endian.
      */
     @SuppressWarnings("unchecked")
@@ -632,11 +638,8 @@ public class Schema {
         }
         if ("bitfield_string".equals(fm.get("type")) && fm.get("parts") instanceof List<?> parts) {
             for (Object raw : parts) {
-                if (raw instanceof List<?> part && part.size() > 2
-                        && !List.of("decimal", "hex", "hex:upper").contains(part.get(2))) {
-                    throw new SchemaException(at + "bitfield_string part format " + part.get(2)
-                            + " is not one of decimal, hex, hex:upper (PS-430)");
-                }
+                // PS-430 (CR-2026-170): the spec prototype's text, unprefixed.
+                if (raw instanceof List<?> part && part.size() > 2) BitfieldParts.parse(part.get(2));
             }
         }
         Object group = fm.get("byte_group");
@@ -807,8 +810,9 @@ public class Schema {
                 throw new SchemaException(at + "names an unknown operation (PS-390)");
             }
             Object ties = stage.get("ties");
-            if (ties != null && !"even".equals(ties) && !"away".equals(ties)) {
-                throw new SchemaException(at + "round `ties` must be even or away (PS-390)");
+            if (ties != null && !"even".equals(ties) && !"away".equals(ties)
+                    && !"up".equals(ties)) {
+                throw new SchemaException(at + "round `ties` must be even, away or up (PS-390)");
             }
         }
     }
@@ -883,6 +887,7 @@ public class Schema {
         }
         f.setBits(toInt(fm.get("bits"), 0));
         f.setConsume(toInt(fm.get("consume"), 0));
+        f.setConsumeDeclared(fm.get("consume") instanceof Number);
         f.setEndian((String) fm.get("endian"));
 
         // A `u8[lo:hi]` range is a bit field. FieldType.fromString does not recognise
@@ -1419,7 +1424,7 @@ public class Schema {
      * fields they were. See {@link Encoder} for what round-tripping can and cannot recover.
      */
     public EncodeResult encode(Map<String, Object> data) {
-        return new Encoder(this, fields).run(data);
+        return encodeWithPort(data, 0, null, null);
     }
 
     /**
@@ -1428,14 +1433,88 @@ public class Schema {
      * may instead arrive in {@code data} as {@code _decode}; this argument wins.
      */
     public EncodeResult encode(Map<String, Object> data, Map<String, Object> decodeRecord) {
-        return new Encoder(this, fields).run(data, decodeRecord);
+        return encodeWithPort(data, 0, null, decodeRecord);
     }
 
     /** {@link #encodeWithPort(Map, int, String)} following a decode record (PS-573). */
     public EncodeResult encodeWithPort(Map<String, Object> data, int fPort, String direction,
                                        Map<String, Object> decodeRecord) {
-        checkDirection(fPort, direction);
-        return new Encoder(this, resolveFields(fPort)).run(data, decodeRecord);
+        // PS-581: which port entry this encode uses, and the FPort it reports. A
+        // rejection is reported through the result, as every encode failure is.
+        int used;
+        try {
+            used = chooseEncodePort(fPort, direction);
+        } catch (SchemaException.DecodeException e) {
+            return new EncodeResult(new byte[0], null, new ArrayList<>(List.of(e.getMessage())));
+        }
+        checkDirection(used, direction);
+        EncodeResult result = new Encoder(this, resolveFields(used)).run(data, decodeRecord);
+        result.setFPort(used);
+        return result;
+    }
+
+    /**
+     * The FPort whose entry an encode uses, by PS-581 (CR-2026-169). A caller's FPort
+     * (non-zero; a port is 1 to 255) chooses its entry, or the {@code default} entry where
+     * none lists it, and an entry declared {@code uplink} is refused only where the
+     * direction is {@code downlink}. Without one: the single entry declaring
+     * {@code downlink}, else the single downlink-capable entry ({@code downlink},
+     * {@code both} or no declaration, PS-287), else the input is rejected naming the
+     * candidates. {@code default} is never chosen without an FPort. A schema without
+     * {@code ports} gives the caller's FPort, else the document's, else 0.
+     */
+    int chooseEncodePort(int fPort, String direction) {
+        if (ports == null || ports.isEmpty()) {
+            return fPort != 0 ? fPort : docFPort;
+        }
+        if (fPort != 0) {
+            PortDef entry = ports.containsKey(String.valueOf(fPort))
+                    ? ports.get(String.valueOf(fPort)) : ports.get("default");
+            if (entry == null) {
+                throw new SchemaException.DecodeException(String.format(
+                        "FPort %d matches no port entry and schema '%s' declares no default; it defines %s (PS-581)",
+                        fPort, name, joinPorts(numberedPorts(e -> true))));
+            }
+            if (DIRECTION_UPLINK.equals(entry.getDirection()) && DIRECTION_DOWNLINK.equals(direction)) {
+                throw new SchemaException.DecodeException(String.format(
+                        "FPort %d is declared direction:uplink and takes no downlink to encode (PS-581)", fPort));
+            }
+            return fPort;
+        }
+        String[] tiers = {"declared downlink", "downlink-capable"};
+        for (int t = 0; t < 2; t++) {
+            final boolean declaredOnly = t == 0;
+            List<Integer> candidates = numberedPorts(e -> {
+                String d = e.getDirection();
+                return declaredOnly ? DIRECTION_DOWNLINK.equals(d)
+                        : d == null || DIRECTION_DOWNLINK.equals(d) || DIRECTION_BOTH.equals(d);
+            });
+            if (candidates.size() == 1) return candidates.get(0);
+            if (candidates.size() > 1) {
+                throw new SchemaException.DecodeException(String.format(
+                        "no FPort was given, and schema '%s' has %d %s port entries (%s); give the FPort (PS-581)",
+                        name, candidates.size(), tiers[t], joinPorts(candidates)));
+            }
+        }
+        throw new SchemaException.DecodeException(String.format(
+                "no FPort was given, and schema '%s' has no port entry that takes a downlink (PS-581)", name));
+    }
+
+    private List<Integer> numberedPorts(java.util.function.Predicate<PortDef> ok) {
+        List<Integer> out = new ArrayList<>();
+        for (Map.Entry<String, PortDef> e : ports.entrySet()) {
+            if (e.getValue() == null || !ok.test(e.getValue())) continue;
+            try { out.add(Integer.parseInt(e.getKey())); } catch (NumberFormatException ignored) { }
+        }
+        Collections.sort(out);
+        return out;
+    }
+
+    private static String joinPorts(List<Integer> ports) {
+        if (ports.isEmpty()) return "nothing";
+        StringBuilder sb = new StringBuilder();
+        for (int p : ports) { if (sb.length() > 0) sb.append(", "); sb.append(p); }
+        return sb.toString();
     }
 
     /** PS-572: the JSON Pointer of each node of the expanded document, by identity. */
@@ -1455,8 +1534,7 @@ public class Schema {
      * definitions, so nothing is encoded.
      */
     public EncodeResult encodeWithPort(Map<String, Object> data, int fPort, String direction) {
-        checkDirection(fPort, direction);
-        return new Encoder(this, resolveFields(fPort)).run(data);
+        return encodeWithPort(data, fPort, direction, null);
     }
 
     /** Directions a message can be travelling, as passed to the three-argument
@@ -1910,8 +1988,11 @@ public class Schema {
             
             case ASCII -> {
                 if (field.getTerminator() != null) length = AsciiText.terminatedSpan(field, ctx);   // PS-593
+                // PS-588 (CR-2026-175): `consume: 0` re-reads the span; the position stays.
+                int echoStart = ctx.getOffset();
                 byte[] data = ctx.read(length);
-                if (field.getTerminator() != null) ctx.setOffset(ctx.getOffset() + 1);   // consumed, not reported
+                if (field.isEcho()) ctx.setOffset(echoStart);
+                else if (field.getTerminator() != null) ctx.setOffset(ctx.getOffset() + 1);   // consumed, not reported
                 // PS-538: each byte is the ISO 8859-1 character of the same number, so the
                 // value is lossless and re-encodes to the same bytes (PS-537). US_ASCII
                 // decoded a byte above 0x7F as U+FFFD. PS-073's warning reports it.
@@ -1933,7 +2014,10 @@ public class Schema {
             }
             
             case HEX -> {
+                // PS-588 (CR-2026-175): `consume: 0` re-reads the span; the position stays.
+                int echoStart = ctx.getOffset();
                 byte[] data = ctx.read(length);
+                if (field.isEcho()) ctx.setOffset(echoStart);
                 value = bytesToHex(data);
             }
 
@@ -1949,7 +2033,10 @@ public class Schema {
             }
             
             case BYTES -> {
+                // PS-588 (CR-2026-175): `consume: 0` re-reads the span; the position stays.
+                int echoStart = ctx.getOffset();
                 byte[] data = ctx.read(length);
+                if (field.isEcho()) ctx.setOffset(echoStart);
                 value = formatBytes(data, field.getFormat(), field.getSeparator());
             }
             
@@ -3044,27 +3131,41 @@ public class Schema {
                 
                 int bitOff = toInt(part.get(0), 0);
                 int bitLen = toInt(part.get(1), 0);
-                String format = part.size() >= 3 ? String.valueOf(part.get(2)) : "decimal";
+                Object format = part.size() >= 3 ? part.get(2) : "decimal";
                 
                 // The value is unsigned: a logical shift, and a 64-bit part's mask is all
                 // ones - Java takes a shift count mod 64, so `(1L << 64) - 1` was 0 and
-                // a 64-bit part read 0. Rendered unsigned for the same reason.
+                // a 64-bit part read 0.
                 long mask = bitLen >= 64 ? -1L : (1L << bitLen) - 1;
                 long raw = bitOff >= 64 ? 0 : (intVal >>> bitOff) & mask;
                 
-                // PS-430: hex lower case, hex:upper upper case; any other format is
-                // refused when the schema is loaded.
-                if ("hex".equals(format)) {
-                    partStrs.add(Long.toHexString(raw));
-                } else if ("hex:upper".equals(format)) {
-                    partStrs.add(Long.toHexString(raw).toUpperCase());
-                } else {
-                    partStrs.add(Long.toUnsignedString(raw));
-                }
+                // PS-430, PS-582: the part's format writes it (checked at load).
+                partStrs.add(BitfieldParts.format(raw, bitLen, format));
             }
         }
         
         return prefix + String.join(delimiter, partStrs);
+    }
+
+    /**
+     * What a non-consuming byte string decodes from {@code span} (PS-589, CR-2026-175):
+     * its format and separator, or PS-534's trailing 0x00 removal, as a decoder applies them.
+     */
+    Object echoValue(Field field, byte[] span) {
+        switch (field.getType()) {
+            case BYTES: return formatBytes(span, field.getFormat(), field.getSeparator());
+            case HEX: return bytesToHex(span);
+            default: {
+                String str = new String(span, StandardCharsets.ISO_8859_1);
+                int end = str.length();
+                while (end > 0 && str.charAt(end - 1) == '\0') end--;
+                Object value = str.substring(0, end);
+                if (field.getNumeral() != null) {
+                    value = Numeral.decode(field.getName(), (String) value, field.getNumeral());
+                }
+                return value;
+            }
+        }
     }
 
     private Object formatBytes(byte[] data, String format, String separator) {
@@ -3388,8 +3489,15 @@ public class Schema {
                 // away` rounds a tie away from zero (PS-390). BigDecimal(double) is the
                 // exact binary value, so a tie is recognised only where there is one.
                 if (Double.isNaN(value) || Double.isInfinite(value)) continue;
-                java.math.RoundingMode mode = "away".equals(stage.getTies())
-                        ? java.math.RoundingMode.HALF_UP : java.math.RoundingMode.HALF_EVEN;
+                // `up` is toward +infinity: HALF_UP for a non-negative value, HALF_DOWN
+                // (toward zero) for a negative one.
+                String ties = stage.getTies();
+                java.math.RoundingMode mode = "away".equals(ties)
+                        ? java.math.RoundingMode.HALF_UP
+                        : "up".equals(ties)
+                        ? (value < 0 ? java.math.RoundingMode.HALF_DOWN
+                                     : java.math.RoundingMode.HALF_UP)
+                        : java.math.RoundingMode.HALF_EVEN;
                 value = new java.math.BigDecimal(value).setScale(decimals, mode).doubleValue();
                 continue;
             }
@@ -3464,6 +3572,8 @@ public class Schema {
             case "mod" -> b == 0 ? COMPUTE_OMITTED : (double) Math.floorMod((long) a, (long) b);
             // PS-276 floored, already correct.
             case "idiv" -> b == 0 ? COMPUTE_OMITTED : (double) Math.floorDiv((long) a, (long) b);
+            // PS-584: a result that is not a finite real number omits the field.
+            case "pow" -> Double.isFinite(Math.pow(a, b)) ? Math.pow(a, b) : COMPUTE_OMITTED;
             default -> throw new SchemaException.DecodeException(
                     "Unknown compute op: " + compute.getOp());
         };

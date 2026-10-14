@@ -121,6 +121,9 @@ public static partial class SchemaParser
             schema.Direction = Scalar(direction);
         CheckPortDeclarations(root);
         Cr159.CheckPorts(root);            // CR-2026-159
+        foreach (var docKey in new[] { "fPort", "fport" })
+            if (root.TryGetValue(docKey, out var docNode) && int.TryParse(Scalar(docNode), out var docPort))
+                schema.DocFPort = docPort;
 
         // No `header:` block. It was never in the specification, and honouring it
         // here while Python and Go ignored it meant the same schema decoded
@@ -303,7 +306,7 @@ public static partial class SchemaParser
 
     /// <summary>
     /// PS-426: match_value is withdrawn. PS-422: `encoding` is a named code on a uN. PS-430:
-    /// a bitfield_string part is decimal, hex or hex:upper. PS-364: a byte_group member
+    /// a bitfield_string part is decimal, sdecimal, hex or hex:upper, with an optional :N. PS-364: a byte_group member
     /// declares no endian.
     /// </summary>
     /// <summary>PS-407: a ${value} lookup default reports a string, so every label must be one.</summary>
@@ -343,9 +346,8 @@ public static partial class SchemaParser
         }
         if (type == "bitfield_string" && fm.TryGetValue("parts", out var partsNode) && partsNode is YamlSequenceNode parts)
             foreach (var part in parts.Children.OfType<YamlSequenceNode>())
-                if (part.Children.Count > 2 && Scalar(part.Children[2]) is not ("decimal" or "hex" or "hex:upper"))
-                    throw new InvalidOperationException($"Field '{name}': bitfield_string part format "
-                        + $"{Scalar(part.Children[2])} is not one of decimal, hex, hex:upper (PS-430)");
+                if (part.Children.Count > 2)
+                    BitfieldParts.Parse(Scalar(part.Children[2]));   // PS-430, the prototype's text
         if (fm.TryGetValue("byte_group", out var group))
         {
             var members = group as YamlSequenceNode
@@ -450,8 +452,8 @@ public static partial class SchemaParser
         {
             if (Scalar(op) != "round")
                 throw new InvalidOperationException($"{at} names an unknown operation {Scalar(op)} (PS-390)");
-            if (stage.TryGetValue("ties", out var ties) && Scalar(ties) is not ("even" or "away"))
-                throw new InvalidOperationException(at + ": round `ties` must be even or away (PS-390)");
+            if (stage.TryGetValue("ties", out var ties) && Scalar(ties) is not ("even" or "away" or "up"))
+                throw new InvalidOperationException(at + ": round `ties` must be even, away or up (PS-390)");
         }
         else if (keys.Any(TransformOpParameters.Contains))
             throw new InvalidOperationException(at + ": `decimals` and `ties` belong to an `op:` stage (PS-452)");
@@ -856,7 +858,7 @@ public static partial class SchemaParser
 
         // Bool
         if (fm.TryGetValue("bit", out var bitNode)) f.Bit = Int(bitNode);
-        if (fm.TryGetValue("consume", out var cons)) f.Consume = Int(cons);
+        if (fm.TryGetValue("consume", out var cons)) { f.Consume = Int(cons); f.ConsumeDeclared = true; }
 
         // Enum
         if (fm.TryGetValue("base", out var baseNode)) f.Base = Scalar(baseNode);

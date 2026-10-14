@@ -396,6 +396,9 @@ func (s *Schema) fieldMeta(decl map[string]any, repeat map[string]any, siblings 
 	if unit != nil {
 		entry["unit"] = s.metaReference(unit, repeat, false, siblings)
 	}
+	if decl["unit"] != nil {
+		entry["display_unit"] = s.metaReference(decl["unit"], repeat, false, siblings) // PS-596
+	}
 	if ipso := asStringMap(decl["ipso"]); ipso != nil {
 		if object, present := ipso["object"]; present {
 			instance, ok := ipso["instance"]

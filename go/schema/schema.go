@@ -176,6 +176,9 @@ type Field struct {
 	// Bool field options
 	Bit     int  `json:"bit,omitempty" yaml:"bit,omitempty"`         // Bit position for bool extraction
 	Consume int  `json:"consume,omitempty" yaml:"consume,omitempty"` // Bytes to consume after reading
+	// ConsumeDeclared records a `consume` written at all, so that `consume: 0` on a byte
+	// string - a re-read of its span (PS-588, CR-2026-175) - is told from no `consume`.
+	ConsumeDeclared bool `json:"-" yaml:"-"`
 	// Byte group (inline grouped bitfields)
 	ByteGroup []Field `json:"byte_group,omitempty" yaml:"byte_group,omitempty"`
 	Size      int     `json:"size,omitempty" yaml:"size,omitempty"` // Size of byte group in bytes
@@ -268,7 +271,7 @@ type Transform struct {
 	// Named operation form, e.g. {op: round, decimals: 2, ties: away}.
 	Op       string `json:"op,omitempty" yaml:"op,omitempty"`
 	Decimals int    `json:"decimals,omitempty" yaml:"decimals,omitempty"`
-	// Ties is "even" (the default) or "away" from zero (PS-390).
+	// Ties is "even" (the default), "away" from zero or "up" toward +infinity (PS-390).
 	Ties string `json:"ties,omitempty" yaml:"ties,omitempty"`
 	// Bound stages (PS-115): floor is a lower clamp, ceiling an upper one.
 	Floor   *float64   `json:"floor,omitempty" yaml:"floor,omitempty"`
@@ -357,6 +360,9 @@ type Schema struct {
 	Fields      []Field                   `json:"fields,omitempty" yaml:"fields,omitempty"`
 	Ports       map[string]*PortDef       `json:"-" yaml:"-"` // Port-based schema selection
 	Definitions map[string]*DefinitionDef `json:"-" yaml:"-"` // Reusable definitions
+	// DocFPort is the document's top-level fPort (PS-458), 0 where it declares none. An
+	// encoder of a schema without `ports` reports it where the caller gives no FPort.
+	DocFPort int `json:"-" yaml:"-"`
 	// repeatOnly is every name declared in some repeat's elements and nowhere outside
 	// one (PS-368): a reference to one from outside an element is an error.
 	repeatOnly map[string]bool
@@ -419,6 +425,8 @@ type DecodeContext struct {
 
 // EncodeContext maintains state during encoding.
 type EncodeContext struct {
+	// FPort is the FPort the encode used (PS-581); 0 where there is none.
+	FPort     int
 	Buffer    []byte
 	Endian    string
 	Variables map[string]any
@@ -446,6 +454,9 @@ type EncodeContext struct {
 	covered    []byte
 	peeks      []peekRecord
 	overlayErr error
+	// echoes holds each non-consuming byte string given a value, checked where the frame
+	// closes (PS-589, CR-2026-175).
+	echoes []echoRecord
 	// order is the schema's source key order, from which encodeTLV recovers the cases'
 	// declaration order (PS-527). A Go map has none.
 	order keyOrder
@@ -724,9 +735,10 @@ func roundHalfEvenDecimal(value float64, decimals int) float64 {
 }
 
 // roundHalfAwayDecimal rounds to `decimals` places with a tie going away from zero
-// (PS-390 `ties: away`), on the stored value. big.Float holds the binary value
+// (PS-390 `ties: away`), or with a negative tie going toward zero (`ties: up`, toward
+// +infinity, as Math.round), on the stored value. big.Float holds the binary value
 // exactly, so 78.125 is seen as the tie it is and 2.355 - stored just below - is not.
-func roundHalfAwayDecimal(value float64, decimals int) float64 {
+func roundHalfAwayDecimal(value float64, decimals int, up bool) float64 {
 	if math.IsNaN(value) || math.IsInf(value, 0) {
 		return value
 	}
@@ -737,7 +749,8 @@ func roundHalfAwayDecimal(value float64, decimals int) float64 {
 	scaled := new(big.Float).SetPrec(2048).Mul(exact, new(big.Float).SetPrec(2048).SetFloat64(math.Pow(10, float64(decimals))))
 	floor, _ := scaled.Int(nil)
 	frac := new(big.Float).SetPrec(2048).Sub(scaled, new(big.Float).SetPrec(2048).SetInt(floor))
-	if frac.Cmp(big.NewFloat(0.5)) >= 0 {
+	half := frac.Cmp(big.NewFloat(0.5))
+	if half > 0 || (half == 0 && !(up && value < 0)) {
 		floor.Add(floor, big.NewInt(1))
 	}
 	text := floor.String()
@@ -776,8 +789,8 @@ func applyTransformStages(value float64, stages []Transform) float64 {
 			// strconv.FormatFloat is correctly rounded on the stored value and breaks
 			// ties to even, so it does both jobs; verified against Python's round() on
 			// the exact-tie and representation-error cases.
-			if stage.Ties == "away" {
-				value = roundHalfAwayDecimal(value, stage.Decimals)
+			if stage.Ties == "away" || stage.Ties == "up" {
+				value = roundHalfAwayDecimal(value, stage.Decimals, stage.Ties == "up")
 			} else {
 				value = roundHalfEvenDecimal(value, stage.Decimals)
 			}
@@ -1102,6 +1115,15 @@ func ParseSchema(data string) (*Schema, error) {
 				}
 				schema.Definitions[name] = dd
 			}
+		}
+	}
+
+	for _, key := range []string{"fPort", "fport"} {
+		switch v := raw[key].(type) {
+		case int:
+			schema.DocFPort = v
+		case float64:
+			schema.DocFPort = int(v)
 		}
 	}
 
@@ -1530,8 +1552,10 @@ func parseFieldMap(fm map[string]any, node *yaml.Node) Field {
 	}
 	if consume, ok := fm["consume"].(int); ok {
 		f.Consume = consume
+		f.ConsumeDeclared = true
 	} else if consume, ok := fm["consume"].(float64); ok {
 		f.Consume = int(consume)
+		f.ConsumeDeclared = true
 	}
 
 	// Enum field options
@@ -2681,11 +2705,14 @@ func decodeField(field Field, ctx *DecodeContext) (any, error) {
 			}
 			length = span
 		}
+		start := ctx.Offset
 		data, err := ctx.Read(length)
 		if err != nil {
 			return nil, err
 		}
-		if field.HasTerminator {
+		if isEcho(field) {
+			ctx.Offset = start // PS-588 (CR-2026-175): the span is read again
+		} else if field.HasTerminator {
 			ctx.Offset++ // consumed, not reported
 		}
 		value = decodeASCII(field.Name, data, ctx, field.Nul) // PS-534, PS-538
@@ -2733,9 +2760,13 @@ func decodeField(field Field, ctx *DecodeContext) (any, error) {
 		value = base64.StdEncoding.EncodeToString(data)
 
 	case TypeHex, TypeHexLower, TypeHexUpperLower:
+		start := ctx.Offset
 		data, err := ctx.Read(length)
 		if err != nil {
 			return nil, err
+		}
+		if isEcho(field) {
+			ctx.Offset = start // PS-588 (CR-2026-175)
 		}
 		// PS-074: `hex` is lowercase without separators; uppercase is `hex:upper`.
 		encoded := hex.EncodeToString(data)
@@ -2752,9 +2783,13 @@ func decodeField(field Field, ctx *DecodeContext) (any, error) {
 		return nil, nil
 
 	case TypeBytes, TypeBytesLower:
+		start := ctx.Offset
 		data, err := ctx.Read(length)
 		if err != nil {
 			return nil, err
+		}
+		if isEcho(field) {
+			ctx.Offset = start // PS-588 (CR-2026-175)
 		}
 		value = formatBytes(data, field.Format, field.Separator)
 
@@ -2782,24 +2817,14 @@ func decodeField(field Field, ctx *DecodeContext) (any, error) {
 			}
 			bitOff, _ := toInt(part[0])
 			bitLen, _ := toInt(part[1])
-			format := "decimal"
+			var format any = "decimal"
 			if len(part) >= 3 {
-				if f, ok := part[2].(string); ok {
-					format = f
-				}
+				format = part[2]
 			}
 			mask := (uint64(1) << bitLen) - 1
 			raw := (intVal >> bitOff) & mask
-			// PS-430: hex lower case, hex:upper upper case; the load check refuses
-			// any other part format.
-			switch format {
-			case "hex":
-				partStrs = append(partStrs, strconv.FormatUint(raw, 16))
-			case "hex:upper":
-				partStrs = append(partStrs, strings.ToUpper(strconv.FormatUint(raw, 16)))
-			default:
-				partStrs = append(partStrs, strconv.FormatUint(raw, 10))
-			}
+			// PS-430, PS-582: the part's format writes it (checked at load).
+			partStrs = append(partStrs, formatBitfieldPart(raw, bitLen, format))
 		}
 		value = prefix + strings.Join(partStrs, delimiter)
 
@@ -3917,6 +3942,8 @@ func fixedElementSizeKnown(fields []Field) (int, bool) {
 			continue
 		case f.Type == TypeBoolean:
 			continue
+		case isEcho(f):
+			continue // PS-588 (CR-2026-175): a re-read advances nothing
 		case bitRangePattern.MatchString(string(f.Type)) || f.Type == TypeBoolLower:
 			total += f.Consume
 		case f.Type == TypeBytesLower || f.Type == TypeAsciiLower || f.Type == TypeHexLower ||
@@ -4147,6 +4174,83 @@ func (s *Schema) Encode(data map[string]any) ([]byte, error) {
 type EncodeResult struct {
 	Payload  []byte
 	Warnings []string
+	// FPort is the FPort the encode used (PS-581): the port entry chosen for a schema
+	// with `ports`, else the caller's, else the document's `fPort`; 0 where there is none.
+	FPort int
+}
+
+// ChooseEncodePort is the port entry an encoder uses, by PS-581 (CR-2026-169), and the
+// FPort it reports. A caller's FPort (non-zero; a port is 1 to 255) chooses its entry, or
+// the `default` entry where none lists it, and an entry declared `uplink` is refused only
+// where direction is "downlink". Without one: the single entry declaring `downlink`, else
+// the single downlink-capable entry (`downlink`, `both` or no declaration, PS-287), else
+// the input is rejected naming the candidates. `default` is never chosen without an
+// FPort, having no number to report. A schema without `ports` returns the caller's FPort,
+// else the document's.
+func (s *Schema) ChooseEncodePort(fPort int, direction string) (int, error) {
+	if len(s.Ports) == 0 {
+		if fPort == 0 {
+			return s.DocFPort, nil
+		}
+		return fPort, nil
+	}
+	if fPort != 0 {
+		entry, ok := s.Ports[strconv.Itoa(fPort)]
+		if !ok {
+			entry, ok = s.Ports["default"]
+		}
+		if !ok {
+			return 0, fmt.Errorf("FPort %d matches no port entry and schema '%s' declares no default; it defines %s (PS-581)",
+				fPort, s.Name, joinPorts(s.numberedPorts(func(*PortDef) bool { return true })))
+		}
+		if entry.Direction == DirectionUplink && direction == DirectionDownlink {
+			return 0, fmt.Errorf("FPort %d is declared direction:uplink and takes no downlink to encode (PS-581)", fPort)
+		}
+		return fPort, nil
+	}
+	tiers := []struct {
+		name string
+		ok   func(*PortDef) bool
+	}{
+		{"declared downlink", func(e *PortDef) bool { return e.Direction == DirectionDownlink }},
+		{"downlink-capable", func(e *PortDef) bool {
+			return e.Direction == DirectionDownlink || e.Direction == DirectionBoth || e.Direction == ""
+		}},
+	}
+	for _, tier := range tiers {
+		candidates := s.numberedPorts(tier.ok)
+		if len(candidates) == 1 {
+			return candidates[0], nil
+		}
+		if len(candidates) > 1 {
+			return 0, fmt.Errorf("no FPort was given, and schema '%s' has %d %s port entries (%s); give the FPort (PS-581)",
+				s.Name, len(candidates), tier.name, joinPorts(candidates))
+		}
+	}
+	return 0, fmt.Errorf("no FPort was given, and schema '%s' has no port entry that takes a downlink (PS-581)", s.Name)
+}
+
+// numberedPorts lists, ascending, the numbered port entries satisfying ok.
+func (s *Schema) numberedPorts(ok func(*PortDef) bool) []int {
+	var out []int
+	for key, entry := range s.Ports {
+		if n, err := strconv.Atoi(key); err == nil && entry != nil && ok(entry) {
+			out = append(out, n)
+		}
+	}
+	sort.Ints(out)
+	return out
+}
+
+func joinPorts(ports []int) string {
+	if len(ports) == 0 {
+		return "nothing"
+	}
+	parts := make([]string, len(ports))
+	for i, p := range ports {
+		parts[i] = strconv.Itoa(p)
+	}
+	return strings.Join(parts, ", ")
 }
 
 // EncodeWithPort encodes data to binary using port-based schema selection.
@@ -4169,10 +4273,28 @@ func (s *Schema) EncodeWithPort(data map[string]any, fPort int) ([]byte, error) 
 // direction produces bytes the far end reads against different field definitions, so
 // nothing is encoded. Pass "" for direction to skip the check.
 func (s *Schema) EncodeWithPortDirection(data map[string]any, fPort int, direction string) ([]byte, error) {
-	if err := s.checkDirection(fPort, direction); err != nil {
+	used, err := s.ChooseEncodePort(fPort, direction) // PS-581
+	if err != nil {
 		return nil, err
 	}
-	return s.EncodeWithPort(data, fPort)
+	if err := s.checkDirection(used, direction); err != nil {
+		return nil, err
+	}
+	return s.EncodeWithPort(data, used)
+}
+
+// EncodeToResultDirection is EncodeToResult choosing its port entry by PS-581 (a zero
+// fPort is none given) and checking direction against it; the result reports the FPort
+// used. Pass "" for direction to skip the uplink check.
+func (s *Schema) EncodeToResultDirection(data map[string]any, fPort int, direction string) (*EncodeResult, error) {
+	used, err := s.ChooseEncodePort(fPort, direction)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.checkDirection(used, direction); err != nil {
+		return nil, err
+	}
+	return s.EncodeToResult(data, used)
 }
 
 // EncodeToResult is EncodeWithPort with the warnings retained, matching what the
@@ -4182,7 +4304,7 @@ func (s *Schema) EncodeToResult(data map[string]any, fPort int) (*EncodeResult, 
 	if err != nil {
 		return nil, err
 	}
-	return &EncodeResult{Payload: ctx.Buffer, Warnings: ctx.Warnings}, nil
+	return &EncodeResult{Payload: ctx.Buffer, Warnings: ctx.Warnings, FPort: ctx.FPort}, nil
 }
 
 // encodeToContext is the one encode path. EncodeWithPort and
@@ -4201,7 +4323,13 @@ func (s *Schema) encodeToContext(
 func (s *Schema) encodeToContextRecord(
 	data map[string]any, fPort int, order []string, record map[string]any,
 ) (*EncodeContext, error) {
+	// PS-581: which port entry this encode uses, and the FPort it reports.
+	fPort, err := s.ChooseEncodePort(fPort, "")
+	if err != nil {
+		return nil, err
+	}
 	ctx := NewEncodeContext(s.Endian)
+	ctx.FPort = fPort
 	data, ctx.trace = s.takeRecord(data, record)
 	ctx.TLVOrder = order
 	ctx.Definitions = s.Definitions
@@ -4242,6 +4370,9 @@ func (s *Schema) encodeToContextRecord(
 		return nil, ctx.overlayErr
 	}
 	if err := ctx.checkPeeks(0); err != nil { // PS-551 (CR-2026-141)
+		return nil, err
+	}
+	if err := ctx.checkEchoes(0); err != nil { // PS-589 (CR-2026-175)
 		return nil, err
 	}
 	if err := ctx.checkRemaining(); err != nil { // PS-564
@@ -4834,6 +4965,9 @@ func encodeTLV(field Field, data map[string]any, ctx *EncodeContext) error {
 			return inner.overlayErr
 		}
 		if err := inner.checkPeeks(0); err != nil { // PS-551: closed with its entry
+			return err
+		}
+		if err := inner.checkEchoes(0); err != nil { // PS-589 (CR-2026-175)
 			return err
 		}
 		ctx.Write(tag)
@@ -5477,6 +5611,7 @@ func encodeFields(fields []Field, data map[string]any, ctx *EncodeContext) error
 func encodeFieldsSealed(fields []Field, data map[string]any, ctx *EncodeContext) error {
 	mark := ctx.beginFieldList()
 	from := len(ctx.peeks)
+	fromEcho := len(ctx.echoes)
 	if err := encodeFieldList(fields, data, ctx); err != nil {
 		return err
 	}
@@ -5486,6 +5621,10 @@ func encodeFieldsSealed(fields []Field, data map[string]any, ctx *EncodeContext)
 	if err := ctx.checkPeeks(from); err != nil {
 		return err
 	}
+	if err := ctx.checkEchoes(fromEcho); err != nil { // PS-589 (CR-2026-175)
+		return err
+	}
+	ctx.echoes = ctx.echoes[:fromEcho]
 	ctx.sealFrom(mark.start, from)
 	return ctx.endFieldList(mark, false)
 }
@@ -5629,6 +5768,16 @@ func encodeFieldList(fields []Field, data map[string]any, ctx *EncodeContext) er
 				length = 1
 			}
 			ctx.writePadding(length) // CR-2026-141: no value
+			continue
+		}
+
+		// PS-589 (CR-2026-175): a byte string that does not consume re-reads bytes the
+		// other fields write, so it writes none and is not required; a value given for it
+		// is checked where the frame closes.
+		if isEcho(field) {
+			if err := ctx.recordEcho(field, data); err != nil {
+				return err
+			}
 			continue
 		}
 
@@ -5804,7 +5953,7 @@ func encodeBitfieldString(field Field, strVal string, ctx *EncodeContext) error 
 		}
 		bitOff := 0
 		bitLen := 8
-		format := "decimal"
+		var format any = "decimal"
 		if f, ok := part[0].(float64); ok {
 			bitOff = int(f)
 		} else if f, ok := part[0].(int); ok {
@@ -5816,25 +5965,19 @@ func encodeBitfieldString(field Field, strVal string, ctx *EncodeContext) error 
 			bitLen = f
 		}
 		if len(part) > 2 {
-			if s, ok := part[2].(string); ok {
-				format = s
-			}
+			format = part[2]
 		}
 		seg := "0"
 		if i < len(segments) {
 			seg = segments[i]
 		}
-		var val uint64
-		if format == "hex" || format == "hex:upper" {
-			// Case does not matter on the way back in (PS-431).
-			v, _ := strconv.ParseUint(seg, 16, 64)
-			val = v
-		} else {
-			v, _ := strconv.ParseUint(seg, 10, 64)
-			val = v
+		// PS-096, PS-431, PS-583: parsed by the part's format; a value the width cannot
+		// hold is rejected, never masked.
+		val, err := parseBitfieldSegment(seg, bitLen, format, field.Name)
+		if err != nil {
+			return err
 		}
-		mask := uint64((1 << bitLen) - 1)
-		intVal |= (val & mask) << bitOff
+		intVal |= val << bitOff
 	}
 
 	ctx.Write(encodeUint(intVal, length, endian))
@@ -6667,6 +6810,13 @@ func evaluateCompute(cd *ComputeDef, ctx *DecodeContext) (float64, error) {
 		}
 		// PS-276 floored: rounds toward negative infinity, not toward zero.
 		return float64(floorDiv(int64(a), int64(b))), nil
+	case "pow":
+		// PS-584: a result that is not a finite real number omits the field.
+		r := math.Pow(a, b)
+		if math.IsNaN(r) || math.IsInf(r, 0) {
+			return 0, errComputeOmitted
+		}
+		return r, nil
 	default:
 		return 0, fmt.Errorf("unknown compute op: %s", cd.Op)
 	}
