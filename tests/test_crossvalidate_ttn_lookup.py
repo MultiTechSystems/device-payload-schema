@@ -66,3 +66,23 @@ def test_a_skipped_decoder_is_reported_not_counted(tmp_path):
     status, problems = cv.check_schema(schema, tmp_path, use_decoder=True)
     assert status == "agrees"
     assert any(p.startswith("note: vendor decoder") for p in problems)
+
+
+def test_codec_named_without_the_codec_infix(tmp_path):
+    # pallidus `codec-mr1.yaml`, mcci `codec-catena4610.yaml`, dragino `sw3l-lbcodec.yaml`,
+    # ellenex `codec-single.yaml` (decoder uplinkdecoder-singlesense.js): found by name
+    # or by the decoder the codec names.
+    (tmp_path / "codec-mr1.yaml").write_text(
+        "uplinkDecoder: {fileName: codec-mr1.js}\n"
+    )
+    (tmp_path / "sw3l-lbcodec.yaml").write_text(
+        "uplinkDecoder: {fileName: sw3l-lb.js}\n"
+    )
+    (tmp_path / "codec-single.yaml").write_text(
+        "uplinkDecoder: {fileName: uplinkdecoder-singlesense.js}\n"
+    )
+    assert cv.find_codec(tmp_path, "codec-mr1").name == "codec-mr1.yaml"
+    assert cv.find_codec(tmp_path, "sw3l-lb").name == "sw3l-lbcodec.yaml"
+    assert (
+        cv.find_codec(tmp_path, "uplinkdecoder-singlesense").name == "codec-single.yaml"
+    )
