@@ -28,6 +28,20 @@
           ],
           "description": "On an ascii field: report its digit text as the integer it spells, in base 10 or base 16, strictly (PS-560, PS-561)."
         },
+        "nul": {
+          "enum": [
+            "trailing",
+            "stop",
+            "drop"
+          ],
+          "description": "On an ascii field: trailing (the default) removes trailing 0x00 bytes, stop ends the value at the first 0x00, drop removes every 0x00 (PS-534)."
+        },
+        "terminator": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 255,
+          "description": "On an ascii field, in place of length: the byte that ends the text. It is consumed and not reported (PS-593, PS-595)."
+        },
         "consume": {
           "type": "integer",
           "minimum": 0,

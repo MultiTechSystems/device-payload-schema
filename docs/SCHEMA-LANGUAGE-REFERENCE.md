@@ -134,6 +134,22 @@ after any sign, and rejects a negative `hex` value or one that does not fit (PS-
 - {name: rssi,  type: ascii, length: 4, numeral: decimal}   # "-065" -> -65
 ```
 
+An `ascii` field may declare `nul` (PS-534): `trailing` (the default) removes trailing 0x00
+bytes, `stop` ends the value before the first 0x00 and leaves the rest of the field unreported,
+`drop` removes every 0x00. Whitespace is never trimmed. Instead of `length`, an `ascii` field may
+declare `terminator`, a byte 0 to 255 (PS-593): the text runs to the first such byte, which is
+consumed and not reported, and a payload that ends first is an error naming the field. Declaring
+both `length` and `terminator`, or neither, is rejected at load. `nul` and `terminator` apply before
+`numeral` (PS-594). An encoder writes `nul: stop` and `nul: drop` values padded to `length` (a value
+holding 0x00 under `stop` is rejected; `drop` does not round-trip a dropped 0x00), and a terminated
+value followed by its terminator, with no padding and no fill for a `numeral`; a value holding the
+terminator is rejected (PS-595).
+
+```yaml
+- {name: model, type: ascii, length: 8, nul: stop}   # 45 4D 33 31 30 00 58 59 -> "EM310"
+- {name: version, type: ascii, terminator: 0x00}     # 31 2E 32 00 -> "1.2"
+```
+
 A `bytes` field reports a **lowercase** hex string by default (PS-281). Its `format:` is
 one of `hex`, `hex:upper`, `base64` or `array` (PS-079), and a `separator:` goes between
 the bytes of either hex format (PS-391). `hex:upper` is a format, not a type: `type:

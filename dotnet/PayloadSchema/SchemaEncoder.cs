@@ -3089,19 +3089,20 @@ public static class SchemaEncoder
                 case FieldType.Ascii when field.Numeral != null && Helpers.ToFloat64(value).Item1:
                 {
                     // PS-561: digits in the declared base, rounded as PS-552 requires.
+                    int? fixedLen = field.Terminator == null && field.Length > 0 && field.LengthRef == null
+                        ? field.Length : null;                                  // PS-593: no width
                     var text = Numeral.Encode(field.Name, Helpers.ToFloat64(value).Item2,
-                        field.Length > 0 && field.LengthRef == null ? field.Length : null,
-                        field.Numeral);
-                    return Helpers.EncodeAscii(field.Name, text,
-                        field.Length > 0 && field.LengthRef == null ? field.Length : null,
-                        _result.Warnings);
+                        fixedLen, field.Numeral);
+                    return Helpers.EncodeAscii(field.Name, text, fixedLen,
+                        _result.Warnings, field.Nul, field.Terminator);
                 }
                 case FieldType.Ascii or FieldType.String:
                     // PS-537. A fixed `length` pads and bounds the value; `remaining` or a
                     // reference has no fixed count, so the value supplies it.
                     return Helpers.EncodeAscii(field.Name, value?.ToString() ?? "",
                         field.Length > 0 && field.LengthRef == null ? field.Length : null,
-                        _result.Warnings);
+                        _result.Warnings, field.Nul,
+                        field.Type == FieldType.Ascii ? field.Terminator : null);
             }
 
             throw new InvalidOperationException($"Cannot encode type: {field.Type}");

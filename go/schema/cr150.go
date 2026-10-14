@@ -57,6 +57,10 @@ func encodeNumeral(name string, value float64, fixed int, numeral string) (strin
 	if width < 0 {
 		width = len(sign) + len(digits)
 	}
+	if fixed < 0 && n < 0 && numeral == "hex" { // PS-168, PS-595
+		return "", fmt.Errorf("Field '%s': %s is negative, which a hex numeral cannot write (PS-168)",
+			name, givenText(value))
+	}
 	if (n < 0 && numeral == "hex") || len(sign)+len(digits) > width {
 		shown := width
 		if fixed < 0 {

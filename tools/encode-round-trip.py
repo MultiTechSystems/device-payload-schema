@@ -91,6 +91,13 @@ The `inherent` reasons, each of which is a decision recorded elsewhere:
                     value, not the payload: a float field of a vector that does not
                     re-encode and reports 0.
 
+  nul-mode          An `ascii` field declared `nul: stop` or `nul: drop` (PS-534, CR-2026-177).
+                    `stop` leaves the bytes after the first 0x00 out of the value, and `drop`
+                    removes the 0x00 bytes wherever they were, so neither is in the output
+                    to write back (PS-595: "a decode followed by an encode may differ from the
+                    original frame"). Judged from the schema: an ascii field with either mode
+                    in a vector that does not re-encode.
+
 One reason is *not* inherent and is reported separately, because it is a gap rather than a
 loss:
 
@@ -135,6 +142,7 @@ INHERENT = (
     "null-element",
     "shared-label",
     "negative-zero",
+    "nul-mode",
 )
 
 #: The floating-point types PS-566 covers.
@@ -262,6 +270,18 @@ def zero_floats(schema, data, port=None):
             and not isinstance(data.get(f["name"]), bool) and data[f["name"]] == 0]
 
 
+def nul_mode_fields(schema, port=None):
+    """Top-level ascii fields declared `nul: stop` or `nul: drop` (PS-534, PS-595)."""
+    fields = schema.get("fields") or []
+    ports = schema.get("ports") or {}
+    if ports:
+        entry = ports.get(port, ports.get(str(port), ports.get("default")))
+        fields = (entry or {}).get("fields") or [] if isinstance(entry, dict) else []
+    return [f["name"] for f in fields
+            if isinstance(f, dict) and f.get("type") == "ascii" and f.get("name")
+            and f.get("nul") in ("stop", "drop")]
+
+
 def has_null_element(node):
     """A null inside an array: an `element` repeat's omitted value (PS-528)."""
     if isinstance(node, dict):
@@ -290,6 +310,8 @@ def classify(decoded, traits, schema=None, port=None):
         return "absent-value"
     if schema is not None and zero_floats(schema, decoded.data, port):
         return "negative-zero"                                           # PS-566
+    if schema is not None and nul_mode_fields(schema, port):
+        return "nul-mode"                                                # PS-534, PS-595
     return None
 
 

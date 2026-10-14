@@ -308,6 +308,10 @@ func checkFieldRules(field map[string]any, at string) error {
 	if err := checkNumeral(field); err != nil {
 		return err
 	}
+	// PS-534, PS-593 (CR-2026-177): nul and terminator on an ascii field.
+	if err := checkAsciiText(field); err != nil {
+		return err
+	}
 	// PS-510 (CR-2026-102): ipso and senml are mappings.
 	if err := checkAnnotations(field); err != nil {
 		return err

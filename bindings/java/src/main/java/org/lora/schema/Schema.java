@@ -614,6 +614,7 @@ public class Schema {
     private static void checkWave4(Map<String, Object> fm) {
         String at = "Field '" + fm.get("name") + "': ";
         Numeral.check(fm);                                    // PS-560
+        AsciiText.check(fm);                                  // PS-534, PS-593, PS-072
         if (fm.containsKey("match_value")) {
             throw new SchemaException(at + "match_value is withdrawn; write a signed type (sN), a "
                     + "signed bit range (sN[start:end]), encoding, match or guard instead (PS-426)");
@@ -1129,6 +1130,8 @@ public class Schema {
         
         if (fm.get("encoding") instanceof String encoding) f.setEncoding(encoding);
         if (fm.get("numeral") instanceof String numeral) f.setNumeral(numeral);
+        if (fm.get("nul") instanceof String nul) f.setNul(nul);
+        f.setTerminator(AsciiText.terminatorOf(fm.get("terminator")));
 
         // byte_group: fields packed into shared bytes. Written either as a list of
         // fields with a sibling `size`, or as {size: N, fields: [...]}.
@@ -1906,7 +1909,9 @@ public class Schema {
             }
             
             case ASCII -> {
+                if (field.getTerminator() != null) length = AsciiText.terminatedSpan(field, ctx);   // PS-593
                 byte[] data = ctx.read(length);
+                if (field.getTerminator() != null) ctx.setOffset(ctx.getOffset() + 1);   // consumed, not reported
                 // PS-538: each byte is the ISO 8859-1 character of the same number, so the
                 // value is lossless and re-encodes to the same bytes (PS-537). US_ASCII
                 // decoded a byte above 0x7F as U+FFFD. PS-073's warning reports it.
@@ -1921,9 +1926,7 @@ public class Schema {
                 // Trailing NUL padding only, as the reference strips it: this removed
                 // every NUL and then trimmed spaces, so "HC " read as "HC" and "A\0B"
                 // as "AB" where Python, Go and C# keep both.
-                int end = str.length();
-                while (end > 0 && str.charAt(end - 1) == '\0') end--;
-                value = str.substring(0, end);
+                value = AsciiText.applyNulMode(str, field.getNul());       // PS-534
                 if (field.getNumeral() != null) {
                     value = Numeral.decode(field.getName(), (String) value, field.getNumeral());   // PS-560
                 }

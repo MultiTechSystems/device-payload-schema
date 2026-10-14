@@ -623,8 +623,10 @@ public static class SchemaDecoder
 
             case FieldType.Ascii:
             {
+                if (field.Terminator != null) length = AsciiText.TerminatedSpan(field, ctx);   // PS-593
                 var data = ctx.Read(length);
-                value = Helpers.DecodeAscii(field.Name, data, ctx.Warnings);
+                if (field.Terminator != null) ctx.Offset++;                  // consumed, not reported
+                value = Helpers.DecodeAscii(field.Name, data, ctx.Warnings, field.Nul);
                 if (field.Numeral != null)
                     value = Numeral.Decode(field.Name, (string)value, field.Numeral);   // PS-560
                 break;
