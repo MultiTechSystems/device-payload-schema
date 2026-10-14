@@ -1,0 +1,101 @@
+# A byte string's output form (PS-079, PS-391) beyond the one-vector tour in
+# bytes-format.yaml: the form combined with a length taken from a preceding field or
+# running to the end of the payload, an empty value, a multi-character joiner, and each
+# form's encode direction (PS-081). One port per case; the field after a run proves the
+# read position moved by exactly the bytes the run holds.
+name: probe_bytes_format_forms
+endian: big
+ports:
+  1:
+    fields:
+    - name: n
+      type: u8
+    - name: body
+      type: bytes
+      length: $n
+      format: "hex:upper"
+    - name: after
+      type: u8
+  2:
+    fields:
+    - name: body
+      type: bytes
+      length: remaining
+      format: hex
+      separator: " "
+  3:
+    fields:
+    - name: body
+      type: bytes
+      length: remaining
+      format: "hex:upper"
+      separator: "::"
+  4:
+    fields:
+    - name: body
+      type: bytes
+      length: remaining
+      format: base64
+  5:
+    fields:
+    - name: body
+      type: bytes
+      length: remaining
+      format: array
+  6:
+    fields:
+    - name: body
+      type: bytes
+      length: remaining
+      format: hex
+test_vectors:
+- name: length_field_upper
+  source: generated
+  fPort: 1
+  payload: "03 A1B2C3 07"
+  expected: {n: 3, body: "A1B2C3", after: 7}
+- name: length_field_upper_empty
+  source: generated
+  fPort: 1
+  payload: "00 07"
+  expected: {n: 0, body: "", after: 7}
+- name: spaced_lower
+  source: generated
+  fPort: 2
+  payload: "AA0B0C"
+  expected: {body: "aa 0b 0c"}
+- name: spaced_single_byte
+  source: generated
+  fPort: 2
+  payload: "AA"
+  expected: {body: "aa"}
+- name: long_joiner_upper
+  source: generated
+  fPort: 3
+  payload: "0A0B0C"
+  expected: {body: "0A::0B::0C"}
+- name: base64_padded_one
+  source: generated
+  fPort: 4
+  payload: "41"
+  expected: {body: "QQ=="}
+- name: base64_padded_two
+  source: generated
+  fPort: 4
+  payload: "4142"
+  expected: {body: "QUI="}
+- name: base64_all_values
+  source: generated
+  fPort: 4
+  payload: "FBFFFE"
+  expected: {body: "+//+"}
+- name: array_values
+  source: generated
+  fPort: 5
+  payload: "00 7F 80 FF"
+  expected: {body: [0, 127, 128, 255]}
+- name: default_lower_hex
+  source: generated
+  fPort: 6
+  payload: "0AFF"
+  expected: {body: "0aff"}
