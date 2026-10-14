@@ -855,7 +855,7 @@ public static partial class SchemaParser
 
         // Bool
         if (fm.TryGetValue("bit", out var bitNode)) f.Bit = Int(bitNode);
-        if (fm.TryGetValue("consume", out var cons)) f.Consume = Int(cons);
+        if (fm.TryGetValue("consume", out var cons)) { f.Consume = Int(cons); f.ConsumeDeclared = true; }
 
         // Enum
         if (fm.TryGetValue("base", out var baseNode)) f.Base = Scalar(baseNode);

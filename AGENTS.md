@@ -3331,6 +3331,54 @@ improved. The Go, Java and C# corpus runners write per-vector reports only when
     -> 2166, C# 2154 -> 2167, Go 2171 -> 2184, plain 2143 -> 2156), `match` 160 -> 173, every vector
     round-tripping.
 
+- **CR-2026-175 (PS-453 and PS-015 amended, PS-588, PS-589; la-payload-schema main 9e8957a, for
+  0.5.7): a byte string that does not consume reports its span again.** A `bytes`, `hex` or
+  `ascii` field declaring `consume: 0` reads and reports its span and leaves the read position,
+  so the fields after it read the same bytes (a whole-frame `raw`, a command's bytes). Its
+  `length` may be `remaining`; PS-535 applies past the end.
+  - **Measured before:** every implementation advanced past the span, so the next field misread
+    or underflowed. Go, Java and C# held `consume` as an int defaulting to 0 and could not tell
+    `consume: 0` from none; on the shared cases Go failed 8 of 10 decodes and all 12 encodes (a
+    given echo was written as data, `00d75a00d75a`, and an omitted one was "Missing required
+    field"). The validator warned PS-453 with text describing behaviour nothing had.
+  - **Where:** `is_echo` (Python, which the TS013 generator imports), Go `isEcho` and
+    `Field.ConsumeDeclared` (`go/schema/cr175.go`), Java `Field.isEcho`/`consumeDeclared`, C#
+    `Field.IsEcho`/`ConsumeDeclared`. Each decoder's bytes/hex/ascii read restores the position;
+    each fixed element size counts an echo as 0 bytes.
+  - **Encode (PS-589):** an echo writes nothing and is not required (a tlv case claims it
+    optionally, as a literal). A value given for it is recorded beside the CR-2026-141 peeks -
+    position (the decoder's, before any pending peek bytes), field, value, and its length read
+    from the input (`remaining` reaches the frame's end) - and checked where the frame closes
+    (top level, each tlv value, each repeat element and trailer): Python `FrameBuffer.echo`,
+    `Frame.echoes`, `check_echoes` (called by `check_peeks`); the runtime's `fr.ec`,
+    `encCheckEchoes` (by `encCheckPeeks`); Go, Java and C# beside their peek records. **The
+    Implementation Record's departure is followed: the comparison is with what the field
+    decodes**, its `format`/`separator`, or PS-534's trailing-0x00 removal (and `numeral`),
+    applied first, so `00d7` given for a `hex:upper`, `:`-separated echo is rejected. Text, the
+    prototype's: `Field 'raw' is given '00d75b', but the other fields write '00d75a' over its
+    span (PS-589)`, or `... write too few bytes over its span (PS-589)`.
+  - **Validator:** PS-015 no longer counts a byte string declaring `consume: 0`, and PS-453 no
+    longer warns on one (it still warns on `u16` and the rest).
+  - **C:** `field_def_t.consume` is a bit range's and a bool's; a byte string always advances.
+    `tools/schema_binary.py` refuses `consume: 0` on one (PS-446) and the harness files it as an
+    interpreter gap.
+  - **Open:** a `$name` length naming a value the input does not carry (a computed length, as
+    jooby's `message.bytes` would need) cannot size the span on encode, so a value given for
+    such an echo is refused as `Missing required field: <name>`; omitting it encodes.
+  - **Cases:** `tests/cr-2026-175-cases.yaml` (the prototype's eight tests and fourteen more: a
+    length from an earlier field, format and separator, ascii padding, a repeat element) read
+    by `test_cr_2026_175_cases.py` (reference and generated codec, plus the validator and C
+    converter rules), Go `cr175_test.go`, Java `CR2026175Test`, C# `CR2026_175Tests`. Fixture
+    `_language-conformance/byte-string-reread.yaml`, 9 vectors, all round-tripping.
+  - **Floors:** decode 2801 -> 2810 in Go, Java and C#; re-encode +9 everywhere (Python and
+    Java 2199 -> 2208, C# 2200 -> 2209, Go 2217 -> 2226, plain 2189 -> 2198), `plain fixed`
+    185 -> 194.
+  - **Corpus and registry:** no schema in the corpus, library, examples or the private registry
+    declares `consume` on a byte string, so no decode, encode or load changes. Written into a
+    copy of registry enginko decoder-environmental (`dataPayload` before `data`, two
+    `remaining` fields at one level), its 96 vectors still pass and a decode re-encodes with
+    the echo given.
+
 
 - **CR-2026-172 (PS-119 amended, PS-584; la-payload-schema main 9e8957a, for 0.5.7): `compute`
   `pow`, a power whose exponent may be a field.** `{op: pow, a: 10, b: $x}` computes `a` to the

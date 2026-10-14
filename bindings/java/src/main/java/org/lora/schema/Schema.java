@@ -577,6 +577,7 @@ public class Schema {
             if (t == FieldType.NUMBER || t == FieldType.BOOLEAN
                     || (t == FieldType.STRING && f.getValue() != null)) continue;
             if (t == FieldType.BITS || t == FieldType.BOOL) { total += f.getConsume(); continue; }
+            if (f.isEcho()) continue;               // PS-588: it advances nothing
             if (t == FieldType.BYTES || t == FieldType.ASCII || t == FieldType.HEX
                     || t == FieldType.BASE64 || t == FieldType.SKIP) {
                 if (f.getLength() <= 0) return 0;
@@ -883,6 +884,7 @@ public class Schema {
         }
         f.setBits(toInt(fm.get("bits"), 0));
         f.setConsume(toInt(fm.get("consume"), 0));
+        f.setConsumeDeclared(fm.get("consume") instanceof Number);
         f.setEndian((String) fm.get("endian"));
 
         // A `u8[lo:hi]` range is a bit field. FieldType.fromString does not recognise
@@ -1907,7 +1909,10 @@ public class Schema {
             }
             
             case ASCII -> {
+                // PS-588 (CR-2026-175): `consume: 0` re-reads the span; the position stays.
+                int echoStart = ctx.getOffset();
                 byte[] data = ctx.read(length);
+                if (field.isEcho()) ctx.setOffset(echoStart);
                 // PS-538: each byte is the ISO 8859-1 character of the same number, so the
                 // value is lossless and re-encodes to the same bytes (PS-537). US_ASCII
                 // decoded a byte above 0x7F as U+FFFD. PS-073's warning reports it.
@@ -1931,7 +1936,10 @@ public class Schema {
             }
             
             case HEX -> {
+                // PS-588 (CR-2026-175): `consume: 0` re-reads the span; the position stays.
+                int echoStart = ctx.getOffset();
                 byte[] data = ctx.read(length);
+                if (field.isEcho()) ctx.setOffset(echoStart);
                 value = bytesToHex(data);
             }
 
@@ -1947,7 +1955,10 @@ public class Schema {
             }
             
             case BYTES -> {
+                // PS-588 (CR-2026-175): `consume: 0` re-reads the span; the position stays.
+                int echoStart = ctx.getOffset();
                 byte[] data = ctx.read(length);
+                if (field.isEcho()) ctx.setOffset(echoStart);
                 value = formatBytes(data, field.getFormat(), field.getSeparator());
             }
             
@@ -3063,6 +3074,27 @@ public class Schema {
         }
         
         return prefix + String.join(delimiter, partStrs);
+    }
+
+    /**
+     * What a non-consuming byte string decodes from {@code span} (PS-589, CR-2026-175):
+     * its format and separator, or PS-534's trailing 0x00 removal, as a decoder applies them.
+     */
+    Object echoValue(Field field, byte[] span) {
+        switch (field.getType()) {
+            case BYTES: return formatBytes(span, field.getFormat(), field.getSeparator());
+            case HEX: return bytesToHex(span);
+            default: {
+                String str = new String(span, StandardCharsets.ISO_8859_1);
+                int end = str.length();
+                while (end > 0 && str.charAt(end - 1) == '\0') end--;
+                Object value = str.substring(0, end);
+                if (field.getNumeral() != null) {
+                    value = Numeral.decode(field.getName(), (String) value, field.getNumeral());
+                }
+                return value;
+            }
+        }
     }
 
     private Object formatBytes(byte[] data, String format, String separator) {

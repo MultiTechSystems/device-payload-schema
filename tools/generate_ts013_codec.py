@@ -1500,7 +1500,7 @@ function encCaseClaims(fields, optional) {             // _case_claims
     if ("match" in f && !f.type) { out = out.concat(encMatchClaims(f.match)); return; }
     if (!f.name || String(f.name).charAt(0) === "_") return;
     // A literal or computed field claims its name, never required (no-silent-empty).
-    if (encIsLiteral(f) || ENC_COMPUTED.indexOf(f.type) >= 0) { out.push([f, true]); return; }
+    if (encIsLiteral(f) || ENC_COMPUTED.indexOf(f.type) >= 0 || encIsEcho(f)) { out.push([f, true]); return; }
     // PS-551 (CR-2026-141): a peek the fields after it fix need not be given.
     out.push([f, !!optional || f.optional === true || covered.indexOf(f) >= 0]);
   });
@@ -1717,6 +1717,7 @@ function encEmit(fr, bytes, carried) {
   }
   for (var c = 0; c < bytes.length; c++) encCover(fr, offset + c, encCov(bytes, c));
   (bytes.pk || []).forEach(function (pk) { fr.pk.push(encShifted(pk, offset)); });
+  (bytes.ec || []).forEach(function (ec) { fr.ec.push(encEchoShifted(ec, offset)); });
   var merged = [];
   for (var i = 0; i < bytes.length; i++) merged.push(i < shared ? (bytes[i] | fr.pend[i]) : bytes[i]);
   fr.pend.splice(0, shared);
@@ -1799,6 +1800,73 @@ function encPeekDisagreement(peeks, frame) {          // peek_disagreement
   return "A field writes bits a peek before it set otherwise (PS-551)";
 }
 
+/* PS-588 (CR-2026-175): a bytes, hex or ascii field declaring `consume: 0` (is_echo). */
+function encIsEcho(f) {
+  return (f.type === "bytes" || f.type === "hex" || f.type === "ascii") && f.consume === 0;
+}
+
+/* PS-589: each one given a value is listed in `ec` as {p, f, given, n} (Frame.echoes): n
+ * its byte count from the input, null for `remaining`, which reaches the frame's end. */
+function encEchoShifted(ec, by) { return { p: ec.p + by, f: ec.f, given: ec.given, n: ec.n }; }
+
+function encEchoLength(f, data) {                     // echo_length
+  var raw = f.length === undefined ? 1 : f.length;
+  if (typeof raw === "string") {
+    var text = raw.trim();
+    if (text.toLowerCase() === "remaining") return null;
+    if (!/^-?\d+$/.test(text)) {
+      var ref = text.charAt(0) === "$" ? text.slice(1) : text, v = data[ref];
+      if (typeof v !== "number" || v < 0 || v !== Math.floor(v)) encFail(encMissing(ref));
+      return v;
+    }
+    raw = parseInt(text, 10);
+  }
+  return raw < 0 ? null : raw;
+}
+
+function encEchoValue(f, span) {                      // echo_value
+  var i, out = "";
+  if (f.type === "ascii") {
+    for (i = 0; i < span.length; i++) out += String.fromCharCode(span[i]);
+    out = out.replace(/\u0000+$/, "");
+    if (f.numeral) {
+      var re = f.numeral === "hex" ? /^[0-9A-Fa-f]+$/ : /^[+-]?[0-9]+$/;
+      if (!re.test(out)) return null;
+      return parseInt(out, f.numeral === "hex" ? 16 : 10);
+    }
+    return out;
+  }
+  var fmt = f.type === "bytes" ? (f.format || "hex") : "hex";
+  if (fmt === "array") return span.slice();
+  if (fmt === "base64") return toBase64(span, 0, span.length);
+  var sep = f.type === "bytes" && f.separator !== undefined ? String(f.separator) : "";
+  for (i = 0; i < span.length; i++) {
+    var d = ("0" + span[i].toString(16)).slice(-2);
+    out += (i ? sep : "") + (fmt === "hex:upper" ? d.toUpperCase() : d);
+  }
+  return out;
+}
+
+function encEchoText(v) {                             // echo_text
+  if (Array.isArray(v)) return "'[" + v.map(function (x) { return encEchoText(x).replace(/^'|'$/g, ""); }).join(", ") + "]'";
+  if (typeof v === "boolean") return v ? "true" : "false";
+  if (typeof v === "number") return String(v);
+  return "'" + String(v) + "'";
+}
+
+function encCheckEchoes(arr) {                        // check_echoes
+  (arr.ec || []).forEach(function (ec) {
+    var n = ec.n === null ? Math.max(0, arr.length - ec.p) : ec.n, written;
+    if (ec.p + n > arr.length) written = "too few bytes";
+    else {
+      var found = encEchoValue(ec.f, Array.prototype.slice.call(arr, ec.p, ec.p + n));
+      if (found !== null && JSON.stringify(found) === JSON.stringify(ec.given)) return;
+      written = found === null ? "too few bytes" : encEchoText(found);
+    }
+    encFail("Field '" + ec.f.name + "' is given " + encEchoText(ec.given) + ", but the other fields write " + written + " over its span (PS-589)");
+  });
+}
+
 function encCheckPeeks(arr) {                         // check_peeks
   (arr.pk || []).forEach(function (pk) {
     if (pk.raw === null) {
@@ -1812,6 +1880,7 @@ function encCheckPeeks(arr) {                         // check_peeks
     var found = encPeekFound(arr, pk, true);
     if (found !== pk.raw) encFail(encPeekDisagreement([pk], arr));
   });
+  encCheckEchoes(arr);                                 // PS-589 (CR-2026-175)
 }
 
 /* PS-551: what the input omits but the rest of it fixes (_derive_inputs and helpers). */
@@ -2091,7 +2160,7 @@ function encListIn(out, fields, data, ctx, top, entry) {
   data = encDerive(fields, data, ctx);
   // CR-2026-136: a frame laid out as a decoder reads it (FrameBuffer). A bit range or
   // bool that does not consume leaves its bytes pending, and the next field's are ORed in.
-  var fr = { out: [], pend: [], cov: {}, pk: [] };
+  var fr = { out: [], pend: [], cov: {}, pk: [], ec: [] };
   // PS-564 (TailLevel): bytes an item adds go to the checks earlier items registered.
   var tl = { checks: [], size: null, mark: 0 };
   function tlClose() {
@@ -2122,6 +2191,10 @@ function encListIn(out, fields, data, ctx, top, entry) {
     out.pk = out.pk || [];
     fr.pk.forEach(function (pk) { out.pk.push(encShifted(pk, base)); });
   }
+  if (fr.ec.length) {
+    out.ec = out.ec || [];
+    fr.ec.forEach(function (ec) { out.ec.push(encEchoShifted(ec, base)); });
+  }
   return fr.pend.length;     // the bytes at the end still pending (Frame.pending)
 
   function encOne(item, out) {
@@ -2150,6 +2223,12 @@ function encListIn(out, fields, data, ctx, top, entry) {
       var n = typeof f.length === "string" ? 0 : Math.max(0, parseInt(f.length === undefined ? 1 : f.length, 10));
       // CR-2026-141 (padding): a skip's zeros fix no peek's bits and contradict none.
       for (var i = 0; i < n; i++) { out.unc = out.unc || {}; out.unc[out.length] = 0; out.push(0); }
+      return;
+    }
+    if (encIsEcho(f)) {
+      // PS-589 (CR-2026-175): it re-reads bytes the other fields write, so it writes none
+      // and is not required; a value given for it is checked where the frame closes.
+      if (name && encHas(data, name)) fr.ec.push({ p: fr.out.length, f: f, given: data[name], n: encEchoLength(f, data) });
       return;
     }
     if (encIsLiteral(f)) return;
@@ -4390,6 +4469,11 @@ function writeS(buf, pos, size, value, endian) {
             # A declared length the payload cannot supply is an error, as in every
             # interpreter; the loops below stopped at the end and reported what was left.
             lines.append(f'{i}  need(buf, pos, {js_name}_n);')
+            # PS-588 (CR-2026-175): `consume: 0` re-reads the span; the position stays.
+            from schema_interpreter import is_echo
+            echo = is_echo(field)
+            if echo:
+                lines.append(f'{i}  var {js_name}_p0 = pos;')
             if ftype == 'ascii':
                 lines.append(f'{i}  for (var _si = 0; _si < {js_name}_n && pos < buf.length; _si++)'
                              f' {{ {js_name} += String.fromCharCode(buf[pos++]); }}')
@@ -4402,6 +4486,8 @@ function writeS(buf, pos, size, value, endian) {
                 warning = json.dumps(ASCII_HIGH_BYTE_WARNING.format(field.get('name')))
                 lines.append(f'{i}  if (/[\\u0080-\\u00ff]/.test({js_name})) wn.push({warning});')
                 lines.append(f'{i}  {js_name} = {js_name}.replace(/\\u0000+$/, "");')
+                if echo:
+                    lines.append(f'{i}  pos = {js_name}_p0;')
                 if field.get('numeral'):
                     # PS-560: the whole text is a numeral of the declared base, or an error
                     # naming the field; parseInt alone would take a prefix.
@@ -4445,6 +4531,8 @@ function writeS(buf, pos, size, value, endian) {
                 upper = '.toUpperCase()' if fmt == 'hex:upper' else ''
                 lines.append(f'{i}  for (var _si = 0; _si < {js_name}_n && pos < buf.length; _si++)'
                              f' {{ {js_name} += (_si ? {sep} : "") + ("0" + buf[pos++].toString(16)).slice(-2){upper}; }}')
+            if echo and ftype != 'ascii':
+                lines.append(f'{i}  pos = {js_name}_p0;')
             if not name.startswith('_'):
                 guards, target = name_from_to_js(field, js_name)
                 for guard in guards:

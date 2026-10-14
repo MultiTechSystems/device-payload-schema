@@ -170,6 +170,9 @@ type Field struct {
 	// Bool field options
 	Bit     int  `json:"bit,omitempty" yaml:"bit,omitempty"`         // Bit position for bool extraction
 	Consume int  `json:"consume,omitempty" yaml:"consume,omitempty"` // Bytes to consume after reading
+	// ConsumeDeclared records a `consume` written at all, so that `consume: 0` on a byte
+	// string - a re-read of its span (PS-588, CR-2026-175) - is told from no `consume`.
+	ConsumeDeclared bool `json:"-" yaml:"-"`
 	// Byte group (inline grouped bitfields)
 	ByteGroup []Field `json:"byte_group,omitempty" yaml:"byte_group,omitempty"`
 	Size      int     `json:"size,omitempty" yaml:"size,omitempty"` // Size of byte group in bytes
@@ -440,6 +443,9 @@ type EncodeContext struct {
 	covered    []byte
 	peeks      []peekRecord
 	overlayErr error
+	// echoes holds each non-consuming byte string given a value, checked where the frame
+	// closes (PS-589, CR-2026-175).
+	echoes []echoRecord
 	// order is the schema's source key order, from which encodeTLV recovers the cases'
 	// declaration order (PS-527). A Go map has none.
 	order keyOrder
@@ -1519,8 +1525,10 @@ func parseFieldMap(fm map[string]any, node *yaml.Node) Field {
 	}
 	if consume, ok := fm["consume"].(int); ok {
 		f.Consume = consume
+		f.ConsumeDeclared = true
 	} else if consume, ok := fm["consume"].(float64); ok {
 		f.Consume = int(consume)
+		f.ConsumeDeclared = true
 	}
 
 	// Enum field options
@@ -2663,9 +2671,13 @@ func decodeField(field Field, ctx *DecodeContext) (any, error) {
 		value = field.Value
 
 	case TypeAscii, TypeAsciiLower:
+		start := ctx.Offset
 		data, err := ctx.Read(length)
 		if err != nil {
 			return nil, err
+		}
+		if isEcho(field) {
+			ctx.Offset = start // PS-588 (CR-2026-175): the span is read again
 		}
 		value = decodeASCII(field.Name, data, ctx) // PS-534, PS-538
 		if field.Numeral != "" {
@@ -2712,9 +2724,13 @@ func decodeField(field Field, ctx *DecodeContext) (any, error) {
 		value = base64.StdEncoding.EncodeToString(data)
 
 	case TypeHex, TypeHexLower, TypeHexUpperLower:
+		start := ctx.Offset
 		data, err := ctx.Read(length)
 		if err != nil {
 			return nil, err
+		}
+		if isEcho(field) {
+			ctx.Offset = start // PS-588 (CR-2026-175)
 		}
 		// PS-074: `hex` is lowercase without separators; uppercase is `hex:upper`.
 		encoded := hex.EncodeToString(data)
@@ -2731,9 +2747,13 @@ func decodeField(field Field, ctx *DecodeContext) (any, error) {
 		return nil, nil
 
 	case TypeBytes, TypeBytesLower:
+		start := ctx.Offset
 		data, err := ctx.Read(length)
 		if err != nil {
 			return nil, err
+		}
+		if isEcho(field) {
+			ctx.Offset = start // PS-588 (CR-2026-175)
 		}
 		value = formatBytes(data, field.Format, field.Separator)
 
@@ -3896,6 +3916,8 @@ func fixedElementSizeKnown(fields []Field) (int, bool) {
 			continue
 		case f.Type == TypeBoolean:
 			continue
+		case isEcho(f):
+			continue // PS-588 (CR-2026-175): a re-read advances nothing
 		case bitRangePattern.MatchString(string(f.Type)) || f.Type == TypeBoolLower:
 			total += f.Consume
 		case f.Type == TypeBytesLower || f.Type == TypeAsciiLower || f.Type == TypeHexLower ||
@@ -4221,6 +4243,9 @@ func (s *Schema) encodeToContextRecord(
 		return nil, ctx.overlayErr
 	}
 	if err := ctx.checkPeeks(0); err != nil { // PS-551 (CR-2026-141)
+		return nil, err
+	}
+	if err := ctx.checkEchoes(0); err != nil { // PS-589 (CR-2026-175)
 		return nil, err
 	}
 	if err := ctx.checkRemaining(); err != nil { // PS-564
@@ -4813,6 +4838,9 @@ func encodeTLV(field Field, data map[string]any, ctx *EncodeContext) error {
 			return inner.overlayErr
 		}
 		if err := inner.checkPeeks(0); err != nil { // PS-551: closed with its entry
+			return err
+		}
+		if err := inner.checkEchoes(0); err != nil { // PS-589 (CR-2026-175)
 			return err
 		}
 		ctx.Write(tag)
@@ -5456,6 +5484,7 @@ func encodeFields(fields []Field, data map[string]any, ctx *EncodeContext) error
 func encodeFieldsSealed(fields []Field, data map[string]any, ctx *EncodeContext) error {
 	mark := ctx.beginFieldList()
 	from := len(ctx.peeks)
+	fromEcho := len(ctx.echoes)
 	if err := encodeFieldList(fields, data, ctx); err != nil {
 		return err
 	}
@@ -5465,6 +5494,10 @@ func encodeFieldsSealed(fields []Field, data map[string]any, ctx *EncodeContext)
 	if err := ctx.checkPeeks(from); err != nil {
 		return err
 	}
+	if err := ctx.checkEchoes(fromEcho); err != nil { // PS-589 (CR-2026-175)
+		return err
+	}
+	ctx.echoes = ctx.echoes[:fromEcho]
 	ctx.sealFrom(mark.start, from)
 	return ctx.endFieldList(mark, false)
 }
@@ -5608,6 +5641,16 @@ func encodeFieldList(fields []Field, data map[string]any, ctx *EncodeContext) er
 				length = 1
 			}
 			ctx.writePadding(length) // CR-2026-141: no value
+			continue
+		}
+
+		// PS-589 (CR-2026-175): a byte string that does not consume re-reads bytes the
+		// other fields write, so it writes none and is not required; a value given for it
+		// is checked where the frame closes.
+		if isEcho(field) {
+			if err := ctx.recordEcho(field, data); err != nil {
+				return err
+			}
 			continue
 		}
 
