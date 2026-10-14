@@ -754,7 +754,10 @@ final class Wave6a {
         for (Object raw : fields) {
             if (!(raw instanceof Map<?, ?> f)) return null;
             String type = f.get("type") == null ? "" : String.valueOf(f.get("type"));
-            if (FIXED_SIZES.containsKey(type)) {
+            if (FIXED_SIZES.containsKey(type) && f.get("consume") instanceof Number c0
+                    && !(f.get("consume") instanceof Boolean) && c0.doubleValue() == 0) {
+                continue;                           // PS-603: it reads in place
+            } else if (FIXED_SIZES.containsKey(type)) {
                 total += FIXED_SIZES.get(type);
             } else if (COMPUTED_TYPES.contains(type) || isLiteral(f)) {
                 continue;

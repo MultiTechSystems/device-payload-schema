@@ -448,6 +448,14 @@ public static class SchemaDecoder
         ctx.Produced(field);
         try
         {
+            if (field.IsPeekedNumber)
+            {
+                // PS-603 (CR-2026-182): a whole number declaring `consume: 0` reads in place.
+                int start = ctx.Offset;
+                var value = DecodeFieldBody(field, ctx, schema);
+                ctx.Offset = start;
+                return value;
+            }
             if (field.Type is not (FieldType.Object or FieldType.Repeat))
                 return DecodeFieldBody(field, ctx, schema);
             ctx.MetaDepth++;
@@ -472,6 +480,16 @@ public static class SchemaDecoder
         field.LengthDeclared && field.Length == 0
         && field.Type is FieldType.Skip or FieldType.Bytes or FieldType.Ascii
             or FieldType.String or FieldType.Hex or FieldType.Base64;
+
+    /// <summary>What a whole number that does not consume decodes from <paramref name="span"/>
+    /// (PS-604, CR-2026-182): its type, arithmetic and lookup, as a decoder applies them;
+    /// null where it has no value.</summary>
+    internal static object? PeekedNumberValue(SchemaField field, byte[] span, string endian)
+    {
+        var value = DecodeFieldBody(field, new DecodeContext(span, endian), null);
+        if (value is double d && d == 0) return 0.0;                // PS-566
+        return value is string or bool || Helpers.ToFloat64(value).Item1 ? value : null;
+    }
 
     static object? DecodeFieldBody(SchemaField field, DecodeContext ctx, PayloadSchemaDefinition? schema)
     {
@@ -1031,6 +1049,7 @@ public static class SchemaDecoder
         int total = 0;
         foreach (var f in fields)
         {
+            if (f.IsPeekedNumber) continue;                         // PS-603: reads in place
             switch (f.Type)
             {
                 case FieldType.Number:

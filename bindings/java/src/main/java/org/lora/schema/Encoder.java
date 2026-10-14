@@ -781,6 +781,7 @@ final class Encoder {
 
     /** The byte count of a non-consuming byte string, read from the input. */
     private static Integer echoLength(Field field, Map<String, Object> data) {
+        if (field.isPeekedNumber()) return Field.wholeNumberSize(field.getType());   // PS-604
         if (field.getLengthRef() != null) {
             String ref = field.getLengthRef();
             if (ref.startsWith("$")) ref = ref.substring(1);
@@ -840,8 +841,9 @@ final class Encoder {
             } else {
                 Object found;
                 try {
-                    found = schema.echoValue(e.field(),
-                            java.util.Arrays.copyOfRange(frame, e.pos(), e.pos() + length));
+                    byte[] span = java.util.Arrays.copyOfRange(frame, e.pos(), e.pos() + length);
+                    found = e.field().isPeekedNumber() ? schema.peekedNumberValue(e.field(), span)
+                            : schema.echoValue(e.field(), span);
                 } catch (RuntimeException x) {
                     found = null;
                 }
@@ -850,7 +852,8 @@ final class Encoder {
             }
             throw new SchemaException.EncodeException("Field '" + e.field().getName()
                     + "' is given " + echoText(e.given()) + ", but the other fields write "
-                    + written + " over its span (PS-589)");
+                    + written + " over its span ("
+                    + (e.field().isPeekedNumber() ? "PS-604" : "PS-589") + ")");
         }
     }
 

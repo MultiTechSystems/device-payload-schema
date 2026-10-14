@@ -263,7 +263,28 @@ public class SchemaField
     /// (PS-588): it reports its span and leaves the read position, and an encoder writes
     /// nothing for it (PS-589).</summary>
     public bool IsEcho => ConsumeDeclared && Consume == 0
-        && (Type == FieldType.Bytes || Type == FieldType.Hex || Type == FieldType.Ascii);
+        && (Type == FieldType.Bytes || Type == FieldType.Hex || Type == FieldType.Ascii
+            || IsPeekedNumber);
+
+    /// <summary>A whole numeric field declaring <c>consume: 0</c> (PS-603, CR-2026-182): an
+    /// integer, a float, a minifloat, <c>udec</c>/<c>sdec</c> or a word-ordered variant. It
+    /// reads its value in place and leaves the read position; an encoder writes nothing for
+    /// it (PS-604).</summary>
+    public bool IsPeekedNumber => ConsumeDeclared && Consume == 0 && WholeNumberSize(Type) > 0;
+
+    /// <summary>The byte width of a whole numeric type (PS-453), 0 for any other.</summary>
+    public static int WholeNumberSize(FieldType t) => t switch
+    {
+        FieldType.U8 or FieldType.S8 or FieldType.UDec or FieldType.SDec => 1,
+        FieldType.U16 or FieldType.S16 or FieldType.F16 or FieldType.BF16
+            or FieldType.UFlt16 or FieldType.SFlt16 => 2,
+        FieldType.U24 or FieldType.S24 or FieldType.SFlt24 => 3,
+        FieldType.U32 or FieldType.S32 or FieldType.F32 or FieldType.U32LE16 or FieldType.S32LE16
+            or FieldType.F32LE16 or FieldType.U32BE16LE or FieldType.S32BE16LE
+            or FieldType.F32BE16LE => 4,
+        FieldType.U64 or FieldType.S64 or FieldType.F64 => 8,
+        _ => 0,
+    };
 
     // Enum
     public string? Base { get; set; }

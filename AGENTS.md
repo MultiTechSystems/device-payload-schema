@@ -3419,6 +3419,41 @@ improved. The Go, Java and C# corpus runners write per-vector reports only when
     compute: {op: pow, a: 10, b: $log_r_gas}}` after `log_r_gas` decodes `17 40 F8 00` to
     `log_r_gas` 8 and `r_gas` 100000000 (registry file not edited here).
 
+- **CR-2026-182 (PS-453 amended, PS-603, PS-604; merged on spec main for 0.5.8): a whole number
+  with `consume: 0` reads in place.** An integer, float, minifloat, `udec`/`sdec` or word-ordered
+  field declaring `consume: 0` reads its value and leaves the read position, as its full bit range
+  does. On encode it is CR-2026-175's echo: it writes nothing and is not required (the bytes fix
+  it), and a value given for it is compared, where the frame closes, with what the bytes the other
+  fields write over its span decode to through its own type, arithmetic and lookup:
+  `Field 'peek' is given 39321, but the other fields write 4660 over its span (PS-604)`.
+  - **Measured before (master 205723a):** all five ignored `consume: 0` on a whole number and
+    advanced. `{kind: u8, consume: 0}` before a match on `$kind` underflowed on `0105` (PS-535 at
+    the second case field) in Python, the TS013 codec, Go, Java and C#, and every encoder wrote
+    the peek as a byte of its own (`{kind: 1, temperature: 21.5}` came out `010100d7`). None
+    returned the silent `{}` the CR reports; that was not reproduced on master. The C harness
+    built such a field advancing too.
+  - **Where:** `whole_number_size`/`is_peeked_number` (Python; `is_echo` includes it, so every
+    echo path - the field lists, tlv claims, fixed element size - takes it), `_echo_decoder`
+    (the span through `_decode_field_endian` and `_apply_modifiers`, handed to `check_echoes`
+    with the echo); the TS013 generator wraps the read in a saved position, and the runtime's
+    `encIsPeekedNumber`/`encWholeValue`; Go `go/schema/cr182.go` (`isPeekedNumber`,
+    `decodeInPlace`, `peekedNumberValue`); Java `Field.isPeekedNumber`,
+    `Schema.peekedNumberValue`; C# `SchemaField.IsPeekedNumber`,
+    `SchemaDecoder.PeekedNumberValue`. The echo record carries the encode's byte order.
+  - **Validator:** PS-453 no longer warns on a whole number (it still does on `base64` and the
+    like). **C:** every field advances; `tools/schema_binary.py` refuses it by name (PS-446) and
+    the harness files it as an interpreter gap.
+  - **Count:** 0 whole numeric fields with `consume: 0` in `schemas/devices`, `schemas/library`,
+    `examples` and the private registry, so no existing output changes.
+  - **Cases:** `tests/cr-2026-182-cases.yaml` (the prototype's TestCR2026182ConsumeZeroWholeNumber
+    and more: arithmetic, byte order, a lookup label, a float, a nibble decimal, a word-ordered
+    value) read by `test_cr_2026_182_cases.py` (reference and generated codec, plus the
+    validator, the C converter and a decode-record round trip), Go `cr182_test.go`, Java
+    `CR2026182Test`, C# `CR2026_182Tests`. Fixture
+    `_language-conformance/whole-number-read-in-place.yaml`, 11 vectors, all round-tripping.
+  - **Floors:** decode 2842 -> 2853 in Go, Java and C#; re-encode +11 everywhere (Python and
+    Java 2239 -> 2250, C# 2240 -> 2251, Go 2257 -> 2268, plain 2229 -> 2240), all `match`
+    (173 -> 184): every harness files the fixture under `match` as a whole.
 - **CR-2026-178 (PS-178 amended, PS-596; la-payload-schema main, for 0.5.7): `_meta` carries
   `display_unit`.** Where a field declares `unit`, its `_meta.fields` entry carries
   `display_unit`, the text exactly as declared, right after `unit`; `unit` stays the SenML name

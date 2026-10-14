@@ -435,7 +435,7 @@ public static class SchemaEncoder
             // frame closes.
             if (field.IsEcho)
             {
-                frame?.AddEcho(field, data);
+                frame?.AddEcho(field, data, _endian);
                 return Array.Empty<byte>();
             }
             // PS-360: `value` on a field that reads bytes is the constant to write,
@@ -3427,12 +3427,13 @@ internal sealed class FrameBuffer
     /// value given for it is recorded at the position a decoder is at - the start of any
     /// bytes still pending - with its length read from the input (null for
     /// <c>remaining</c>).</summary>
-    public void AddEcho(SchemaField field, Dictionary<string, object?> data)
+    public void AddEcho(SchemaField field, Dictionary<string, object?> data, string endian = "big")
     {
         if (string.IsNullOrEmpty(field.Name)
             || !data.TryGetValue(field.Name, out var given) || given == null) return;
         int? length;
-        if (field.LengthRef != null)
+        if (field.IsPeekedNumber) length = SchemaField.WholeNumberSize(field.Type);   // PS-604
+        else if (field.LengthRef != null)
         {
             if (!data.TryGetValue(field.LengthRef, out var n)
                 || Helpers.ToFloat64(n) is not (true, var d) || d < 0 || d != Math.Floor(d))
@@ -3442,7 +3443,7 @@ internal sealed class FrameBuffer
         else if (field.Length < 0) length = null;
         else length = field.Length != 0 || field.LengthDeclared
             ? field.Length : Helpers.InferLengthFromType(field.Type);
-        _echoes.Add(new Echo(_buf.Count, field, given, length));
+        _echoes.Add(new Echo(_buf.Count, field, given, length, endian));
     }
 
     void Cover(int position, byte[] mask)
@@ -3568,7 +3569,8 @@ internal sealed record Peek(int Position, int Size, bool Little, int Start, int 
 /// <summary>A non-consuming byte string given a value (CR-2026-175, PS-589): where a decoder
 /// reads it, its field, the value given, and its length (null for <c>remaining</c>, the end
 /// of the frame it is checked in).</summary>
-internal sealed record Echo(int Position, SchemaField Field, object? Given, int? Length);
+internal sealed record Echo(int Position, SchemaField Field, object? Given, int? Length,
+    string Endian = "big");
 
 /// <summary>
 /// A frame's PS-551 metadata (CR-2026-141): per byte, the bits some field wrote, and each
@@ -3672,13 +3674,19 @@ internal sealed class FrameMeta
             else
             {
                 object? found;
-                try { found = EchoValue(e.Field, frame.AsSpan(e.Position, length)); }
+                try
+                {
+                    found = e.Field.IsPeekedNumber
+                        ? SchemaDecoder.PeekedNumberValue(e.Field, frame.AsSpan(e.Position, length).ToArray(), e.Endian)
+                        : EchoValue(e.Field, frame.AsSpan(e.Position, length));
+                }
                 catch (Exception) { found = null; }
                 if (found != null && EchoEquals(found, e.Given)) continue;
                 written = found != null ? EchoText(found) : "too few bytes";
             }
             throw new FieldErrorException($"Field '{e.Field.Name}' is given {EchoText(e.Given)}, "
-                + $"but the other fields write {written} over its span (PS-589)");
+                + $"but the other fields write {written} over its span "
+                + (e.Field.IsPeekedNumber ? "(PS-604)" : "(PS-589)"));
         }
     }
 

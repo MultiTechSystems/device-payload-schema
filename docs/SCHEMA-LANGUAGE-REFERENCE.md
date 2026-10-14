@@ -232,7 +232,31 @@ field a level may hold (PS-015).
   equal what the field decodes from the bytes the other fields write over its span (its
   `format` and `separator`, or the trailing 0x00 removal, applied first), or the input is
   rejected naming the field (PS-589).
-- On any other type than a bit range or `bool`, `consume: 0` is NOT RECOMMENDED (PS-453).
+- On any other type than a bit range, a `bool`, a byte string or a whole number (below),
+  `consume: 0` is NOT RECOMMENDED (PS-453).
+
+#### Reading a whole number in place (`consume: 0`)
+
+A whole numeric field - an integer `uN`/`sN`, a float `f16`/`bf16`/`f32`/`f64`, a minifloat,
+`udec`/`sdec` or a word-ordered variant - declaring `consume: 0` reads its value from the bytes
+at the read position as it otherwise would, and leaves the position where it was (PS-603). It
+is reported, referenced and matched on like any field, as its full bit range is. A frame's kind
+peeked before the cases that read it again:
+
+```yaml
+- {name: _kind, type: u8, consume: 0}
+- match:
+    field: $_kind
+    cases:
+      1: [{name: kind, type: u8}, {name: temperature, type: s16, div: 10}]
+      2: [{name: kind, type: u8}, {name: battery, type: u8}]
+# 01 00D7 -> {"kind": 1, "temperature": 21.5}
+```
+
+- An encoder writes nothing for it; the fields that consume its bytes write them. Where the
+  input omits it, the bytes fix it, and it is not required. A value given for it must equal
+  what those bytes decode to, through its own type, arithmetic and lookup, or the input is
+  rejected naming the field (PS-604).
 
 ### Special Types
 
