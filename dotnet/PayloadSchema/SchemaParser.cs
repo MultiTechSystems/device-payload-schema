@@ -303,7 +303,7 @@ public static partial class SchemaParser
 
     /// <summary>
     /// PS-426: match_value is withdrawn. PS-422: `encoding` is a named code on a uN. PS-430:
-    /// a bitfield_string part is decimal, hex or hex:upper. PS-364: a byte_group member
+    /// a bitfield_string part is decimal, sdecimal, hex or hex:upper, with an optional :N. PS-364: a byte_group member
     /// declares no endian.
     /// </summary>
     /// <summary>PS-407: a ${value} lookup default reports a string, so every label must be one.</summary>
@@ -342,9 +342,8 @@ public static partial class SchemaParser
         }
         if (type == "bitfield_string" && fm.TryGetValue("parts", out var partsNode) && partsNode is YamlSequenceNode parts)
             foreach (var part in parts.Children.OfType<YamlSequenceNode>())
-                if (part.Children.Count > 2 && Scalar(part.Children[2]) is not ("decimal" or "hex" or "hex:upper"))
-                    throw new InvalidOperationException($"Field '{name}': bitfield_string part format "
-                        + $"{Scalar(part.Children[2])} is not one of decimal, hex, hex:upper (PS-430)");
+                if (part.Children.Count > 2)
+                    BitfieldParts.Parse(Scalar(part.Children[2]));   // PS-430, the prototype's text
         if (fm.TryGetValue("byte_group", out var group))
         {
             var members = group as YamlSequenceNode

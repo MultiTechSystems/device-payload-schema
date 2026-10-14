@@ -843,6 +843,43 @@ function encDigitBits(text, base) {
   return bits;
 }
 
+function encPow2Text(k, less) {                       // 2^k, or 2^k - 1, in decimal
+  if (less && k === 0) return "0";
+  var n = less ? Math.ceil(k / 8) : Math.floor(k / 8) + 1, bytes = [];
+  for (var i = 0; i < n; i++) bytes.push(less ? 0xFF : 0);
+  if (less) { if (k % 8) bytes[0] = (1 << (k % 8)) - 1; } else bytes[0] = 1 << (k % 8);
+  return decimalOf(bytes);
+}
+
+function encSegmentBits(segment, width, fmt, name) {  // parse_bitfield_segment
+  // PS-096, PS-431, PS-583: leading zeros accepted, hex without regard to case, a `-` only
+  // on sdecimal; a value the part's width cannot hold is rejected, never masked. The
+  // part's bits, least significant first, exact at any width.
+  var base = partFormat(fmt).base, text = String(segment).replace(/^\s+|\s+$/g, "");
+  var re = base === "sdecimal" ? /^-?[0-9]+$/ : base === "decimal" ? /^[0-9]+$/ : /^[0-9A-Fa-f]+$/;
+  if (!re.test(text)) encFail("Field '" + name + "': segment " + encPyRepr(String(segment)) + " is not a " + base + " part (PS-096)");
+  var neg = text.charAt(0) === "-", bits = encDigitBits(neg ? text.slice(1) : text, base.indexOf("hex") === 0 ? 16 : 10);
+  var len = 0, b;
+  for (b = 0; b < bits.length; b++) if (bits[b]) len = b + 1;
+  var fits;
+  if (base !== "sdecimal") fits = len <= width;
+  else if (!neg) fits = len <= width - 1;
+  else fits = len <= width - 1 || (len === width && bits.slice(0, width - 1).indexOf(1) < 0);
+  if (!fits) {
+    var range = base === "sdecimal"
+      ? "-" + encPow2Text(width - 1, false) + " to " + encPow2Text(width - 1, true)
+      : "0 to " + encPow2Text(width, true);
+    encFail("Field '" + name + "': segment " + encPyRepr(String(segment)) + " does not fit a " + width + "-bit " + base + " part, " + range + " (PS-583)");
+  }
+  var out = [];
+  for (b = 0; b < width; b++) out.push(bits[b] ? 1 : 0);
+  if (neg && len) {                                     // two's complement within the width
+    for (b = 0; b < width; b++) out[b] ^= 1;
+    for (b = 0; b < width; b++) { out[b] ^= 1; if (out[b]) break; }
+  }
+  return out;
+}
+
 function encBitfieldString(out, f, value, ctx) {      // _encode_bitfield_string
   var parts = f.parts || [], delim = f.delimiter === undefined ? "." : f.delimiter;
   var prefix = f.prefix || "", length = f.length === undefined ? 2 : f.length;
@@ -854,18 +891,9 @@ function encBitfieldString(out, f, value, ctx) {      // _encode_bitfield_string
     if (p.length < 2) continue;
     var fmt = p.length > 2 ? p[2] : "decimal";
     var seg = i < segs.length ? segs[i] : "0";
-    var hexFmt = fmt === "hex" || fmt === "hex:upper";
-    var v = hexFmt ? parseInt(seg, 16) : parseInt(seg, 10);
-    if (isNaN(v)) encFail("invalid literal for bitfield_string segment: " + JSON.stringify(seg));
-    if (Math.abs(v) > 9007199254740991) {
-      // Past 2^53 a Number has already lost the low bits, so place the digits exactly.
-      var bits = encDigitBits(seg, hexFmt ? 16 : 10);
-      if (!bits) encFail("invalid literal for bitfield_string segment: " + JSON.stringify(seg));
-      var start = Number(p[0]), width = Number(p[1]);
-      for (var b = 0; b < width && b < bits.length; b++) if (bits[b]) packed[start + b] = 1;
-      continue;
-    }
-    packed = encPlace(packed, v, Number(p[0]), Number(p[1]));
+    var start = Number(p[0]), width = Number(p[1]);
+    var bits = encSegmentBits(seg, width, fmt, f.name);
+    for (var b = 0; b < width; b++) if (bits[b]) packed[start + b] = 1;
   }
   // PS-050a: the field's own byte order, as it is decoded; this wrote the document's.
   encPacked(out, packed, length, f.endian === "little" || f.endian === "big" ? f.endian : ctx.endian);
@@ -3238,14 +3266,43 @@ function bitBytes(bytes, off, width) {
   return out;
 }
 
-/* One part of a bitfield_string, rendered in `fmt` (PS-430). */
+/* A part format's base and minimum width (PS-430): decimal, sdecimal, hex or hex:upper,
+ * with an optional `:N` from 1 to 32. The generator refuses any other at load. */
+function partFormat(fmt) {
+  var m = /^(decimal|sdecimal|hex:upper|hex)(?::([1-9][0-9]?))?$/.exec(String(fmt));
+  if (!m || (m[2] && Number(m[2]) > 32)) throw new Error("bitfield_string part format " + fmt + " (PS-430)");
+  return {base: m[1], width: m[2] ? Number(m[2]) : 0};
+}
+
+/* A magnitude (bytes, most significant first) in a part format's base: hex lower or upper
+ * case, else decimal; `-` first where `neg`; zero-filled on the left to `width` digits and
+ * never cut (PS-430, PS-582). The one formatter, for CR-2026-176's templates too. */
+function partText(neg, mag, base, width) {
+  var digits;
+  if (base === 'hex' || base === 'hex:upper') {
+    digits = '';
+    for (var k = 0; k < mag.length; k++) digits += (mag[k] < 16 ? '0' : '') + mag[k].toString(16);
+    digits = digits.replace(/^0+/, '') || '0';
+    if (base === 'hex:upper') digits = digits.toUpperCase();
+  } else {
+    digits = decimalOf(mag);
+  }
+  while (digits.length < width) digits = '0' + digits;
+  return (neg ? '-' : '') + digits;
+}
+
+/* One part of a bitfield_string, rendered in `fmt` (PS-430); `sdecimal` reads its bits as
+ * two's complement of the part's width (PS-582). */
 function bitfieldPart(bytes, off, width, fmt) {
-  var out = bitBytes(bytes, off, width);
-  if (fmt === 'decimal') return decimalOf(out);
-  var hex = '';
-  for (var k = 0; k < out.length; k++) hex += (out[k] < 16 ? '0' : '') + out[k].toString(16);
-  hex = hex.replace(/^0+/, '') || '0';
-  return fmt === 'hex:upper' ? hex.toUpperCase() : hex;
+  var f = partFormat(fmt), out = bitBytes(bytes, off, width), neg = false, k;
+  if (f.base === 'sdecimal' && width > 0 && (out[0] >> ((width - 1) % 8)) & 1) {
+    neg = true;
+    var spare = out.length * 8 - width;
+    for (k = 0; k < out.length; k++) out[k] = (~out[k]) & 0xFF;
+    out[0] &= 0xFF >> spare;
+    for (k = out.length - 1; k >= 0; k--) { out[k] = (out[k] + 1) & 0xFF; if (out[k]) break; }
+  }
+  return partText(neg, out, f.base, f.width);
 }
 
 /* A bit range of a base wider than six bytes, sign-extended from the range's width when
@@ -4687,6 +4744,7 @@ function writeS(buf, pos, size, value, endian) {
         return f'encReverseModifiers({val_var}, {json.dumps(field, default=str)})'
 
     def _gen_decode_bitfield_string(self, field: Dict) -> List[str]:
+        from schema_interpreter import parse_part_format
         i = self._i()
         lines = []
         name = to_js_name(field['name'])
@@ -4707,10 +4765,8 @@ function writeS(buf, pos, size, value, endian) {
             offset = int(part[0])
             width = int(part[1])
             fmt = part[2] if len(part) > 2 else 'decimal'
-            # PS-430: hex lower case, hex:upper upper case, anything else refused.
-            if fmt not in ('decimal', 'hex', 'hex:upper'):
-                raise ValueError(f"bitfield_string part format {fmt!r} is not one of "
-                                 f"decimal, hex, hex:upper (PS-430)")
+            # PS-430: decimal, sdecimal, hex or hex:upper with an optional :N width.
+            parse_part_format(fmt)
             seg_exprs.append(
                 f'bitfieldPart({name}_raw, {offset}, {width}, {json.dumps(fmt)})'
             )

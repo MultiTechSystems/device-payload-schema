@@ -1222,9 +1222,7 @@ def validate_field_list(fields: List[Dict], path: str, errors: List[str],
                     for pi, part in enumerate(fld['parts']):
                         if not isinstance(part, list) or len(part) < 2:
                             errors.append(f"{path}[{i}].parts[{pi}]: must be [bitOffset, bitLength] or [bitOffset, bitLength, format]")
-                        elif len(part) > 2 and part[2] not in ('hex', 'hex:upper', 'decimal'):
-                            errors.append(f"{path}[{i}].parts[{pi}]: format must be "
-                                          f"'decimal', 'hex' or 'hex:upper' (PS-430)")
+                        # A part's format (PS-430) is schema_iterator_errors' check.
                 if 'length' not in fld:
                     errors.append(f"{path}[{i}] ({name}): bitfield_string should have explicit 'length'")
                 continue

@@ -316,12 +316,13 @@ func checkFieldRules(field map[string]any, at string) error {
 	if err := checkLookupTemplate(field, at); err != nil {
 		return err
 	}
-	// PS-430: a bitfield_string part is decimal, hex or hex:upper.
+	// PS-430 (CR-2026-170): a bitfield_string part is decimal, sdecimal, hex or hex:upper,
+	// with an optional :N width; the spec prototype's text, unprefixed.
 	if parts, ok := field["parts"].([]any); ok && field["type"] == "bitfield_string" {
 		for _, raw := range parts {
 			if part, ok := raw.([]any); ok && len(part) > 2 {
-				if format := part[2]; format != "decimal" && format != "hex" && format != "hex:upper" {
-					return fmt.Errorf("%s: bitfield_string part format %v is not one of decimal, hex, hex:upper (PS-430)", at, format)
+				if _, _, err := parsePartFormat(part[2]); err != nil {
+					return err
 				}
 			}
 		}

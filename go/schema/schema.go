@@ -2759,24 +2759,14 @@ func decodeField(field Field, ctx *DecodeContext) (any, error) {
 			}
 			bitOff, _ := toInt(part[0])
 			bitLen, _ := toInt(part[1])
-			format := "decimal"
+			var format any = "decimal"
 			if len(part) >= 3 {
-				if f, ok := part[2].(string); ok {
-					format = f
-				}
+				format = part[2]
 			}
 			mask := (uint64(1) << bitLen) - 1
 			raw := (intVal >> bitOff) & mask
-			// PS-430: hex lower case, hex:upper upper case; the load check refuses
-			// any other part format.
-			switch format {
-			case "hex":
-				partStrs = append(partStrs, strconv.FormatUint(raw, 16))
-			case "hex:upper":
-				partStrs = append(partStrs, strings.ToUpper(strconv.FormatUint(raw, 16)))
-			default:
-				partStrs = append(partStrs, strconv.FormatUint(raw, 10))
-			}
+			// PS-430, PS-582: the part's format writes it (checked at load).
+			partStrs = append(partStrs, formatBitfieldPart(raw, bitLen, format))
 		}
 		value = prefix + strings.Join(partStrs, delimiter)
 
@@ -5781,7 +5771,7 @@ func encodeBitfieldString(field Field, strVal string, ctx *EncodeContext) error 
 		}
 		bitOff := 0
 		bitLen := 8
-		format := "decimal"
+		var format any = "decimal"
 		if f, ok := part[0].(float64); ok {
 			bitOff = int(f)
 		} else if f, ok := part[0].(int); ok {
@@ -5793,25 +5783,19 @@ func encodeBitfieldString(field Field, strVal string, ctx *EncodeContext) error 
 			bitLen = f
 		}
 		if len(part) > 2 {
-			if s, ok := part[2].(string); ok {
-				format = s
-			}
+			format = part[2]
 		}
 		seg := "0"
 		if i < len(segments) {
 			seg = segments[i]
 		}
-		var val uint64
-		if format == "hex" || format == "hex:upper" {
-			// Case does not matter on the way back in (PS-431).
-			v, _ := strconv.ParseUint(seg, 16, 64)
-			val = v
-		} else {
-			v, _ := strconv.ParseUint(seg, 10, 64)
-			val = v
+		// PS-096, PS-431, PS-583: parsed by the part's format; a value the width cannot
+		// hold is rejected, never masked.
+		val, err := parseBitfieldSegment(seg, bitLen, format, field.Name)
+		if err != nil {
+			return err
 		}
-		mask := uint64((1 << bitLen) - 1)
-		intVal |= (val & mask) << bitOff
+		intVal |= val << bitOff
 	}
 
 	ctx.Write(encodeUint(intVal, length, endian))
