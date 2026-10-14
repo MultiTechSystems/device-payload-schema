@@ -1464,11 +1464,7 @@ public static class SchemaDecoder
             case string text when Helpers.ParseListCaseKey(text) is not null:
                 return false;
             case string text:
-                var separator = text.IndexOf("..", StringComparison.Ordinal);
-                return separator > 0
-                       && long.TryParse(text[..separator].Trim(), out var lo)
-                       && long.TryParse(text[(separator + 2)..].Trim(), out var hi)
-                       && value >= lo && value <= hi;
+                return RangeKey.Parse(text) is { } range && range.Contains(value);
             case Dictionary<string, object?> rangeMap:
                 var low = rangeMap.TryGetValue("min", out var minNode)
                     && Helpers.ToFloat64(minNode) is (true, var lowKey) ? lowKey : double.NegativeInfinity;
@@ -1495,13 +1491,8 @@ public static class SchemaDecoder
                 // A quoted flow sequence, "[1, 2, 3]", matches any element (PS-398).
                 return listed.Contains(matchValue);
             case string text:
-                var separator = text.IndexOf("..", StringComparison.Ordinal);
-                if (separator > 0)
-                {
-                    return long.TryParse(text[..separator].Trim(), out var lo)
-                           && long.TryParse(text[(separator + 2)..].Trim(), out var hi)
-                           && matchValue >= lo && matchValue <= hi;
-                }
+                if (text.Contains("..", StringComparison.Ordinal))
+                    return RangeKey.Parse(text) is { } range && range.Contains(matchValue);
                 return long.TryParse(text.Trim(), out var exact) && matchValue == exact;
             case List<object?> list:
                 return list.Any(item =>

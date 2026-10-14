@@ -498,6 +498,9 @@ public static partial class SchemaParser
                 if (kv.Value is not YamlSequenceNode)
                     throw new InvalidOperationException($"{construct}.cases[{Scalar(kv.Key)}]: a case "
                         + "body is a field list; write [] for a case that reads nothing (PS-441)");
+                if (RangeKey.Error(Scalar(kv.Key)) is { } problem)                  // PS-398, PS-151
+                    throw new InvalidOperationException(
+                        $"{construct}.cases[{Scalar(kv.Key)}]: {problem}");
             }
         }
     }

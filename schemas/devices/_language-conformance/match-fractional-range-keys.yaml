@@ -1,0 +1,141 @@
+# A range key `start..end` is inclusive over the reals (PS-398), and its bounds are numbers, not
+# necessarily integers: a breakpoint table over a computed reading writes `12.1..35.4`. The
+# reference read each bound through an integer conversion, so such a key matched nothing and
+# raised no error, and the `default` decided every value. A bound may be negative.
+#
+# The reading is a signed word divided by 100, so each value below is the exact quotient and
+# a bound is hit exactly. Where no key holds a value, the `default` supplies the band.
+name: probe_match_fractional_range_keys
+endian: big
+fields:
+  - name: reading
+    type: s16
+    div: 100
+  - match:
+      field: $reading
+      default:
+        - name: band
+          type: string
+          value: none
+      cases:
+        "0..12":
+          - name: band
+            type: string
+            value: low
+        "12.1..35.4":
+          - name: band
+            type: string
+            value: moderate
+        "35.5..55.4":
+          - name: band
+            type: string
+            value: sensitive
+        "-10.5..-0.5":
+          - name: band
+            type: string
+            value: cold
+test_vectors:
+  - name: range_start_zero
+    description: "the inclusive start of 0..12"
+    payload: "0000"
+    source: generated
+    expected:
+      reading: 0.0
+      band: low
+    expected_warnings: []
+  - name: first_range_end
+    description: "12.00, the inclusive end of 0..12"
+    payload: "04B0"
+    source: generated
+    expected:
+      reading: 12.0
+      band: low
+    expected_warnings: []
+  - name: gap_after_first_range
+    description: "12.05 lies between 12 and 12.1, so no key holds it"
+    payload: "04B5"
+    source: generated
+    expected:
+      reading: 12.05
+      band: none
+    expected_warnings: []
+  - name: second_range_start
+    description: "12.10, the inclusive start of 12.1..35.4"
+    payload: "04BA"
+    source: generated
+    expected:
+      reading: 12.1
+      band: moderate
+    expected_warnings: []
+  - name: second_range_end
+    description: "35.40, the inclusive end"
+    payload: "0DD4"
+    source: generated
+    expected:
+      reading: 35.4
+      band: moderate
+    expected_warnings: []
+  - name: gap_after_second_range
+    description: "35.45 lies between 35.4 and 35.5"
+    payload: "0DD9"
+    source: generated
+    expected:
+      reading: 35.45
+      band: none
+    expected_warnings: []
+  - name: third_range_start
+    description: "35.50, the inclusive start of 35.5..55.4"
+    payload: "0DDE"
+    source: generated
+    expected:
+      reading: 35.5
+      band: sensitive
+    expected_warnings: []
+  - name: third_range_end
+    description: "55.40, the inclusive end"
+    payload: "15A4"
+    source: generated
+    expected:
+      reading: 55.4
+      band: sensitive
+    expected_warnings: []
+  - name: just_past_third_range
+    description: "55.41, just above the last bound"
+    payload: "15A5"
+    source: generated
+    expected:
+      reading: 55.41
+      band: none
+    expected_warnings: []
+  - name: negative_range_start
+    description: "-10.50, the inclusive start of -10.5..-0.5"
+    payload: "FBE6"
+    source: generated
+    expected:
+      reading: -10.5
+      band: cold
+    expected_warnings: []
+  - name: negative_range_end
+    description: "-0.50, the inclusive end"
+    payload: "FFCE"
+    source: generated
+    expected:
+      reading: -0.5
+      band: cold
+    expected_warnings: []
+  - name: just_below_negative_range
+    description: "-10.51, just below the start"
+    payload: "FBE5"
+    source: generated
+    expected:
+      reading: -10.51
+      band: none
+    expected_warnings: []
+  - name: just_above_negative_range
+    description: "-0.49, just above the end"
+    payload: "FFCF"
+    source: generated
+    expected:
+      reading: -0.49
+      band: none
+    expected_warnings: []

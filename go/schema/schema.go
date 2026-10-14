@@ -3172,9 +3172,9 @@ func matchCasePattern(value int, pattern any) bool {
 			}
 			return false
 		}
-		lo, hi, ok := parseRangePattern(v)
-		if ok {
-			return value >= lo && value <= hi
+		if strings.Contains(v, "..") {
+			lo, hi, ok := parseRangeKey(v)
+			return ok && rangeContainsInt(int64(value), lo, hi)
 		}
 		if exact, err := strconv.Atoi(v); err == nil {
 			return value == exact
@@ -3210,10 +3210,8 @@ func fractionInRangePattern(value float64, pattern any) bool {
 			return false
 		}
 		if strings.Contains(v, "..") {
-			parts := strings.SplitN(v, "..", 2)
-			lo, errLo := parseIntAny(strings.TrimSpace(parts[0]))
-			hi, errHi := parseIntAny(strings.TrimSpace(parts[1]))
-			return errLo == nil && errHi == nil && value >= float64(lo) && value <= float64(hi)
+			lo, hi, ok := parseRangeKey(v)
+			return ok && rangeContainsFloat(value, lo, hi)
 		}
 	case map[string]any:
 		lo, hi := math.Inf(-1), math.Inf(1)
@@ -3247,23 +3245,6 @@ func parseListCaseKey(text string) ([]int, bool) {
 		values = append(values, int(n))
 	}
 	return values, true
-}
-
-// parseRangePattern reads the "2..5" spelling, inclusive at both ends (PS-270).
-func parseRangePattern(text string) (int, int, bool) {
-	parts := strings.SplitN(text, "..", 2)
-	if len(parts) != 2 {
-		return 0, 0, false
-	}
-	lo, err := strconv.Atoi(strings.TrimSpace(parts[0]))
-	if err != nil {
-		return 0, 0, false
-	}
-	hi, err := strconv.Atoi(strings.TrimSpace(parts[1]))
-	if err != nil {
-		return 0, 0, false
-	}
-	return lo, hi, true
 }
 
 func decodeMatch(field Field, ctx *DecodeContext) (any, error) {
@@ -4422,10 +4403,8 @@ func caseMatchesValue(value int, c Case) bool {
 			return false
 		}
 		if strings.Contains(v, "..") {
-			parts := strings.SplitN(v, "..", 2)
-			lo, errLo := parseIntAny(parts[0])
-			hi, errHi := parseIntAny(parts[1])
-			return errLo == nil && errHi == nil && int64(value) >= lo && int64(value) <= hi
+			lo, hi, ok := parseRangeKey(v)
+			return ok && rangeContainsInt(int64(value), lo, hi)
 		}
 		n, err := parseIntAny(v)
 		return err == nil && int64(value) == n
