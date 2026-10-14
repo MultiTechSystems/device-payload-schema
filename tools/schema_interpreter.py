@@ -3876,6 +3876,9 @@ def field_meta(field_def, repeat=None, siblings=None):
     unit = senml.get('unit') or field_def.get('unit')          # PS-178, no conversion
     if unit is not None:
         entry['unit'] = meta_reference(unit, repeat, siblings=siblings)
+    if field_def.get('unit') is not None:
+        # PS-596: the author's text as declared, whether or not senml.unit replaced it above
+        entry['display_unit'] = meta_reference(field_def['unit'], repeat, siblings=siblings)
     ipso = field_def.get('ipso')
     if isinstance(ipso, dict) and 'object' in ipso:
         entry['ipso'] = {'object': ipso['object'],

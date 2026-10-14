@@ -1,0 +1,69 @@
+# CR-2026-178 (0.5.7, PS-178, PS-596): `_meta.fields` entries carry `display_unit`, the field's
+# `unit` text exactly as declared, beside `unit`, which is the SenML name where `senml.unit` is
+# declared and the field's `unit` otherwise.
+#
+# One case list, read by the reference (tests/test_cr_2026_178_cases.py), Go
+# (go/schema/cr178_test.go), Java (CR2026178Test.java) and C# (CR2026_178Tests.cs). It mirrors
+# the spec prototype's TestCR2026178DisplayUnit. The TS013 codec reports no `_meta`; C has none.
+#
+# `schema` is YAML text and `path` walks `_meta.fields` by dotted key (`o.fields.f` is the
+# member f of the object o, `r.element` a repeat's element entry). `unit` and `display_unit`
+# are the expected values; the word `absent` means the key is not in the entry.
+
+cases:
+
+- name: the_cr_example
+  schema: "name: t\nversion: 1\nfields:\n  - {name: _raw, type: u8}\n  - {name: f, type: number, ref: $_raw, description: Soil temperature, unit: \"°C\", senml: {unit: Cel}}\n"
+  payload: "0000000000000000"
+  path: f
+  unit: Cel
+  display_unit: "°C"
+
+- name: unit_only_is_both
+  schema: "name: t\nversion: 1\nfields:\n  - {name: f, type: u8, unit: Cel}\n"
+  payload: "0000000000000000"
+  path: f
+  unit: Cel
+  display_unit: Cel
+
+- name: senml_unit_only_has_no_display_unit
+  schema: "name: t\nversion: 1\nfields:\n  - {name: f, type: u8, senml: {unit: V}}\n"
+  payload: "0000000000000000"
+  path: f
+  unit: V
+  display_unit: absent
+
+- name: no_unit_at_all
+  schema: "name: t\nversion: 1\nfields:\n  - {name: f, type: u8}\n"
+  payload: "0000000000000000"
+  path: f
+  unit: absent
+  display_unit: absent
+
+- name: exactly_as_declared
+  schema: "name: t\nversion: 1\nfields:\n  - {name: f, type: u8, unit: \"%RH\", senml: {unit: \"%RH\"}}\n"
+  payload: "0000000000000000"
+  path: f
+  unit: "%RH"
+  display_unit: "%RH"
+
+- name: nested_object_member
+  schema: "name: t\nversion: 1\nfields:\n  - name: o\n    type: object\n    fields:\n      - {name: f, type: u8, unit: \"°C\", senml: {unit: Cel}}\n"
+  payload: "0000000000000000"
+  path: o.fields.f
+  unit: Cel
+  display_unit: "°C"
+
+- name: repeat_element
+  schema: "name: t\nversion: 1\nfields:\n  - name: r\n    type: repeat\n    count: 2\n    element: {type: u8, unit: mV}\n"
+  payload: "0000000000000000"
+  path: r.element
+  unit: mV
+  display_unit: mV
+
+- name: repeat_element_with_senml
+  schema: "name: t\nversion: 1\nfields:\n  - name: r\n    type: repeat\n    count: 2\n    element: {type: u8, unit: \"°\", senml: {unit: deg}}\n"
+  payload: "0000000000000000"
+  path: r.element
+  unit: deg
+  display_unit: "°"

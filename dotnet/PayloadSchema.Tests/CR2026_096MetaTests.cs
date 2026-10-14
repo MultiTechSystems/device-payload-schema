@@ -41,7 +41,7 @@ public class CR2026_096MetaTests
             ["schema"] = "flat",
             ["fields"] = new Dictionary<string, object?>
             {
-                ["a"] = new Dictionary<string, object?> { ["type"] = "u8", ["reports"] = "integer", ["unit"] = "V" },
+                ["a"] = new Dictionary<string, object?> { ["type"] = "u8", ["reports"] = "integer", ["unit"] = "V", ["display_unit"] = "V" },
                 ["b"] = new Dictionary<string, object?> { ["type"] = "u8", ["reports"] = "integer" },
             },
         };
