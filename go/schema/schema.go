@@ -265,7 +265,7 @@ type Transform struct {
 	// Named operation form, e.g. {op: round, decimals: 2, ties: away}.
 	Op       string `json:"op,omitempty" yaml:"op,omitempty"`
 	Decimals int    `json:"decimals,omitempty" yaml:"decimals,omitempty"`
-	// Ties is "even" (the default) or "away" from zero (PS-390).
+	// Ties is "even" (the default), "away" from zero or "up" toward +infinity (PS-390).
 	Ties string `json:"ties,omitempty" yaml:"ties,omitempty"`
 	// Bound stages (PS-115): floor is a lower clamp, ceiling an upper one.
 	Floor   *float64   `json:"floor,omitempty" yaml:"floor,omitempty"`
@@ -724,9 +724,10 @@ func roundHalfEvenDecimal(value float64, decimals int) float64 {
 }
 
 // roundHalfAwayDecimal rounds to `decimals` places with a tie going away from zero
-// (PS-390 `ties: away`), on the stored value. big.Float holds the binary value
+// (PS-390 `ties: away`), or with a negative tie going toward zero (`ties: up`, toward
+// +infinity, as Math.round), on the stored value. big.Float holds the binary value
 // exactly, so 78.125 is seen as the tie it is and 2.355 - stored just below - is not.
-func roundHalfAwayDecimal(value float64, decimals int) float64 {
+func roundHalfAwayDecimal(value float64, decimals int, up bool) float64 {
 	if math.IsNaN(value) || math.IsInf(value, 0) {
 		return value
 	}
@@ -737,7 +738,8 @@ func roundHalfAwayDecimal(value float64, decimals int) float64 {
 	scaled := new(big.Float).SetPrec(2048).Mul(exact, new(big.Float).SetPrec(2048).SetFloat64(math.Pow(10, float64(decimals))))
 	floor, _ := scaled.Int(nil)
 	frac := new(big.Float).SetPrec(2048).Sub(scaled, new(big.Float).SetPrec(2048).SetInt(floor))
-	if frac.Cmp(big.NewFloat(0.5)) >= 0 {
+	half := frac.Cmp(big.NewFloat(0.5))
+	if half > 0 || (half == 0 && !(up && value < 0)) {
 		floor.Add(floor, big.NewInt(1))
 	}
 	text := floor.String()
@@ -776,8 +778,8 @@ func applyTransformStages(value float64, stages []Transform) float64 {
 			// strconv.FormatFloat is correctly rounded on the stored value and breaks
 			// ties to even, so it does both jobs; verified against Python's round() on
 			// the exact-tie and representation-error cases.
-			if stage.Ties == "away" {
-				value = roundHalfAwayDecimal(value, stage.Decimals)
+			if stage.Ties == "away" || stage.Ties == "up" {
+				value = roundHalfAwayDecimal(value, stage.Decimals, stage.Ties == "up")
 			} else {
 				value = roundHalfEvenDecimal(value, stage.Decimals)
 			}
@@ -6683,6 +6685,13 @@ func evaluateCompute(cd *ComputeDef, ctx *DecodeContext) (float64, error) {
 		}
 		// PS-276 floored: rounds toward negative infinity, not toward zero.
 		return float64(floorDiv(int64(a), int64(b))), nil
+	case "pow":
+		// PS-584: a result that is not a finite real number omits the field.
+		r := math.Pow(a, b)
+		if math.IsNaN(r) || math.IsInf(r, 0) {
+			return 0, errComputeOmitted
+		}
+		return r, nil
 	default:
 		return 0, fmt.Errorf("unknown compute op: %s", cd.Op)
 	}

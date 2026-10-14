@@ -152,7 +152,7 @@ fields:
 	want := map[string]any{
 		"type":     "repeat",
 		"reports":  "array",
-		"element":  map[string]any{"type": "u16", "reports": "integer", "unit": "Cel"},
+		"element":  map[string]any{"type": "u16", "reports": "integer", "unit": "Cel", "display_unit": "Cel"},
 		"identity": map[string]any{"index": "i", "count": 8, "index_base": 1},
 	}
 	if asJSON(t, got) != asJSON(t, want) {

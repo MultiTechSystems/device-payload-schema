@@ -151,7 +151,7 @@ public class CR2026111Test {
         Map<?, ?> meta = (Map<?, ?>) ((Map<?, ?>) schema.interpret(new byte[16],
                 new InputContext(null, null, null)).get("_meta")).get("fields");
         // Key order is the reference's: type, reports, element, identity.
-        assertEquals("{type=repeat, reports=array, element={type=u16, reports=integer, unit=Cel}, identity={index=i, count=8, index_base=1}}",
+        assertEquals("{type=repeat, reports=array, element={type=u16, reports=integer, unit=Cel, display_unit=Cel}, identity={index=i, count=8, index_base=1}}",
                 String.valueOf(meta.get("temperatures")));
     }
 

@@ -475,7 +475,7 @@ plausible byte. The same applies to an `enum` `default` (PS-068).
 - name: ratio
   type: number
   compute:
-    op: div          # add, sub, mul, div, mod, idiv
+    op: div          # add, sub, mul, div, mod, idiv, pow
     a: $field1       # Field reference or literal
     b: $field2
 ```
@@ -490,6 +490,13 @@ plausible byte. The same applies to an `enum` `default` (PS-068).
 | `div` | Division | `a / b` |
 | `mod` | Modulo (remainder) | `int(a) % int(b)` |
 | `idiv` | Integer division | `int(a) // int(b)` |
+| `pow` | Power; `b` may be a field (PS-584) | `a ** b` |
+
+`pow` computes `a` raised to `b` in binary64, with `b` a literal or a field
+(`{op: pow, a: 10, b: $scale}`); a literal base of 2.718281828459045 gives `e^x`. A result
+that is not a finite real number - a negative `a` with a non-integer `b`, `0` with a negative
+`b`, an overflow - leaves the field absent, as a zero divisor does (PS-278, PS-584), and the
+rest of the payload still decodes.
 
 **Nibble Extraction Example:**
 
@@ -1819,7 +1826,7 @@ TRANSFORMS:   mult div add | sqrt abs pow log10 log | floor ceiling
               | {op: round, decimals: n, ties: even|away} - nothing else (PS-390)
               div 0 or log of x <= 0: the field is absent (PS-100, PS-117)
 
-COMPUTE OPS:  add sub mul div mod idiv
+COMPUTE OPS:  add sub mul div mod idiv pow
 
 GUARD OPS:    gt gte lt lte eq ne
 

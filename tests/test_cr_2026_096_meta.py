@@ -47,7 +47,7 @@ def test_meta_is_last_and_present_without_annotations():
     assert list(data)[-1] == "_meta"
     assert data["_meta"] == {
         "schema": "flat",
-        "fields": {"a": {"type": "u8", "reports": "integer", "unit": "V"},
+        "fields": {"a": {"type": "u8", "reports": "integer", "unit": "V", "display_unit": "V"},
                    "b": {"type": "u8", "reports": "integer"}},
     }
 

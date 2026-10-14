@@ -31,7 +31,7 @@ VALUES = {
     "bytes format": ["hex", "hex:upper", "base64", "array"],
     "bitfield_string part format": ["decimal", "hex", "hex:upper"],
     "encoding": ["sign_magnitude", "bcd", "gray"],
-    "compute op": ["add", "sub", "mul", "div", "mod", "idiv"],
+    "compute op": ["add", "sub", "mul", "div", "mod", "idiv", "pow"],
     "guard op": ["gt", "gte", "lt", "lte", "eq", "ne"],
     "transform stage": ["round", "floor", "ceiling", "clamp", "sqrt", "abs", "pow", "log",
                         "log10"],

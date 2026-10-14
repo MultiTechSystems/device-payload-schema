@@ -61,7 +61,7 @@ public class TransformStage
     public bool Log10 { get; set; }
     public bool Log { get; set; }
     public double? Pow { get; set; }
-    /// <summary>`even` (the default) or `away` from zero, for {op: round} (PS-390).</summary>
+    /// <summary>`even` (the default), `away` from zero or `up` toward +infinity, for {op: round} (PS-390).</summary>
     public string? Ties { get; set; }
     /// <summary>Bound stages (PS-115). C# had none and passed the value through.</summary>
     public double? Floor { get; set; }
