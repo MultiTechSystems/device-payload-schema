@@ -1530,8 +1530,9 @@ function encCaseClaims(fields, optional) {             // _case_claims
     }
     if ("match" in f && !f.type) { out = out.concat(encMatchClaims(f.match)); return; }
     if (!f.name || String(f.name).charAt(0) === "_") return;
-    // A literal or computed field claims its name, never required (no-silent-empty).
-    if (encIsLiteral(f) || encComputed(f) || encIsEcho(f)) { out.push([f, true]); return; }
+    // A literal or computed field claims its name, never required (no-silent-empty), and a
+    // checksum is never taken from the input (PS-587).
+    if (encIsLiteral(f) || encComputed(f) || encIsEcho(f) || f.checksum) { out.push([f, true]); return; }
     // PS-551 (CR-2026-141): a peek the fields after it fix need not be given.
     out.push([f, !!optional || f.optional === true || covered.indexOf(f) >= 0]);
   });
@@ -1748,6 +1749,7 @@ function encEmit(fr, bytes, carried) {
   }
   for (var c = 0; c < bytes.length; c++) encCover(fr, offset + c, encCov(bytes, c));
   (bytes.pk || []).forEach(function (pk) { fr.pk.push(encShifted(pk, offset)); });
+  (bytes.ck || []).forEach(function (c) { fr.ck.push({ p: c.p + offset, f: c.f, endian: c.endian }); });
   (bytes.ec || []).forEach(function (ec) { fr.ec.push(encEchoShifted(ec, offset)); });
   var merged = [];
   for (var i = 0; i < bytes.length; i++) merged.push(i < shared ? (bytes[i] | fr.pend[i]) : bytes[i]);
@@ -1798,6 +1800,40 @@ function encCover(fr, at, mask) { fr.cov[at] = (fr.cov[at] || 0) | mask; }
 
 function encShifted(pk, by) {
   return { p: pk.p + by, size: pk.size, endian: pk.endian, start: pk.start, width: pk.width, raw: pk.raw, name: pk.name };
+}
+
+/* PS-587 (CR-2026-174): a checksum is written as zeros and computed once the frame is
+ * finished (fill_checksums). An array's `ck` lists each placeholder: {p, f, endian}. */
+var ENC_CK_SIZE = { u8: 1, u16: 2, u24: 3, u32: 4, u64: 8, uint8: 1, uint16: 2, uint24: 3, uint32: 4, uint64: 8 };
+
+function encChecksumUnwritten(name) {                  // checksum_unwritten_message
+  return "Field '" + name + "': the bytes its checksum covers are not all written when it is reached (PS-587)";
+}
+
+function encChecksumPlaceholder(out, f, fr, ctx) {    // _checksum_placeholder
+  // A tlv entry or a repeat element or trailer is encoded apart from the frame.
+  if (fr.pend.length || ctx.d564) encFail(encChecksumUnwritten(f.name));
+  var endian = (f.endian === "little" || f.endian === "big") ? f.endian : ctx.endian;
+  out.ck = out.ck || [];
+  out.ck.push({ p: out.length, f: f, endian: endian });
+  (ctx.ckOpen = ctx.ckOpen || []).push(f);
+  for (var i = 0; i < ENC_CK_SIZE[f.type]; i++) out.push(0);
+}
+
+function encFillChecksums(out, ctx) {                 // fill_checksums
+  (out.ck || []).slice().sort(function (a, b) { return a.p - b.p; }).forEach(function (c) {
+    var spec = c.f.checksum, from = spec["from"] || 0, size = ENC_CK_SIZE[c.f.type];
+    if (from > c.p) encFail(encChecksumUnwritten(c.f.name));
+    var v = checksumOf(spec["algo"], out, from, c.p, spec["seed"] || 0);
+    for (var i = 0; i < size; i++) {
+      var shift = c.endian === "little" ? i : size - 1 - i;
+      out[c.p + i] = shift < 4 ? (v >>> (8 * shift)) & 0xFF : 0;
+    }
+    var k = ctx.ckOpen.indexOf(c.f);
+    if (k >= 0) ctx.ckOpen.splice(k, 1);
+  });
+  // One encoded apart from the frame - a tlv entry, a repeat element - never reached it.
+  if (ctx.ckOpen && ctx.ckOpen.length) encFail(encChecksumUnwritten(ctx.ckOpen[0].name));
 }
 
 function encPeekBytes(value, start, width, size, endian) {
@@ -2191,7 +2227,7 @@ function encListIn(out, fields, data, ctx, top, entry) {
   data = encDerive(fields, data, ctx);
   // CR-2026-136: a frame laid out as a decoder reads it (FrameBuffer). A bit range or
   // bool that does not consume leaves its bytes pending, and the next field's are ORed in.
-  var fr = { out: [], pend: [], cov: {}, pk: [], ec: [] };
+  var fr = { out: [], pend: [], cov: {}, pk: [], ck: [], ec: [] };
   // PS-564 (TailLevel): bytes an item adds go to the checks earlier items registered.
   var tl = { checks: [], size: null, mark: 0 };
   function tlClose() {
@@ -2221,6 +2257,10 @@ function encListIn(out, fields, data, ctx, top, entry) {
   if (fr.pk.length) {
     out.pk = out.pk || [];
     fr.pk.forEach(function (pk) { out.pk.push(encShifted(pk, base)); });
+  }
+  if (fr.ck.length) {
+    out.ck = out.ck || [];
+    fr.ck.forEach(function (c) { out.ck.push({ p: c.p + base, f: c.f, endian: c.endian }); });
   }
   if (fr.ec.length) {
     out.ec = out.ec || [];
@@ -2263,6 +2303,7 @@ function encListIn(out, fields, data, ctx, top, entry) {
       return;
     }
     if (encIsLiteral(f)) return;
+    if (f.checksum) { encChecksumPlaceholder(out, f, fr, ctx); return; }   // PS-587
     if ("value" in f) { encField(out, f, f.value, ctx); return; }
     var value;
     // A nameless field other than a skip is refused at load (PS-553); it was written
@@ -2302,7 +2343,7 @@ function encListIn(out, fields, data, ctx, top, entry) {
 
 function encodeRoot(fields, data, endian) {
   // wa: PS-537's warnings, reported after the others as the reference reports them.
-  var ctx = { endian: endian, w: [], wa: [], t564: [], d564: 0 }, out = [];
+  var ctx = { endian: endian, w: [], wa: [], t564: [], d564: 0, ckOpen: [] }, out = [];
   ENC_SCOPE = fields;
   if (data && typeof data === "object" && ("_decode" in data || "_meta" in data)) {
     // PS-573: a decode record given in the input as `_decode`; `_meta` is not input.
@@ -2321,6 +2362,7 @@ function encodeRoot(fields, data, endian) {
     var selected = encRemainingSelection(c.m, c.tail);
     if (selected !== c.chosen) encFail(encRemainingMismatch(c.m, c.tail, selected, c.chosen));
   });
+  encFillChecksums(out, ctx);                            // PS-587 (CR-2026-174)
   if (!out.length) {
     var empty = encEmptyPayloadError(fields, data || {});   // PS-442
     if (empty) encFail(empty);
@@ -2991,6 +3033,102 @@ def ref_to_js(ref: str) -> str:
     return str(ref)
 
 
+NORMALIZE_RUNTIME_JS = r'''
+// normalizeUplink (CR-2026-179, PS-598, PS-599): places each field that declares a
+// `semantic` at its TTN normalized path, in TTN's unit. A port of the reference's
+// run_normalize_plan(); NORMALIZE_PLAN is its normalize_plan() of this schema.
+var NORMALIZE_CONVERSIONS = {
+  'degF': function (x) { return (x - 32) * 5 / 9; },
+  'mV': function (x) { return x / 1000; },
+  'Pa': function (x) { return x / 100; },
+  'kPa': function (x) { return x * 10; },
+  'bar': function (x) { return x * 1000; },
+  'inHg': function (x) { return x * 33.86388640341; },
+  'km/h': function (x) { return x / 3.6; },
+  'mph': function (x) { return x * 0.44704; },
+  'knots': function (x) { return x * 1852 / 3600; },
+  'fraction': function (x) { return x * 100; }
+};
+function normAt(node, at) {
+  for (var i = 0; i < at.length; i++) {
+    node = (node !== null && typeof node === 'object' && !Array.isArray(node)) ? node[at[i]] : undefined;
+  }
+  return node;
+}
+function normMeasurement(plan, data, warnings) {
+  var out = {};
+  for (var s = 0; s < plan.length; s++) {
+    var step = plan[s], path = step.path, present = [];
+    for (var f = 0; f < step.fields.length; f++) {
+      var v = normAt(data, step.fields[f].at);
+      if (v !== undefined && v !== null) present.push([step.fields[f], v]);
+    }
+    if (!present.length) continue;
+    if (step.fields.length > 1) {
+      warnings.push(path + ': declared by ' + step.fields.map(function (e) {
+        return "'" + e.at.join('.') + "'"; }).join(', ') + '; every value on it is left out (PS-598)');
+      continue;
+    }
+    var entry = present[0][0], value = present[0][1], where = entry.at.join('.');
+    if (entry.rule === 'none') {
+      warnings.push(path + ": field '" + where + "' " + entry.how + '; left out (PS-599)');
+      continue;
+    }
+    if (entry.rule === 'convert') {
+      if (typeof value !== 'number') {
+        warnings.push(path + ": field '" + where + "' is not a number; left out (PS-599)");
+        continue;
+      }
+      value = NORMALIZE_CONVERSIONS[entry.how](value);
+    }
+    var parts = path.split('.'), node = out;
+    for (var p = 0; p < parts.length - 1; p++) {
+      if (node[parts[p]] === undefined) node[parts[p]] = {};
+      node = node[parts[p]];
+    }
+    node[parts[parts.length - 1]] = value;
+  }
+  return out;
+}
+function normEmpty(o) { for (var k in o) { return false; } return true; }
+function normalizeUplink(input) {
+  var d = (input && input.data) || {}, warnings = [], msgs = NORMALIZE_PLAN.messages, chosen = null;
+  var fPort = input ? input.fPort : undefined;
+  if (!NORMALIZE_PLAN.ports) {
+    chosen = msgs.length ? msgs[0] : null;
+  } else if (fPort !== undefined && fPort !== null) {
+    for (var i = 0; i < msgs.length && !chosen; i++) if (msgs[i].port === String(fPort)) chosen = msgs[i];
+    for (var j = 0; j < msgs.length && !chosen; j++) if (msgs[j].port === 'default') chosen = msgs[j];
+  } else {
+    var declared = {};
+    msgs.forEach(function (m) { m.names.forEach(function (n) { declared[n] = true; }); });
+    var fits = msgs.filter(function (m) {
+      if (m.open) return true;
+      for (var k in d) {
+        if (Object.prototype.hasOwnProperty.call(declared, k) && m.names.indexOf(k) < 0) return false;
+      }
+      return true;
+    });
+    var shapes = {};
+    fits.forEach(function (m) { shapes[m.shape] = true; });
+    if (Object.keys(shapes).length === 1) chosen = fits[0];
+    else if (fits.length) warnings.push('normalizeUplink cannot tell which port entry decoded this data; nothing is placed (PS-598)');
+  }
+  if (!chosen) return { data: {}, warnings: warnings };
+  var base = normMeasurement(chosen.plan, d, warnings), measurements = [];
+  chosen.repeats.forEach(function (r) {
+    var list = normAt(d, r.at);
+    if (!Array.isArray(list)) return;
+    list.forEach(function (item) {
+      var m = normMeasurement(r.plan, r.element ? { value: item } : item, warnings);
+      if (!normEmpty(m)) measurements.push(m);
+    });
+  });
+  if (measurements.length) return { data: (normEmpty(base) ? [] : [base]).concat(measurements), warnings: warnings };
+  return { data: base, warnings: warnings };
+}
+'''
+
 class TS013Generator:
     def __init__(self, schema: Dict[str, Any], source: str = '', slim: bool = False):
         # `slim` builds a decode-only codec: no encoder, and no commentary. A generated
@@ -3449,6 +3587,36 @@ function bitRange(bytes, off, width, signed) {
   var text = decimalOf(out), v = Number(text);
   if (v <= SAFE_INTEGER) return neg ? -v : v;
   return neg ? '-' + text : text;
+}
+
+/* PS-585 (CR-2026-174): sum8, xor8, crc8/smbus and crc16/kermit over buf[from:to]. */
+function checksumOf(algo, buf, from, to, seed) {
+  var v = algo === "sum8" || algo === "xor8" ? (seed || 0) : 0, k, b;
+  for (var i = from; i < to; i++) {
+    b = buf[i];
+    if (algo === "sum8") v = (v + b) & 0xFF;
+    else if (algo === "xor8") v ^= b;
+    else if (algo === "crc8/smbus") {
+      v ^= b;
+      for (k = 0; k < 8; k++) v = v & 0x80 ? ((v << 1) ^ 0x07) & 0xFF : (v << 1) & 0xFF;
+    } else {
+      v ^= b;
+      for (k = 0; k < 8; k++) v = v & 1 ? (v >>> 1) ^ 0x8408 : v >>> 1;
+    }
+  }
+  return v;
+}
+
+/* PS-586: the check value read at `at` against the bytes it covers; an error, or with
+ * on_mismatch: warn a warning. */
+function checkChecksum(buf, at, carried, spec, name, wn) {
+  var from = spec["from"] || 0;
+  if (from > at) throw new Error("Field '" + name + "': the checksum range starts at byte " + from + ", after the field at byte " + at + " (PS-585)");
+  var v = checksumOf(spec["algo"], buf, from, at, spec["seed"] || 0), got = Number(carried);
+  if (v === got) return;
+  var msg = "Field '" + name + "': " + spec["algo"] + " over bytes " + from + " to " + (at - 1) + " is 0x" +
+    v.toString(16).toUpperCase() + ", but the frame carries 0x" + got.toString(16).toUpperCase() + " (PS-586)";
+  if (spec["on_mismatch"] === "warn") wn.push(msg); else throw new Error(msg);
 }
 
 function readU(buf, pos, size, endian) {
@@ -4744,6 +4912,10 @@ function writeS(buf, pos, size, value, endian) {
             lines.append(f'{i}  pos += 4;')
         else:
             lines.append(f'{i}  var {js_name} = {read_fn}(buf, pos, {sz}, {endian_arg});')
+            if isinstance(field.get('checksum'), dict):
+                # PS-586 (CR-2026-174): verified against the bytes before it.
+                lines.append(f'{i}  checkChecksum(buf, pos, {js_name}, '
+                             f'{json.dumps(field["checksum"])}, {json.dumps(str(name))}, wn);')
             lines.append(f'{i}  pos += {sz};')
             if field.get('sentinel'):
                 # PS-427: the sentinel is the bit pattern, before any encoding.
@@ -5734,6 +5906,14 @@ function writeS(buf, pos, size, value, endian) {
                 lines.append('  }')
                 lines.append('}')
 
+        from schema_interpreter import has_semantic, normalize_plan
+        if has_semantic(self.schema):
+            # PS-598: a schema declaring `semantic` gets normalizeUplink(), which runs the
+            # reference's normalize_plan() over decodeUplink's data.
+            lines.append('')
+            lines.append('var NORMALIZE_PLAN = %s;' % json.dumps(normalize_plan(self.schema),
+                                                                ensure_ascii=False))
+            lines.append(NORMALIZE_RUNTIME_JS.strip('\n'))
         return self._restore_output_keys('\n'.join(lines))
 
     def _field_names(self) -> Set[str]:

@@ -177,9 +177,6 @@ def get_field_id(field: Dict) -> int:
     ipso = field.get('ipso')
     if isinstance(ipso, dict) and isinstance(ipso.get('object'), int):
         return ipso['object'] & 0xFFFF
-    sem = field.get('semantic')
-    if isinstance(sem, dict) and isinstance(sem.get('ipso'), int):
-        return sem['ipso'] & 0xFFFF
     return 0
 
 
@@ -202,6 +199,9 @@ C_UNSUPPORTED_KEYS = {
     "guard": "the C interpreter has no guard",
     "encoding": "the C interpreter has no sign_magnitude/bcd/gray encodings",
     "numeral": "the C interpreter holds ascii text, not the integer it spells (PS-560)",
+    # CR-2026-174: the C interpreter checks and computes one (field_set_checksum), but a
+    # field record has no slot for its algorithm, seed, `from` or `on_mismatch`.
+    "checksum": "this format has no checksum record (PS-585)",
     "template": "the C interpreter has no template string; a string joined from values is not built (PS-590)",
     "sentinel": "the C interpreter has no sentinel (PS-427)",
     "out_of_range": "the C interpreter has no out_of_range: omit (PS-428)",

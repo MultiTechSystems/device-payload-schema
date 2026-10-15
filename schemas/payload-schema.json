@@ -32,6 +32,45 @@
           "type": "string",
           "description": "On a type: string field that declares no value: text joined from values decoded earlier, ${name} (as name_from writes it) or ${name:format} (a part format of PS-430), and $$ for a literal $. Reads and writes no bytes (PS-590 to PS-592)."
         },
+        "checksum": {
+          "type": "object",
+          "description": "On an unsigned integer field: the check value over the bytes from `from` to the byte before it, verified on decode and computed on encode (PS-585 to PS-587).",
+          "additionalProperties": false,
+          "required": [
+            "algo"
+          ],
+          "properties": {
+            "algo": {
+              "enum": [
+                "sum8",
+                "xor8",
+                "crc8/smbus",
+                "crc16/kermit"
+              ]
+            },
+            "seed": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 255,
+              "description": "Starting value, sum8 and xor8 only (default 0)."
+            },
+            "from": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Byte offset where the covered range starts (default 0)."
+            },
+            "on_mismatch": {
+              "enum": [
+                "error",
+                "warn"
+              ],
+              "description": "What a decoder does on a mismatch (default error, PS-586)."
+            },
+            "description": {
+              "type": "string"
+            }
+          }
+        },
         "consume": {
           "type": "integer",
           "minimum": 0,
@@ -108,18 +147,8 @@
           "description": "The value an encoder writes where the input omits the field (PS-554); an enum's unmapped label (PS-068)"
         },
         "semantic": {
-          "type": "object",
-          "properties": {
-            "ipso": {
-              "type": "integer",
-              "description": "IPSO Smart Object ID"
-            },
-            "senml": {
-              "type": "string",
-              "description": "SenML name"
-            }
-          },
-          "description": "Semantic mapping for output formats"
+          "type": "string",
+          "description": "A TTN normalized measurement path, such as air.temperature (PS-470); carried in _meta (PS-600) and placed by a generated normalizeUplink (PS-598, PS-599)"
         },
         "description": {
           "type": "string",

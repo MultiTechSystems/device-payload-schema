@@ -1,0 +1,231 @@
+# CR-2026-179 (0.5.7, PS-470, PS-597 to PS-600): `semantic` is a TTN normalized path. It is a
+# string (PS-470), `_meta` carries it (PS-600), a validator warns on an unknown path, an
+# unconvertible unit and a duplicate path (PS-597), and a generated codec's normalizeUplink()
+# places each value at its path in TTN's unit, by a closed list of conversions, leaving out
+# what it cannot confirm and every value on a duplicate path (PS-598, PS-599).
+#
+# One case list. It mirrors the spec prototype's TestCR2026179Semantic. Readers:
+#   - tests/test_cr_2026_179_cases.py: every case, through the reference interpreter, the
+#     validator, normalize() and the generated codec's normalizeUplink() (under node);
+#   - Go (go/schema/cr179_test.go), Java (CR2026179Test.java) and C# (CR2026_179Tests.cs):
+#     the `meta` and `error` cases, since they produce `_meta` and load schemas but generate
+#     no codec. C has no `_meta` and no `semantic`.
+#
+# `schema` is YAML text. A case is one of
+#   - `payload` (hex) and `meta`: each named top-level field's `_meta` entry's `semantic`;
+#   - `error`: the text the schema's load error contains (the prototype's check_field);
+#   - `payload`, optional `fport`, and `normalized`: normalizeUplink()'s data (numbers within
+#     1e-9 relative), `normalize_warnings` (how many it reports, default 0) and
+#     `semantic_warnings` (how many PS-597 warnings the validator gives, default 0). `fport`
+#     is given to the decoder; `normalize_fport` (default none, as TTN calls it) to normalize.
+
+cases:
+
+- name: meta_carries_semantic
+  schema: "name: t\nversion: 1\nfields:\n  - {name: t, type: u8, unit: Cel, semantic: air.temperature}\n"
+  payload: "10"
+  meta: {t: air.temperature}
+
+- name: meta_carries_an_unknown_path_unchanged
+  schema: "name: t\nversion: 1\nfields:\n  - {name: t, type: u8, unit: Cel, semantic: temperature}\n  - {name: u, type: u8}\n"
+  payload: "1011"
+  meta: {t: temperature, u: null}
+
+- name: a_number_is_rejected
+  schema: "name: t\nversion: 1\nfields:\n  - {name: t, type: u8, semantic: 3303}\n"
+  error: "The semantic of 't' is a string naming a normalized measurement type, such as air.temperature (PS-470)"
+
+- name: the_legacy_ipso_mapping_is_rejected
+  schema: "name: t\nversion: 1\nfields:\n  - {name: t, type: u8, semantic: {ipso: 3303}}\n"
+  error: "The semantic of 't' is a string naming a normalized measurement type, such as air.temperature (PS-470)"
+
+- name: a_list_is_rejected_at_depth
+  schema: "name: t\nversion: 1\nfields:\n  - name: o\n    type: object\n    fields:\n      - {name: m, type: u8, semantic: [soil.moisture]}\n"
+  error: "The semantic of 'm' is a string naming a normalized measurement type, such as air.temperature (PS-470)"
+
+- name: placement_and_conversions
+  schema: |
+    name: t
+    version: 1
+    endian: big
+    fields:
+      - {name: temperature, type: s16, div: 10, unit: "°C", semantic: air.temperature}
+      - {name: humidity, type: u8, unit: "%RH", semantic: air.relativeHumidity}
+      - {name: pressure, type: u24, unit: Pa, semantic: air.pressure}
+      - {name: battery, type: u16, unit: mV, semantic: battery}
+      - {name: wind, type: u8, unit: km/h, semantic: wind.speed}
+      - {name: leak, type: bool, bit: 0, consume: 1, semantic: water.leak}
+  payload: "00D7 2D 018B2C 0CE4 24 01"
+  normalized:
+    air: {temperature: 21.5, relativeHumidity: 45, pressure: 1011.64}
+    battery: 3.3
+    wind: {speed: 10.0}
+    water: {leak: true}
+
+- name: fahrenheit_inhg_knots_and_fraction
+  schema: |
+    name: t
+    version: 1
+    fields:
+      - {name: tf, type: u8, unit: "°F", semantic: air.temperature}
+      - {name: p, type: u8, div: 10, unit: inHg, semantic: air.pressure}
+      - {name: w, type: u8, unit: knots, semantic: wind.speed}
+      - {name: m, type: u8, div: 100, senml: {unit: /}, semantic: soil.moisture}
+  payload: "D4 FF 0A 19"
+  normalized:
+    air: {temperature: 100.0, pressure: 863.529103286955}
+    wind: {speed: 5.144444444444445}
+    soil: {moisture: 25.0}
+
+- name: kpa_bar_mph
+  schema: |
+    name: t
+    version: 1
+    fields:
+      - {name: a, type: u8, div: 10, unit: kPa, semantic: air.pressure}
+      - {name: b, type: u8, div: 100, unit: bar, semantic: soil.depth}
+      - {name: c, type: u8, unit: mph, semantic: wind.speed}
+  payload: "64 05 0A"
+  normalized:
+    air: {pressure: 100.0}
+    wind: {speed: 4.4704}
+  normalize_warnings: 1
+  semantic_warnings: 1
+
+- name: an_unconfirmed_unit_is_left_out_with_a_warning
+  schema: |
+    name: t
+    version: 1
+    fields:
+      - {name: battery, type: u8, unit: "%", semantic: battery}
+      - {name: temp, type: u8, semantic: air.temperature}
+  payload: "5014"
+  normalized: {}
+  normalize_warnings: 2
+  semantic_warnings: 2
+
+- name: a_duplicate_path_places_neither
+  schema: |
+    name: t
+    version: 1
+    endian: big
+    fields:
+      - {name: atmospheric_pressure, type: u16, unit: hPa, semantic: air.pressure}
+      - {name: vapor_pressure, type: u16, unit: hPa, semantic: air.pressure}
+      - {name: t, type: u8, unit: Cel, semantic: air.temperature}
+  payload: "03F2 0010 15"
+  normalized:
+    air: {temperature: 21}
+  normalize_warnings: 1
+  semantic_warnings: 1
+
+- name: an_unknown_path_warns_and_still_loads
+  schema: "name: t\nversion: 1\nfields:\n  - {name: t, type: u8, unit: Cel, semantic: temperature}\n"
+  payload: "15"
+  normalized: {}
+  semantic_warnings: 1
+
+- name: a_repeat_gives_one_measurement_per_element
+  schema: |
+    name: t
+    version: 1
+    endian: big
+    fields:
+      - {name: battery, type: u16, unit: mV, semantic: battery}
+      - name: history
+        type: repeat
+        until: end
+        fields:
+          - {name: t, type: s16, div: 10, unit: "°C", semantic: air.temperature}
+  payload: "0CE4 00D7 00D6"
+  normalized:
+    - {battery: 3.3}
+    - {air: {temperature: 21.5}}
+    - {air: {temperature: 21.4}}
+
+- name: an_element_repeat
+  schema: |
+    name: t
+    version: 1
+    fields:
+      - name: samples
+        type: repeat
+        until: end
+        element: {type: u8, unit: Cel, semantic: soil.temperature}
+  payload: "0A0B"
+  normalized:
+    - {soil: {temperature: 10}}
+    - {soil: {temperature: 11}}
+
+- name: an_absent_field_is_left_out
+  schema: "name: t\nversion: 1\nfields:\n  - {name: t, type: u8, unit: Cel, semantic: air.temperature, sentinel: [255]}\n"
+  payload: "FF"
+  normalized: {}
+
+- name: an_object_member_and_a_case
+  schema: |
+    name: t
+    version: 1
+    fields:
+      - name: probe
+        type: object
+        fields:
+          - {name: moisture, type: u8, unit: "/100", semantic: soil.moisture}
+      - match:
+          length: 1
+          cases:
+            1: [{name: co2, type: u8, unit: ppm, semantic: air.co2}]
+            2: [{name: lux, type: u8, unit: lx, semantic: air.lightIntensity}]
+  payload: "2D 01 64"
+  normalized:
+    soil: {moisture: 45}
+    air: {co2: 100}
+
+- name: a_port_found_from_the_data
+  schema: |
+    name: t
+    version: 1
+    ports:
+      1:
+        fields:
+          - {name: t, type: u8, unit: Cel, semantic: air.temperature}
+      2:
+        fields:
+          - {name: rh, type: u8, unit: "%RH", semantic: air.relativeHumidity}
+  payload: "32"
+  fport: 2
+  normalized:
+    air: {relativeHumidity: 50}
+
+- name: a_port_given
+  schema: |
+    name: t
+    version: 1
+    ports:
+      1:
+        fields:
+          - {name: v, type: u8, unit: Cel, semantic: air.temperature}
+      2:
+        fields:
+          - {name: v, type: u8, unit: Cel, semantic: soil.temperature}
+  payload: "14"
+  fport: 2
+  normalize_fport: 2
+  normalized:
+    soil: {temperature: 20}
+
+- name: ports_the_data_cannot_tell_apart
+  schema: |
+    name: t
+    version: 1
+    ports:
+      1:
+        fields:
+          - {name: v, type: u8, unit: Cel, semantic: air.temperature}
+      2:
+        fields:
+          - {name: v, type: u8, unit: Cel, semantic: soil.temperature}
+  payload: "14"
+  fport: 2
+  normalized: {}
+  normalize_warnings: 1
