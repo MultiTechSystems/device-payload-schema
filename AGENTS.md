@@ -3321,7 +3321,7 @@ improved. The Go, Java and C# corpus runners write per-vector reports only when
     which now resolves on the **YAML node tree** before any value is built (`resolveRefNodes`;
     `ParseSchema` decodes `raw` and builds `keyOrder` from the resolved tree, so a template's
     copy keeps its source key order - a match's case order, PS-563, and `_meta` read it; a
-    JSON-only document is turned into a node tree first); Java `Schema.expandRawRefs`; C#
+    JSON-only document is turned into a node tree first; the decoded value is then given string keys throughout, `stringKeyedDocument`, as the map resolver left it - a case or port key otherwise stays `map[any]any` and the walks that read `map[string]any`, such as the PS-442 guard's `declaredSources`, miss it); Java `Schema.expandRawRefs`; C#
     `SchemaParser.ExpandRefs`. The validator now checks the resolved schema throughout
     (`validate_schema_structure`), the TS013 generator and `generate_output_schema.py` resolve
     first, and `tools/schema_binary.py` resolves before converting, so **C reads templates and
