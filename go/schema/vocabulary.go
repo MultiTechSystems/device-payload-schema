@@ -153,6 +153,10 @@ func checkTypeVocabulary(raw map[string]any) error {
 					}
 				}
 			}
+			// PS-532, PS-590 (CR-2026-176): a template string writes no object or repeat.
+			if err := checkTemplateAggregates(field, aggregates); err != nil {
+				return err
+			}
 			if spelling == "object" || spelling == "repeat" {
 				if name != "" {
 					aggregates[name] = true
@@ -303,6 +307,11 @@ func checkFieldRules(field map[string]any, at string) error {
 		if typ, _ := field["type"].(string); !unsignedTypes[typ] {
 			return fmt.Errorf("%s: encoding applies only to an unsigned integer type uN, not %v (PS-422)", at, field["type"])
 		}
+	}
+	// PS-361, PS-590, PS-430 (CR-2026-176): `template` on a string field without `value`,
+	// a string field declaring one of the two, and each ${name:format} a part format.
+	if err := checkStringTemplate(field); err != nil {
+		return err
 	}
 	// PS-560 (CR-2026-150): numeral is decimal or hex, on an ascii field only.
 	if err := checkNumeral(field); err != nil {

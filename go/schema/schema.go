@@ -119,6 +119,10 @@ type Field struct {
 	Encoding string `json:"encoding,omitempty" yaml:"encoding,omitempty"`
 	// Numeral is `decimal` or `hex` on an ascii field reported as an integer (PS-560).
 	Numeral string `json:"numeral,omitempty" yaml:"numeral,omitempty"`
+	// Template is a string field's text joined from earlier values (PS-590, CR-2026-176);
+	// HasTemplate tells an empty template from none.
+	Template    string `json:"template,omitempty" yaml:"template,omitempty"`
+	HasTemplate bool   `json:"-" yaml:"-"`
 	// Nul is an ascii field's treatment of 0x00 bytes: trailing (default), stop or drop
 	// (PS-534). Terminator ends a variable-length ascii field in place of `length`
 	// (PS-593); HasTerminator tells byte 0 from none.
@@ -1279,6 +1283,10 @@ func parseFieldMap(fm map[string]any, node *yaml.Node) Field {
 	}
 	if numeral, ok := fm["numeral"].(string); ok {
 		f.Numeral = numeral
+	}
+	if template, ok := fm["template"].(string); ok {
+		f.Template = template
+		f.HasTemplate = true
 	}
 	if nul, ok := fm["nul"].(string); ok {
 		f.Nul = nul
@@ -2719,8 +2727,14 @@ func decodeField(field Field, ctx *DecodeContext) (any, error) {
 		// A literal reads no bytes (PS-357), and `string` is only ever a literal: a
 		// string read from the payload is `ascii` (PS-361). This read the bytes where a
 		// length was declared and reported nil where none was.
+		if field.HasTemplate {
+			// PS-590 to PS-592 (CR-2026-176): joined from earlier values, reading no bytes;
+			// omitted where a reference has no value.
+			value = ctx.renderStringTemplate(field)
+			break
+		}
 		if field.Value == nil {
-			return nil, fmt.Errorf("field '%s': type string declares no value; a string read from the payload is type ascii (PS-361)", field.Name)
+			return nil, errors.New(stringNeitherMessage(field.Name))
 		}
 		value = field.Value
 
@@ -3973,7 +3987,7 @@ func fixedElementSizeKnown(fields []Field) (int, bool) {
 		// the schema's own `number` spelling was counted as a one-byte read.
 		case f.Type == TypeNumber || f.Type == "number" || f.IntegerResult:
 			continue
-		case (f.Type == TypeString || f.Type == TypeStringLower) && f.Value != nil:
+		case (f.Type == TypeString || f.Type == TypeStringLower) && (f.Value != nil || f.HasTemplate):
 			continue
 		case f.Type == TypeBoolean:
 			continue
@@ -5788,8 +5802,8 @@ func encodeFieldList(fields []Field, data map[string]any, ctx *EncodeContext) er
 		// six — so with the order reversed they would reach encodeField, whose
 		// switch has no case for `number`, and a schema that encoded fine would
 		// start reporting "cannot encode type".
-		if field.Type == TypeNumber || field.Type == "number" {
-			continue
+		if field.Type == TypeNumber || field.Type == "number" || isStringTemplate(field) {
+			continue // PS-590: a template string writes nothing, its input ignored
 		}
 
 		// `skip` is padding: it contributes its own bytes and takes no input, so
@@ -6278,8 +6292,9 @@ func encodeField(field Field, value any, ctx *EncodeContext) error {
 		// A boolean literal came from no bytes, so it writes none (PS-359).
 
 	case TypeAscii, TypeAsciiLower, TypeString, TypeStringLower:
-		if (field.Type == TypeString || field.Type == TypeStringLower) && field.Value != nil {
-			// A literal came from no bytes, so it writes none (PS-359).
+		if (field.Type == TypeString || field.Type == TypeStringLower) && (field.Value != nil || field.HasTemplate) {
+			// A literal or a template string came from no bytes, so it writes none
+			// (PS-359, PS-590).
 			break
 		}
 		if value != nil {

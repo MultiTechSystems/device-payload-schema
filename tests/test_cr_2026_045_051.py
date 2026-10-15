@@ -85,6 +85,8 @@ def test_a_constant_is_written_whatever_the_input_says():
 def test_a_string_with_no_value_is_an_error_not_a_read():
     schema = {"name": "p", "fields": [{"name": "s", "type": "string", "length": 2}]}
     assert any("PS-361" in e for e in SchemaInterpreter(schema).decode(b"ab").errors)
-    assert any("PS-361" in w for w in validate_schema(schema).schema_warnings)
+    # CR-2026-176 made it a load error (PS-361 amended); it was a warning.
+    report = validate_schema(schema)
+    assert any("PS-361" in w for w in report.schema_errors + report.schema_warnings)
     with pytest.raises(ValueError, match="PS-361"):
         TS013Generator(schema).generate()

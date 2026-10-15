@@ -28,6 +28,10 @@
           ],
           "description": "On an ascii field: report its digit text as the integer it spells, in base 10 or base 16, strictly (PS-560, PS-561)."
         },
+        "template": {
+          "type": "string",
+          "description": "On a type: string field that declares no value: text joined from values decoded earlier, ${name} (as name_from writes it) or ${name:format} (a part format of PS-430), and $$ for a literal $. Reads and writes no bytes (PS-590 to PS-592)."
+        },
         "nul": {
           "enum": [
             "trailing",

@@ -42,7 +42,7 @@ func fieldDefault(f Field) (any, bool) {
 // isComputedField reports a field computed from others, which has no bytes of its own.
 func isComputedField(f Field) bool {
 	return f.Type == TypeNumber || f.Type == "number" || f.Type == TypeInteger ||
-		f.Type == "integer" || f.IntegerResult
+		f.Type == "integer" || f.IntegerResult || isStringTemplate(f) // PS-590
 }
 
 // isLiteralField reports a `string`, `number` or `boolean` field declaring `value`

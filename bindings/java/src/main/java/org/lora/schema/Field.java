@@ -273,6 +273,13 @@ public class Field {
     public void setLookupSequence(boolean value) { this.lookupIsSequence = value; }
     public Object getLookupDefault() { return lookupDefault; }
     public void setLookupDefault(Object value) { this.lookupDefault = value; }
+    /** A string field's `template` (PS-590, CR-2026-176), or null. */
+    private String template;
+    public String getTemplate() { return template; }
+    public void setTemplate(String value) { this.template = value; }
+    /** A `type: string` field declaring `template`: computed, reading no bytes (PS-590). */
+    public boolean isTemplate() { return type == FieldType.STRING && template != null; }
+
     public String getNameFrom() { return nameFrom; }
     public void setNameFrom(String value) { this.nameFrom = value; }
     public void setLookup(Map<Integer, Object> lookup) { this.lookup = lookup; }

@@ -586,6 +586,9 @@ function encEmptyPayloadError(fields, data) {
   return null;
 }
 
+function encComputed(f) {                             // COMPUTED_TYPES, or a template (PS-590)
+  return ENC_COMPUTED.indexOf(f.type) >= 0 || (f.type === "string" && "template" in f);
+}
 function encIsLiteral(f) {                            // is_literal
   return (f.type === "string" || f.type === "number" || f.type === "boolean") && "value" in f;
 }
@@ -804,7 +807,7 @@ function encByteGroup(out, f, data, ctx) {            // _encode_byte_group
     var g = members[i];
     if (!g || typeof g !== "object") continue;
     if ("endian" in g) encFail("byte_group member '" + (g.name || "?") + "' declares endian; the group's byte order is declared on the group (PS-364)");
-    if (ENC_COMPUTED.indexOf(g.type) >= 0 || encIsLiteral(g)) continue;   // no bits of its own
+    if (encComputed(g) || encIsLiteral(g)) continue;   // no bits of its own
     var name = g.name || "", v;
     if (!name) v = g["default"] === undefined ? 0 : g["default"];
     else if ("value" in g || name.charAt(0) === "_") v = encInternalValue(g, data);
@@ -1031,7 +1034,7 @@ function encBodyScore(body, data) {
       Object.keys(names).forEach(function (n) { if (has.call(data, n)) score++; });
       continue;
     }
-    if (!f.name || String(f.name).charAt(0) === "_" || (ENC_COMPUTED.indexOf(f.type) >= 0 && !encIsLiteral(f))) continue;
+    if (!f.name || String(f.name).charAt(0) === "_" || (encComputed(f) && !encIsLiteral(f))) continue;
     var key = f.name;
     if (f.name_from) { try { key = encResolveName(f, f.name, data); } catch (e) { key = null; } }
     if (key === null || !has.call(data, key)) continue;
@@ -1227,7 +1230,7 @@ function encNestedDiscriminator(m, data, label) {
   if (fb) branches.push(["default", fb]);
   function namesOf(fields) {
     return fields.filter(function (f) {
-      return f && f.name && String(f.name).charAt(0) !== "_" && ENC_COMPUTED.indexOf(f.type) < 0;
+      return f && f.name && String(f.name).charAt(0) !== "_" && !encComputed(f);
     }).map(function (f) { return f.name; });
   }
   var filled = [];
@@ -1329,7 +1332,7 @@ function encRepeatElementsBody(out, f, data, records, count, ctx) {
     // PS-542: the records do not say which element they came from.
     encFail("Repeat '" + name + "' has elements that yield several records, which cannot be encoded (PS-542)");
   }
-  if (f.present_if && rf.some(function (r) { return r && ENC_COMPUTED.indexOf(r.type) < 0 && !encIsLiteral(r); })) {
+  if (f.present_if && rf.some(function (r) { return r && !encComputed(r) && !encIsLiteral(r); })) {
     encFail("repeat field " + JSON.stringify(name) + " declares present_if and its elements read payload bytes, so the elements it dropped cannot be encoded (PS-387)");
   }
   if (count !== null && records.length !== count) {
@@ -1417,7 +1420,7 @@ function encClaimable(fields) {                       // _claimable_fields
       (f.flagged.groups || []).forEach(function (grp) { out = out.concat(encClaimable(grp.fields || [])); });
       return;
     }
-    if (!f.name || String(f.name).charAt(0) === "_" || ENC_COMPUTED.indexOf(f.type) >= 0) return;
+    if (!f.name || String(f.name).charAt(0) === "_" || encComputed(f)) return;
     out.push(f);
   });
   return out;
@@ -1543,7 +1546,7 @@ function encCoveredPeeks(fields) {
   (fields || []).forEach(function (f) {
     if (!f || typeof f !== "object") return;
     if (encIsPeekField(f)) { pending.push(f); return; }
-    if (ENC_COMPUTED.indexOf(f.type) >= 0 || encIsLiteral(f)) return;
+    if (encComputed(f) || encIsLiteral(f)) return;
     var construct = ["match", "tlv", "byte_group", "flagged", "$ref"].some(function (k) { return k in f; });
     var bits = typeof f.type === "string" && /[\[:<]/.test(f.type);
     if (!construct && !bits && ["skip", "object", "repeat", "bool"].indexOf(f.type) < 0) out = out.concat(pending);
@@ -1569,7 +1572,7 @@ function encCaseClaims(fields, optional) {             // _case_claims
     if (!f.name || String(f.name).charAt(0) === "_") return;
     // A literal or computed field claims its name, never required (no-silent-empty), and a
     // checksum is never taken from the input (PS-587).
-    if (encIsLiteral(f) || ENC_COMPUTED.indexOf(f.type) >= 0 || encIsEcho(f) || f.checksum) { out.push([f, true]); return; }
+    if (encIsLiteral(f) || encComputed(f) || encIsEcho(f) || f.checksum) { out.push([f, true]); return; }
     // PS-551 (CR-2026-141): a peek the fields after it fix need not be given.
     out.push([f, !!optional || f.optional === true || covered.indexOf(f) >= 0]);
   });
@@ -1668,7 +1671,7 @@ function encTlvBody(out, f, data, ctx) {
     if (isMap && c.type && c.type !== "object" && c.type !== "repeat") return false;
     if (c.type === "object" && !isMap && modes[c.name] !== "merge") return false;
     if (encIsLiteral(c)) return c.value === v;        // PS-359, PS-513
-    if (ENC_COMPUTED.indexOf(c.type) >= 0) return true;   // asks for its source (PS-434)
+    if (encComputed(c)) return true;   // asks for its source (PS-434)
     var took = encCaseTakes(c, v);
     return took[0] && (took[1] || !exactOnly);
   }
@@ -2053,7 +2056,7 @@ function encSizeSource(fields, ref) {                 // _size_source
 
 function encDerivable(src) {                          // _derivable
   if (!src || !src.name) return false;
-  if (ENC_COMPUTED.indexOf(src.type) >= 0 || encIsLiteral(src)) return false;
+  if (encComputed(src) || encIsLiteral(src)) return false;
   var keys = ["value", "name_from", "lookup", "mult", "div", "add", "transform", "polynomial", "encoding", "compute", "ref", "guard"];
   return !keys.some(function (k) { return k in src; });
 }
@@ -2133,7 +2136,7 @@ function encSame(a, b) {
 function encRecordedInputs(fields, data, d, ctx) {    // _recorded_inputs
   function internal(f) {
     var name = f.name;
-    if (typeof name !== "string" || name.charAt(0) !== "_" || ENC_COMPUTED.indexOf(f.type) >= 0 ||
+    if (typeof name !== "string" || name.charAt(0) !== "_" || encComputed(f) ||
         encIsLiteral(f) || "value" in f) return;
     var rec = encRecorded(ctx, "internal", f);
     if (rec === undefined) return;
@@ -2375,7 +2378,7 @@ function encListIn(out, fields, data, ctx, top, entry) {
       if (nested === null || typeof nested !== "object" || Array.isArray(nested)) encFail(encMissing(objKey));   // PS-551
       return encObject(out, f.fields || [], nested, ctx);
     }
-    if (ENC_COMPUTED.indexOf(type) >= 0) return;
+    if (encComputed(f)) return;
     if (type === "skip") {
       var n = typeof f.length === "string" ? 0 : Math.max(0, parseInt(f.length === undefined ? 1 : f.length, 10));
       // CR-2026-141 (padding): a skip's zeros fix no peek's bits and contradict none.
@@ -3609,6 +3612,41 @@ function partText(neg, mag, base, width) {
   return (neg ? '-' : '') + digits;
 }
 
+/* A template string field's text (PS-590 to PS-592, CR-2026-176), or undefined where a
+ * reference has no value. `parts` holds literal text and {js, name, fmt} references:
+ * `${name}` writes what a key template writes (PS-532) - a looked-up field's label from
+ * `lbl`, else the value bound, by String(); `${name:format}` writes the number bound
+ * (PS-523) through partText. A format given a value that is not an integer, or hex given a
+ * negative one, makes the field absent with a warning naming it (PS-591). */
+function tmplString(parts, field, vars, lbl, wn) {
+  var out = "", absent = false;
+  for (var k = 0; k < parts.length; k++) {
+    var p = parts[k];
+    if (typeof p === "string") { out += p; continue; }
+    var number = vars[p.js];
+    if (number === undefined || number === null) { absent = true; continue; }
+    if (p.fmt === null) {
+      var v = (p.js in lbl) ? lbl[p.js] : number;
+      if (v === undefined || v === null) { absent = true; continue; }
+      out += String(v);
+      continue;
+    }
+    var f = partFormat(p.fmt);
+    if (typeof number !== "number" || !isFinite(number) || Math.floor(number) !== number ||
+        (f.base.charAt(0) === "h" && number < 0)) {
+      var given = typeof number === "number" || typeof number === "boolean" ? String(number) : "'" + String(number) + "'";
+      wn.push("Field '" + field + "': ${" + p.name + ":" + p.fmt + "} is given " + given +
+              ", which the format cannot write, so the field is absent (PS-591)");
+      absent = true;
+      continue;
+    }
+    var mag = [], n = Math.abs(number);
+    do { mag.unshift(n % 256); n = Math.floor(n / 256); } while (n > 0);
+    out += partText(number < 0, mag, f.base, f.width);
+  }
+  return absent ? undefined : out;
+}
+
 /* One part of a bitfield_string, rendered in `fmt` (PS-430); `sdecimal` reads its bits as
  * two's complement of the part's width (PS-582). */
 function bitfieldPart(bytes, off, width, fmt) {
@@ -4643,9 +4681,35 @@ function writeS(buf, pos, size, value, endian) {
         # A string literal (spec "Literal Types"): a constant, read from no bytes.
         # `string` fell through to the integer path, which emitted a TODO and nothing,
         # so the key was silently missing from every generated codec.
+        if ftype == 'string' and 'template' in field and 'value' not in field:
+            # PS-590 to PS-592 (CR-2026-176): text joined from values decoded earlier,
+            # rendered by the runtime's tmplString; undefined where a reference has no value.
+            from schema_interpreter import STRING_TEMPLATE_RE
+            parts: List[Any] = []
+            template, last = str(field['template']), 0
+            for match in STRING_TEMPLATE_RE.finditer(template):
+                parts.append(template[last:match.start()])
+                if match.group(1) is None:
+                    parts.append('$')
+                else:
+                    parts.append({'js': to_js_name(match.group(1)), 'name': match.group(1),
+                                  'fmt': match.group(2)})
+                last = match.end()
+            parts.append(template[last:])
+            parts = [p for p in parts if p != '']
+            lines.append(f'{i}  var {js_name}_out = tmplString({json.dumps(parts)}, '
+                         f'{json.dumps(str(name))}, vars, lbl, wn);')
+            body = self._bind_js({k: v for k, v in field.items() if k != 'lookup'},
+                                 js_name, f'{js_name}_out')
+            if not name.startswith('_'):
+                guards, target = name_from_to_js(field, js_name)
+                body.extend(guards)
+                body.append(f'{target} = {js_name}_out;')
+            lines.append(f'{i}  if ({js_name}_out !== undefined) {{ ' + ' '.join(body) + ' }')
+            return lines
         if ftype == 'string' and 'value' not in field:
-            raise ValueError(f"Field '{name}': type string declares no value; a string read "
-                             f"from the payload is type ascii (PS-361)")
+            from schema_interpreter import string_neither_message
+            raise ValueError(string_neither_message(name))
         # A boolean literal likewise (PS-357, PS-519); its value is checked at load.
         if (ftype == 'string' and 'value' in field and not field.get('length')) or (
                 ftype == 'boolean' and 'value' in field):

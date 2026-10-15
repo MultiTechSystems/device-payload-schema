@@ -131,6 +131,10 @@ final class References {
                 } else if (k.equals("name_from") || (inSenml && k.equals("name"))) {
                     Matcher m = TEMPLATE_REFERENCE.matcher(s);
                     while (m.find()) names.add(m.group(1));
+                } else if (k.equals("template")) {
+                    // PS-590: `${name}` or `${name:format}` in a string field's template.
+                    Matcher m = TemplateStrings.REFERENCE.matcher(s);
+                    while (m.find()) names.add(m.group(1));
                 }
                 for (String n : names) if (!declared.contains(n)) ahead.add(new String[] {n, k});
             } else if (k.equals("default")) {

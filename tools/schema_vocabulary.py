@@ -168,6 +168,7 @@ VOCABULARY: Dict[str, Dict[str, Tuple[Tuple[str, ...], str]]] = {
         "nul": (_DECODERS, "trailing | stop | drop: how an ascii field treats its 0x00 bytes (PS-534)"),
         "terminator": (_DECODERS, "a byte 0 to 255 that ends a variable-length ascii field, in place of length (PS-593)"),
         "checksum": (_DECODERS, "a check value over earlier bytes, verified on decode and computed on encode (PS-585)"),
+        "template": (_DECODERS, "text joined from earlier values on a type: string field, ${name} or ${name:format} (PS-590)"),
         "valid_range": (("py", "go", "cs", "outschema"), "quality flag (_quality)"),
         "resolution": (("py", "go", "cs"), "measurement resolution annotation"),
         "unece": (("py", "go", "cs"), "UN/ECE unit code annotation"),

@@ -232,10 +232,10 @@ implementation has a runner that reads the same YAML and the same vectors:
 
 | Implementation | Runner | Decode floor | Re-encode floor |
 |---|---|---|---|
-| Python | `tests/test_corpus_conformance.py` | every vector | 2273 |
-| Go | `go/schema/corpus_conformance_test.go` | 2884 | 2291 (plain API 2263) |
-| C# | `dotnet/PayloadSchema.Tests/CorpusConformanceTests.cs` | 2884 | 2274 |
-| Java | `bindings/java/.../CorpusConformanceTest.java` | 2884 | 2273 |
+| Python | `tests/test_corpus_conformance.py` | every vector | 2282 |
+| Go | `go/schema/corpus_conformance_test.go` | 2893 | 2300 (plain API 2272) |
+| C# | `dotnet/PayloadSchema.Tests/CorpusConformanceTests.cs` | 2893 | 2283 |
+| Java | `bindings/java/.../CorpusConformanceTest.java` | 2893 | 2282 |
 | C | `tools/c-corpus-harness.py` (builds each expressible schema through the struct API) | 575 of 575 attempted | n/a |
 
 These figures move with every schema added. `make check-floors` prints each floor beside
@@ -832,10 +832,10 @@ exercised to the best-covered part of the project:
 
 | | Runner | Round-trips |
 |---|---|---|
-| Python | `tests/test_encode_round_trip.py` | 2273 |
-| Go | `go/schema/corpus_encode_test.go` | 2291 (plain 2263) |
-| Java | `bindings/java/.../CorpusEncodeRoundTripTest.java` | 2273 |
-| C# | `dotnet/.../CorpusEncodeRoundTripTests.cs` | 2274 |
+| Python | `tests/test_encode_round_trip.py` | 2282 |
+| Go | `go/schema/corpus_encode_test.go` | 2300 (plain 2272) |
+| Java | `bindings/java/.../CorpusEncodeRoundTripTest.java` | 2282 |
+| C# | `dotnet/.../CorpusEncodeRoundTripTests.cs` | 2283 |
 | C | `src/test_encoder.c`, built by `make test-c` (unit tests, not a corpus round trip) | n/a |
 
 - **A name may be an object under one tag and a scalar under another, and a tlv encoder
@@ -3702,6 +3702,57 @@ improved. The Go, Java and C# corpus runners write per-vector reports only when
     where they failed with `empty separator`; the other vectors that failed so now fail on their
     next defect, mostly PS-434 internal fields (watteco, twtg). No vector relied on a filled part or a missing
     prefix (no PS-605 rejection anywhere).
+
+- **CR-2026-176 (PS-361 amended, PS-590 to PS-592; la-payload-schema main for 0.5.7): a
+  `type: string` field may declare `template`**, text joined from values decoded earlier. It reads
+  and writes no bytes. `${name}` writes what PS-532 writes (a number as JavaScript's String(n), a
+  looked-up field's label, a string as is, a boolean `true`/`false`); `${name:format}` writes the
+  number the reference binds (PS-523, so a looked-up field's code) in a PS-430 part format through
+  CR-2026-170's formatter; `$$` is `$`. A reference with no value (never bound, a sentinel, an arm
+  not taken, a lookup miss under a bare reference) makes the field absent (PS-592); a format given
+  a non-integer, or `hex` a negative number, makes it absent with `Field 'c': ${v:decimal} is given
+  2.5, which the format cannot write, so the field is absent (PS-591)` (the value as the
+  prototype's js_text: a number as String(n), a boolean bare, text quoted).
+  - **Load, the prototype's text:** `template` beside `value`, off `type: string` or not a string
+    (`The template of 't' is a string on a `type: string` field that declares no `value` (PS-361,
+    PS-590)`); a reference to an object or repeat its field list declares earlier (`... references
+    `o`, an object or repeat, which has no text (PS-532, PS-590)`); an undeclared or late name is
+    PS-539's message with key `template`; a format that is no part format is PS-430's text. **A
+    `type: string` with neither key is now a load error** in Python (and so the validator and the
+    generator), Go, Java and C#: `Field 't': `type: string` is a literal that declares `value`, or a
+    template that declares `template`; a string read from the payload is `ascii` (PS-361)`. It was
+    a decode error in each, and a validator warning only.
+  - **Encode:** a template field is a computed field: nothing written, not required, the input's
+    value ignored, never counted when a case is scored, claimed optionally by a tlv case.
+  - **Where:** Python `render_string_template` / `string_template_errors` / `is_string_template`
+    (in `schema_iterator_errors`; `reference_errors` reads `template`), and `is_string_template`
+    beside every encoder `is_literal`/`COMPUTED_TYPES` test; the codec's `tmplString` runtime
+    helper and `encComputed`, which every encoder-runtime computed test now goes through; Go
+    `cr176.go` (`isComputedField` counts it); Java `TemplateStrings` (`Encoder.isComputed`); C#
+    `TemplateStrings.cs` (`SchemaEncoder.IsTemplate` in `IsComputed`). Vocabulary key `template`,
+    `payload-schema.json`, and a reference-doc section.
+  - **Measured before:** every decoder failed the field with the old PS-361 decode error; Go, Java
+    and C# accepted every malformed template at load; every encoder required the field and Go,
+    Java and C# wrote the given text as bytes (`{"_h":7,"_m":5,"t":"ignored"}` came out
+    `070569676e6f726564`).
+  - **C:** no template; `tools/schema_binary.py` refuses `template` by name (PS-446), and the
+    harness names it a C gap.
+  - **Measured:** no corpus, example or private-registry schema declares `template` or a
+    `type: string` with neither key, so nothing changes decode or encode output or is rejected.
+    The registry's 13 tektelic `raw` echoes (`stringifyBytes`, `[01, 01, 00]`) become writable: a
+    `consume: 0` bytes echo with `format: hex:upper` and `separator: ", "` under `_raw`, then
+    `{name: raw, type: string, template: "[${_raw}]"}`, which decodes `0074ab11` as
+    `[00, 74, AB, 11]` and round-trips (Python, probed).
+  - **Cases:** `tests/cr-2026-176-cases.yaml` (decode, encode and load lists; the prototype's
+    `TestCR2026176TemplateStrings` case for case, plus an arm, an object, a tlv case, a repeat
+    element, a numeric label and `var`), read by `test_cr_2026_176_cases.py` (reference,
+    validator, generated codec, binary converter), Go `cr176_test.go`, Java `CR2026176Test`, C#
+    `CR2026_176Tests`. Fixture `_language-conformance/string-template.yaml` (four ports, nine
+    vectors, all round-tripping, mutation 100%). **Floors:** decode 2852 -> 2861 in Go, Java and
+    C#; re-encode +9 everywhere (Python and Java 2247 -> 2256, C# 2248 -> 2257, Go 2265 -> 2274,
+    plain 2237 -> 2246), `plain fixed` +9 (Python 231 -> 240, Go, Java and C# 225 -> 234).
+  - `test_cr_2026_014_expected_warnings` accepts an expected warning that names its field
+    (`Field '...`) as identifying, beside a tag or an offset.
 
 - **CR-2026-169 (PS-581; la-payload-schema main, for 0.5.7): which port entry an encoder
   uses.** An encoder of a schema with `ports` encodes one entry and reports the FPort it used:
