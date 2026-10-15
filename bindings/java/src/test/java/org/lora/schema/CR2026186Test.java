@@ -65,6 +65,12 @@ public class CR2026186Test {
                     return;
                 }
                 Map<String, Object> got = new LinkedHashMap<>(schema.decode(payload));
+                if (c.containsKey("warning")) {     // PS-610, PS-614 (amended): omitted, warned
+                    String want = String.valueOf(c.get("warning"));
+                    Object warnings = got.get("_warnings");
+                    assertTrue(warnings instanceof List<?> l && l.stream().anyMatch(w -> String.valueOf(w).contains(want)),
+                            "want a warning '" + want + "', got " + warnings);
+                }
                 got.remove("_warnings");
                 got.remove("_quality");
                 assertEquals(norm(c.get("expected")), norm(got));

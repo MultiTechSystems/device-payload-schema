@@ -59,7 +59,7 @@ public class CR2026_186Tests
             yield return new object[]
             {
                 Get("name"), Get("schema"), Get("payload"), Get("input"), expected,
-                Get("error"), Get("reports"),
+                Get("error"), Get("reports"), Get("warning"),
             };
         }
     }
@@ -95,7 +95,7 @@ public class CR2026_186Tests
     [Theory]
     [MemberData(nameof(DecodeCases))]
     public void Decode(string name, string schemaText, string payload, string input,
-        string expected, string error, string reports)
+        string expected, string error, string reports, string warning)
     {
         var schema = SchemaParser.Parse(schemaText);
         if (error.Length > 0)
@@ -105,6 +105,9 @@ public class CR2026_186Tests
             return;
         }
         var result = SchemaDecoder.Decode(schema, Convert.FromHexString(payload));
+        if (warning.Length > 0)     // PS-610, PS-614 (amended): omitted with a warning
+            Assert.True(result.TryGetValue("_warnings", out var w) && w is List<string> list
+                && list.Any(x => x.Contains(warning)), $"[{name}] expected a warning '{warning}'");
         using var doc = JsonDocument.Parse(expected);
         Assert.Equal(JsonSerializer.Serialize(Normal(FromJson(doc.RootElement))),
             JsonSerializer.Serialize(Normal(result)));
@@ -113,7 +116,7 @@ public class CR2026_186Tests
     [Theory]
     [MemberData(nameof(EncodeCases))]
     public void Encode(string name, string schemaText, string payload, string input,
-        string expected, string error, string reports)
+        string expected, string error, string reports, string warning)
     {
         var schema = SchemaParser.Parse(schemaText);
         using var doc = JsonDocument.Parse(input);
@@ -133,7 +136,7 @@ public class CR2026_186Tests
     [Theory]
     [MemberData(nameof(LoadCases))]
     public void Load(string name, string schemaText, string payload, string input,
-        string expected, string error, string reports)
+        string expected, string error, string reports, string warning)
     {
         var e = Assert.ThrowsAny<Exception>(() => SchemaParser.Parse(schemaText));
         Assert.True(e.Message.Contains(error), $"[{name}] expected '{error}', got: {e.Message}");
@@ -143,7 +146,7 @@ public class CR2026_186Tests
     [Theory]
     [MemberData(nameof(MetaCases))]
     public void Meta(string name, string schemaText, string payload, string input,
-        string expected, string error, string reports)
+        string expected, string error, string reports, string warning)
     {
         var schema = SchemaParser.Parse(schemaText);
         var output = SchemaDecoder.Interpret(schema, Convert.FromHexString(payload), new InputContext());

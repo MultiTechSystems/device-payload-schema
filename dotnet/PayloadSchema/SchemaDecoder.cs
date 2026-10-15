@@ -314,7 +314,18 @@ public static class SchemaDecoder
                         ctx.Produced(field, outputName);                      // PS-492
                     // PS-610 (CR-2026-186): reported as an instant in its format; a
                     // reference still binds the number.
-                    result[outputName] = field.Time != null ? TimeFields.Format(field, value) : value;
+                    try
+                    {
+                        result[outputName] = field.Time != null ? TimeFields.Format(field, value) : value;
+                    }
+                    catch (TimeOmittedException outside)
+                    {
+                        // PS-610 (amended 2026-10-15): no instant to report, so the field is
+                        // omitted with a warning; a reference still binds the number.
+                        ctx.Warnings.Add(outside.Message);
+                        ctx.Bind(field, field.Name, value);
+                        continue;
+                    }
                 }
                 // Keyed by the schema-level name in Variables so $references keep
                 // working when name_from is in play (PS-267). A looked-up field binds
