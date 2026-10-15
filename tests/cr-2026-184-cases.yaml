@@ -1,0 +1,121 @@
+# CR-2026-184 (PS-607): a validator warns where a `skip`, or a bit range's `consume`, advances
+# past a byte that bit ranges or bools consuming nothing read only in part. The bits no field
+# reads are lost: a decoder discards them and an encoder writes them as 0.
+#
+# The warning is never a rejection: every schema here loads and decodes. A byte that nothing
+# reads in part draws none, and neither do a byte_group member's unnamed bits (PS-553). Each
+# field list is walked in order and the walk goes silent once a field's size is unknown; a
+# nested field list (a match case, a repeat's fields) is checked from its own start and names
+# "a byte" rather than an offset.
+#
+# The cases are the spec prototype's TestCR2026184SkipOverPartlyReadBits, one for one. They
+# are read by tests/test_cr_2026_184_skip_bits.py, through `skip_bit_warnings()` and
+# `validate_schema()`. Go, Java and C# have no validator-warning surface, and C reads no YAML,
+# so this is the Python validator's alone.
+#
+# Each case gives `schema` (YAML text) and `warnings`, the whole list in order; `payload` and
+# `expected` (JSON text), where given, are a decode the warning does not stop.
+
+cases:
+
+- name: the_cr_example
+  schema: |
+    name: t
+    version: 1
+    fields:
+      - {name: _std, type: "u8[0:0]"}
+      - {name: _ep_lo, type: "u8[5:7]"}
+      - {name: _b0, type: skip, length: 1}
+      - {name: x, type: u8}
+  warnings:
+    - "byte 0 is read in part (bits 0, 5-7) and the skip '_b0' advances past it; bits 1-4 are read by no field. A decoder discards them and an encoder writes them as 0 (PS-607)"
+
+- name: the_watteco_header
+  schema: |
+    name: t
+    version: 1
+    fields:
+      - {name: _a, type: "u64[56:56]"}
+      - {name: _b, type: "u64[57:58]"}
+      - {name: _c, type: "u64[61:63]"}
+      - {type: skip, length: 1}
+      - {name: v, type: u8}
+  warnings:
+    - "byte 0 is read in part (bits 0-2, 5-7) and a skip advances past it; bits 3-4 are read by no field. A decoder discards them and an encoder writes them as 0 (PS-607)"
+
+- name: naming_the_bits_silences_it
+  schema: |
+    name: t
+    version: 1
+    fields:
+      - {name: _std, type: "u8[0:0]"}
+      - {name: _fc, type: "u8[1:4]"}
+      - {name: _ep_lo, type: "u8[5:7]"}
+      - {name: _b0, type: skip, length: 1}
+  warnings: []
+
+- name: a_consume_on_the_last_range
+  schema: |
+    name: t
+    version: 1
+    fields:
+      - {name: a, type: "u8[0:3]"}
+      - {name: b, type: "u8[4:5]", consume: 1}
+  warnings:
+    - "byte 0 is read in part (bits 0-5) and 'b', with consume: 1, advances past it; bits 6-7 are read by no field. A decoder discards them and an encoder writes them as 0 (PS-607)"
+
+- name: a_bool_in_a_match_case_of_a_port
+  schema: |
+    name: t
+    version: 1
+    ports:
+      1:
+        fields:
+          - {name: k, type: u8}
+          - match:
+              field: $k
+              cases:
+                1:
+                  - {name: f, type: bool, bit: 7}
+                  - {type: skip, length: 1}
+  warnings:
+    - "port 1: a byte is read in part (bit 7) and a skip advances past it; bits 0-6 are read by no field. A decoder discards them and an encoder writes them as 0 (PS-607)"
+
+- name: no_warning_for_padding_read_whole
+  schema: |
+    name: t
+    version: 1
+    fields:
+      - {type: skip, length: 2}
+      - {name: a, type: u8}
+  warnings: []
+
+- name: no_warning_for_a_byte_read_whole_after
+  schema: |
+    name: t
+    version: 1
+    fields:
+      - {name: _k, type: "u8[0:3]"}
+      - {name: k, type: u8}
+  warnings: []
+
+- name: no_warning_for_a_byte_group_member
+  schema: |
+    name: t
+    version: 1
+    fields:
+      - byte_group:
+          - {name: a, type: "u8[0:3]"}
+  warnings: []
+
+- name: the_schema_still_loads_and_decodes
+  schema: |
+    name: t
+    version: 1
+    fields:
+      - {name: std, type: "u8[0:0]"}
+      - {type: skip, length: 1}
+  warnings:
+    - "byte 0 is read in part (bit 0) and a skip advances past it; bits 1-7 are read by no field. A decoder discards them and an encoder writes them as 0 (PS-607)"
+  payload: "11"
+  expected: '{"std": 1}'

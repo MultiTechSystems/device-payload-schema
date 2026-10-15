@@ -3702,6 +3702,35 @@ improved. The Go, Java and C# corpus runners write per-vector reports only when
     everywhere (Python and Java 2199 -> 2213, C# 2200 -> 2214, Go 2217 -> 2231, plain 2189 ->
     2203), `plain fixed` 185 -> 199.
 
+- **CR-2026-184 (PS-607; la-payload-schema branch `cr/0.5.8-apply-184-185`, for 0.5.8): a
+  validator warns where a skip discards bits read in part.** Where a `skip`, or a bit range's
+  `consume`, advances past a byte that bit ranges or bools consuming nothing read only in part,
+  the bits no field reads are lost (decoded nowhere, encoded as 0). A validator SHOULD warn and
+  MUST NOT reject; a byte nothing reads in part, and a byte_group member's unnamed bits (PS-553),
+  draw nothing.
+  - **Where:** Python `skip_bit_warnings()` in `tools/schema_interpreter.py`, a port of the
+    prototype's function (`_skip_bit_check`, `_skip_bit_nested`, `_bit_list`) with its message
+    verbatim: `byte 0 is read in part (bits 0, 5-7) and the skip '_b0' advances past it; bits
+    1-4 are read by no field. A decoder discards them and an encoder writes them as 0 (PS-607)`,
+    prefixed `port N: ` per port. Each field list is walked in order from its start, silent once
+    a field's size is unknown; a nested list is checked from its own start and says `a byte`.
+    It runs over the `$ref`-spliced document; `validate_schema()` adds the warnings beside
+    PS-597's. One adaptation: a type alias (`uint8`, `int16`) is read as its canonical type,
+    where the prototype's size table knows only `i8`..`i64`.
+  - **Go, Java and C# have no validator-warning surface** (no load-time warnings at all; PS-524
+    and PS-597 are Python-only too), so nothing was added there. C reads no YAML. Decode and
+    encode are unchanged everywhere.
+  - **Cases:** `tests/cr-2026-184-cases.yaml` (the prototype's nine tests), read by
+    `test_cr_2026_184_skip_bits.py` (`skip_bit_warnings()`, `validate_schema()`, and the decode
+    the warning does not stop). A warning cannot be a corpus vector: no fixture, no floor moves.
+  - **Measured** (Python, read only): corpus 19 of 378 device schemas warn (98 warnings: dnt
+    lw-wsci 51, vobo 11, Milesight ct10x/ct30x/em310-tilt/ws302/ws50x/wt201 29, five
+    `_language-conformance` fixtures 7); private registry 269 of 543 at ddab991 (1523
+    warnings) and 269 of 543 at bd5d398 (1495), after the Watteco frame-control fix: the 28
+    Watteco schemas each lose one warning (the frame-control header byte, bits 3-4) and keep
+    the rest (e.g. port 125's `batch` byte, bit 6).
+    Dragino 63, Watteco 28, Adeunis 17, Tektelic 16, Netvox 14, Dingtek 14 schemas lead.
+
 - **CR-2026-183 (PS-096 amended, PS-605, PS-606; la-payload-schema main, for 0.5.8): encoding
   a bitfield_string's segments.** Decode is unchanged. An encoder removes the declared `prefix`
   and rejects a value without it, then splits the rest on the delimiter and rejects a segment
