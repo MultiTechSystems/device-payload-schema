@@ -3143,6 +3143,7 @@ final class Encoder {
         // The value as given, for a PS-168 rejection to name (PS-552).
         givenField = field;
         givenValue = value;
+        if (BitLabels.declared(field)) return BitLabels.encode(field, value);       // PS-618
         Object reversed = reverseLookup(value, field.getLookup(), field.getName());   // PS-169
 
         if (reversed instanceof Boolean flag && field.getLookup() != null

@@ -991,6 +991,14 @@ public static class SchemaDecoder
         if (field.Type == FieldType.Enum && ctx.EnumCodes.Remove(field, out var code))
             ctx.LookupBinding[field] = DecodeContext.IsNumericLabel(value) ? value : code;
 
+        // PS-616 (CR-2026-187): the labels of the set bits; a reference binds the number
+        // (PS-523), as for a lookup.
+        if (!asDeclared && BitLabels.Declared(field) && BitLabels.Number(value) is System.Numerics.BigInteger bits)
+        {
+            ctx.LookupBinding[field] = value;
+            value = BitLabels.Decode(field, bits, ctx);
+        }
+
         // Store variable: PS-523's binding, keeping the label for templates (PS-532).
         if (field.Var != null)
             ctx.Bind(field, field.Var, value);

@@ -725,6 +725,7 @@ public class Schema {
     private static void checkWave4(Map<String, Object> fm) {
         String at = "Field '" + fm.get("name") + "': ";
         Numeral.check(fm);                                    // PS-560
+        BitLabels.check(fm);                                  // PS-616, PS-617
         Packed.check(fm);                                     // PS-621
         AsciiText.check(fm);                                  // PS-534, PS-593, PS-072
         if (fm.containsKey("match_value")) {
@@ -2406,6 +2407,17 @@ public class Schema {
             }
         }
         
+        // PS-616 (CR-2026-187): the labels of the set bits; a reference binds the number
+        // (PS-523), as for a lookup.
+        if (!asDeclared && BitLabels.declared(field)) {
+            java.math.BigInteger bits = BitLabels.number(value);
+            if (bits != null) {
+                Object number = value;
+                value = BitLabels.decode(field, bits, ctx);
+                ctx.recordLookup(field, number, value);
+            }
+        }
+
         // PS-428: outside the range is no reading, not a flagged one, so the field is
         // absent - neither reported nor bound.
         if (fieldRules && !asDeclared && !lookedUp && Wave6b.rangeOmits(field, value)) {

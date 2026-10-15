@@ -534,6 +534,42 @@ Values may be numbers as well as strings (PS-106).
 list, so there is no original to recover; encoders report the field rather than writing a
 plausible byte. The same applies to an `enum` `default` (PS-068).
 
+### Set-Bit Labels (`bit_labels`)
+
+A status, alarm or capability word is often reported as the names of its set bits. A
+`lookup` names one value; `bit_labels` names each bit (0 the least significant), and the field
+reports the labels of the bits that are set (PS-616):
+
+```yaml
+- name: sensor_type                  # 0x0F -> "T/H,CO2,PMx,Gas1"
+  type: u8
+  bit_labels: {0: T/H, 1: CO2, 2: PMx, 3: Gas1, 4: Gas2, 5: Light, 6: Noise, 7: Pressure}
+  join: ","
+
+- name: options                      # 0x00 -> ["None"]; 0x05 -> ["sensor", "led"]
+  type: u8
+  bit_labels: {0: sensor, 2: led, 3: buzzer}
+  none: None
+```
+
+- It is declared on an unsigned integer (`u8` to `u64`) or an unsigned bit range, and not
+  beside `lookup`, arithmetic, `transform`, `polynomial`, `time`, `compute`, `encoding` or
+  `value`. `join`, `none` and `order` belong to it.
+- The labels are a list, or one string separated by `join` where it is declared. `order` is
+  `ascending` (the default) or `descending`, by bit number. Where no listed bit is set the
+  field reports its `none` label (`["None"]`, or the text), else `[]` or `""`.
+- A `$` reference to the field binds its number, as for a lookup (PS-523).
+- A set bit with no label is not reported, and the decoder warns, naming the field and the
+  bit (PS-617). A bit outside the width, two bits with one label, a `none` that is a bit's
+  label, or a label containing a non-empty `join` is rejected at load.
+- An empty `join` concatenates the labels; an encoder splits such text by the longest label
+  first, so where one label is a prefix of another the schema decodes but is refused for
+  encoding (PS-617).
+- An encoder takes a list, or the joined text where `join` is declared, and writes the bits of
+  those labels and no others; an unknown label is rejected, and `[]`, `""` or the `none` label
+  writes 0. Order and repetition do not matter (PS-618).
+- `_meta` reports `array`, or `string` where `join` is declared (PS-570).
+
 ## Computed Fields
 
 ### Polynomial (calibration curves)

@@ -203,6 +203,10 @@ C_UNSUPPORTED_KEYS = {
     "consume_terminator": "the C interpreter has no terminator-delimited ascii (PS-619)",
     "end_terminates": "the C interpreter has no terminator-delimited ascii (PS-619)",
     "numeral": "the C interpreter holds ascii text, not the integer it spells (PS-560)",
+    "bit_labels": "the C interpreter has no bit_labels; it reports a number, not the labels of its set bits (PS-616)",
+    "join": "the C interpreter has no bit_labels (PS-616)",
+    "none": "the C interpreter has no bit_labels (PS-616)",
+    "order": "the C interpreter has no bit_labels (PS-616)",
     # CR-2026-174: the C interpreter checks and computes one (field_set_checksum), but a
     # field record has no slot for its algorithm, seed, `from` or `on_mismatch`.
     "checksum": "this format has no checksum record (PS-585)",

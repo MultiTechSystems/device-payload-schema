@@ -2691,6 +2691,156 @@ def encode_numeral(name: Any, value: Any, length: Optional[int], numeral: str) -
     return sign + digits.rjust(width - len(sign), '0')
 
 
+# --- CR-2026-187 (PS-616 to PS-618): the labels of a bitmask's set bits ------------------
+
+#: The keys PS-616 adds, and the ones it excludes beside `bit_labels`, in the order the spec
+#: prototype names them.
+BIT_LABEL_KEYS = ('bit_labels', 'join', 'none', 'order')
+BIT_LABEL_EXCLUDED = ('lookup', 'add', 'mult', 'div', 'transform', 'polynomial', 'time',
+                      'compute', 'value', 'encoding')
+_BIT_LABEL_WHOLE = {'u8': 8, 'u16': 16, 'u24': 24, 'u32': 32, 'u64': 64,
+                    'uint8': 8, 'uint16': 16, 'uint24': 24, 'uint32': 32, 'uint64': 64}
+
+
+def bit_label_width(field: Dict[str, Any]) -> Optional[int]:
+    """The width in bits of an unsigned integer field or an unsigned bit range, else None."""
+    t = str(field.get('type', '')).strip()
+    if t in _BIT_LABEL_WHOLE:
+        return _BIT_LABEL_WHOLE[t]
+    m = _BIT_RANGE.match(t)
+    if m and t.startswith('u') and int(m.group(3)) >= int(m.group(2)):
+        return int(m.group(3)) - int(m.group(2)) + 1
+    return None
+
+
+def bit_label_number(bit: Any) -> Any:
+    """A bit_labels key as a number: a YAML integer, or a JSON key of digits."""
+    if isinstance(bit, str) and bit.isdigit():
+        return int(bit)
+    return bit
+
+
+def bit_labels_error(node: Dict[str, Any]) -> Optional[str]:
+    """PS-616, PS-617: the first load error of one field mapping, in the spec prototype's
+    order and text (check_bit_labels); None where it is valid or declares none of the keys."""
+    if 'type' not in node or not any(k in node for k in BIT_LABEL_KEYS):
+        return None
+    where = f"Field '{node.get('name')}'"
+    labels = node.get('bit_labels')
+    if labels is None:
+        return f"{where}: join, none and order belong to bit_labels (PS-616)"
+    width = bit_label_width(node)
+    if width is None:
+        return (f"{where}: bit_labels is declared on an unsigned integer or an unsigned bit "
+                f"range, not {node.get('type')!r} (PS-616)")
+    clash = [k for k in BIT_LABEL_EXCLUDED if k in node]
+    if clash:
+        return f"{where}: bit_labels reports labels, so {', '.join(clash)} does not apply (PS-616)"
+    if not isinstance(labels, dict) or not labels:
+        return f"{where}: bit_labels maps bit numbers to labels (PS-616)"
+    seen = set()
+    for bit, label in labels.items():
+        number = bit_label_number(bit)
+        if isinstance(number, bool) or not isinstance(number, int) or not 0 <= number < width:
+            return f"{where}: bit {number!r} is outside its {width} bits (PS-617)"
+        if not isinstance(label, str):
+            return f"{where}: the label of bit {number} is a string (PS-616)"
+        if label in seen:
+            return f"{where}: two bits have the label {label!r} (PS-617)"
+        seen.add(label)
+    join = node.get('join')
+    if join is not None:
+        if not isinstance(join, str):
+            return f"{where}: join is a string (PS-616)"
+        if join and any(join in label for label in seen):
+            return f"{where}: a label contains the join text {join!r} (PS-617)"
+    none = node.get('none')
+    if none is not None and (not isinstance(none, str) or none in seen):
+        return f"{where}: none is a string that no bit has as its label (PS-616)"
+    if node.get('order', 'ascending') not in ('ascending', 'descending'):
+        return f"{where}: order is ascending or descending (PS-616)"
+    return None
+
+
+def bit_labels_errors(node, _top=True):
+    """PS-616, PS-617 over the whole schema, test vectors aside: one error per field."""
+    errors = []
+    if isinstance(node, list):
+        for item in node:
+            errors.extend(bit_labels_errors(item, False))
+    elif isinstance(node, dict):
+        error = bit_labels_error(node)
+        if error:
+            errors.append(error)
+        for key, value in node.items():
+            if (_top and key == 'test_vectors') or key == 'bit_labels':
+                continue
+            errors.extend(bit_labels_errors(value, False))
+    return errors
+
+
+def bit_label_table(field: Dict[str, Any]) -> List[Tuple[int, str]]:
+    """(bit, label) in the field's declared order (PS-616)."""
+    table = sorted((bit_label_number(bit), label)
+                   for bit, label in field['bit_labels'].items())
+    return table[::-1] if field.get('order') == 'descending' else table
+
+
+def decode_bit_labels(field: Dict[str, Any], raw: int, warnings: List[str]) -> Any:
+    """PS-616, PS-617: the labels of the set bits the mapping lists, as a list, or as text
+    joined by `join`; the `none` label where no listed bit is set. A set bit with no label
+    is not reported, and warned about."""
+    table = bit_label_table(field)
+    listed = {bit for bit, _ in table}
+    for bit in range(raw.bit_length()):
+        if raw >> bit & 1 and bit not in listed:
+            warnings.append(f"Field '{field.get('name')}': bit {bit} is set and has no label; "
+                            f"it is not reported (PS-617)")
+    labels = [label for bit, label in table if raw >> bit & 1]
+    if not labels and field.get('none') is not None:
+        labels = [field['none']]
+    return field['join'].join(labels) if 'join' in field else labels
+
+
+def encode_bit_labels(field: Dict[str, Any], value: Any) -> int:
+    """PS-618: the number with the bits of the given labels set, every other bit 0. A list,
+    or the joined text where `join` is declared; an empty one or the `none` label is 0."""
+    name = field.get('name')
+    by_label = {label: bit for bit, label in bit_label_table(field)}
+    if isinstance(value, str) and 'join' in field:
+        join = field['join']
+        if value == '' or value == field.get('none'):
+            items = []
+        elif join:
+            items = value.split(join)
+        else:
+            labels = sorted(by_label, key=len, reverse=True)
+            if any(a != b and b.startswith(a) for a in labels for b in labels):
+                raise FieldError(f"Field '{name}': with an empty join, one label is a prefix "
+                                 f"of another, so its text cannot be split; the schema "
+                                 f"decodes but is not encoded (PS-617)")
+            items, rest = [], value
+            while rest:
+                found = next((label for label in labels if rest.startswith(label)), None)
+                if found is None:
+                    raise FieldError(f"Field '{name}': {rest!r} does not begin with a label "
+                                     f"(PS-618)")
+                items.append(found)
+                rest = rest[len(found):]
+    elif isinstance(value, list):
+        none = field.get('none')
+        items = [v for v in value if not (none is not None and v == none)]
+    else:
+        raise FieldError(f"Field '{name}': {value!r} is not a list of labels"
+                         f"{' or joined text' if 'join' in field else ''} (PS-618)")
+    number = 0
+    for item in items:
+        if not isinstance(item, str) or item not in by_label:
+            raise FieldError(f"Field '{name}': {item!r} is not one of its labels (PS-618)")
+        number |= 1 << by_label[item]
+    return number
+
+
 # PS-430, PS-582, PS-583 (CR-2026-170): a bitfield_string part format is decimal, sdecimal, hex
 # or hex:upper, optionally followed by `:N`, a minimum width from 1 to 32 that never cuts.
 # One helper per job, so the template formats of CR-2026-176 can reuse format_part_number.
@@ -4552,6 +4702,7 @@ def schema_iterator_errors(schema):
     errors = field_name_errors(schema)
     errors.extend(withdrawn_errors(schema))                          # CR-2026-159
     errors.extend(numeral_errors(schema))                            # PS-560
+    errors.extend(bit_labels_errors(schema))                         # PS-616, PS-617
     errors.extend(packed_repeat_errors(schema))                      # PS-621
     errors.extend(ascii_text_errors(schema))                         # PS-534, PS-593
     errors.extend(checksum_errors(schema))                           # PS-585
@@ -5247,6 +5398,8 @@ def reports_of(field_def):
         return next(iter(kinds)) if len(kinds) == 1 else None
     if isinstance(field_def.get('tlv'), dict) and not field_def.get('type'):
         return 'array'                                # `channels` of a merge: false tlv
+    if 'bit_labels' in field_def:                                     # PS-616 (CR-2026-187)
+        return 'string' if 'join' in field_def else 'array'
     if is_time_field(field_def):                      # PS-610 (CR-2026-186)
         return {'unix': 'number', 'calendar': 'object'}.get(
             field_def['time'].get('format'), 'string')
@@ -7335,7 +7488,8 @@ class SchemaInterpreter:
         name unbound altogether.
         """
         names = [n for n in names if n]
-        if field_def.get('lookup') is not None or field_def.get('type') == 'enum':
+        if (field_def.get('lookup') is not None or field_def.get('type') == 'enum'
+                or 'bit_labels' in field_def):                               # PS-616
             number = self._lookup_numbers.pop(field_def, OMITTED)
             numeric = (value is not OMITTED and isinstance(value, (int, float))
                        and not isinstance(value, bool))
@@ -8371,7 +8525,12 @@ class SchemaInterpreter:
             self._lookup_numbers[field_def] = value
         # Apply lookup table
         value = apply_lookup(value, field_def.get('lookup'))
-        
+        # PS-616 (CR-2026-187): the labels of the set bits; a reference binds the number.
+        if ('bit_labels' in field_def and isinstance(value, int)
+                and not isinstance(value, bool)):
+            self._lookup_numbers[field_def] = value
+            value = decode_bit_labels(field_def, value, self._nested_warnings)
+
         return value
     
     def _report_leftover(self, payload: bytes, pos: int, result: DecodeResult) -> None:
@@ -11194,6 +11353,8 @@ class SchemaInterpreter:
             value = time_input_seconds(field_def, value)
         # The value as given, for a PS-168 rejection to name (PS-552).
         self._encode_given = (field_def, value)     # held, compared by identity
+        if 'bit_labels' in field_def:
+            return encode_bit_labels(field_def, value)                     # PS-618
         value = reverse_lookup(value, field_def.get('lookup'),
                                field_def.get('name', '?'))                 # PS-169
 

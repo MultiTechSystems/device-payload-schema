@@ -138,6 +138,15 @@ def yaml_type_to_json_schema(field_type: str, field_def: Dict[str, Any]) -> Dict
     if base_type.startswith('be_') or base_type.startswith('le_'):
         base_type = base_type[3:]
     
+    # PS-616 (CR-2026-187): the labels of the set bits, a list or one joined text.
+    if field_def.get('bit_labels') is not None:
+        labels = [v for v in field_def['bit_labels'].values() if isinstance(v, str)]
+        if field_def.get('none') is not None:
+            labels.append(field_def['none'])
+        if 'join' in field_def:
+            return {"type": "string"}
+        return {"type": "array", "items": {"type": "string", "enum": labels}}
+
     # Integer types
     if base_type in ('u8', 'u16', 'u24', 'u32', 'u64', 'uint8', 'uint16', 'uint24', 'uint32', 'uint64'):
         schema = {"type": "integer", "minimum": 0}

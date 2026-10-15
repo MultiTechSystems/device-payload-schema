@@ -321,6 +321,10 @@ func checkFieldRules(field map[string]any, at string) error {
 	if err := checkNumeral(field); err != nil {
 		return err
 	}
+	// PS-616, PS-617 (CR-2026-187): bit_labels on an unsigned integer or bit range.
+	if err := checkBitLabels(field); err != nil {
+		return err
+	}
 	// PS-621 (CR-2026-189): packed_bits and bit_offset on a repeat of integers only.
 	if err := packedRepeatError(field); err != nil {
 		return err

@@ -28,6 +28,26 @@
           ],
           "description": "On an ascii field: report its digit text as the integer it spells, in base 10 or base 16, strictly (PS-560, PS-561)."
         },
+        "bit_labels": {
+          "type": "object",
+          "additionalProperties": {"type": "string"},
+          "description": "On an unsigned integer or unsigned bit range: a mapping of bit number (0 the least significant) to label; the field reports the labels of its set bits, as a list, or as text where join is declared (PS-616 to PS-618)."
+        },
+        "join": {
+          "type": "string",
+          "description": "With bit_labels: the text between the labels; the field reports one string. An empty join concatenates them (PS-616, PS-617)."
+        },
+        "none": {
+          "type": "string",
+          "description": "With bit_labels: the label reported where no listed bit is set (PS-616)."
+        },
+        "order": {
+          "enum": [
+            "ascending",
+            "descending"
+          ],
+          "description": "With bit_labels: the order of the labels by bit number; ascending by default (PS-616)."
+        },
         "template": {
           "type": "string",
           "description": "On a type: string field that declares no value: text joined from values decoded earlier, ${name} (as name_from writes it) or ${name:format} (a part format of PS-430), and $$ for a literal $. Reads and writes no bytes (PS-590 to PS-592)."

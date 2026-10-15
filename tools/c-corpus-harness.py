@@ -119,6 +119,7 @@ UNREACHABLE_KEYS = {
     "consume_terminator": "the interpreter has no terminator-delimited ascii (PS-619)",
     "end_terminates": "the interpreter has no terminator-delimited ascii (PS-619)",
     "numeral": "the interpreter holds ascii text, not the integer it spells (PS-560)",
+    "bit_labels": "the interpreter has no bit_labels (PS-616)",
     "template": "the interpreter has no template string (PS-590)",
     "time": "the interpreter has no time field (PS-610)",
     "var": "variables are only read by match, which this harness skips",

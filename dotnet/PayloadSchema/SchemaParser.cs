@@ -465,6 +465,7 @@ public static partial class SchemaParser
         var name = fm.TryGetValue("name", out var n) ? Scalar(n) : "?";
         var type = fm.TryGetValue("type", out var t) ? Scalar(t) : "";
         Numeral.Check(fm);                                              // PS-560
+        BitLabels.Check(fm);                                            // PS-616, PS-617
         Cr189.Check(fm);                                                // PS-621
         AsciiText.Check(fm);                                            // PS-534, PS-593, PS-072
         if (fm.Children.ContainsKey(new YamlScalarNode("match_value")))
