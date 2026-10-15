@@ -103,6 +103,12 @@ func reportsOf(decl map[string]any) string {
 		}
 		return ""
 	}
+	if labels, ok := decl["bit_labels"]; ok && labels != nil { // PS-616 (CR-2026-187)
+		if _, joined := decl["join"]; joined {
+			return "string"
+		}
+		return "array"
+	}
 	declared := ""
 	if t, ok := decl["type"]; ok && t != nil {
 		declared = fmt.Sprint(t)

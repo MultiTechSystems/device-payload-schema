@@ -63,6 +63,8 @@ public static partial class Meta
             if (kinds.SetEquals(new[] { "integer", "number" })) return "number";
             return kinds.Count == 1 ? kinds.First() : null;
         }
+        if (Has(field, "bit_labels") && Value(field, "bit_labels") != null)       // PS-616 (CR-2026-187)
+            return Has(field, "join") ? "string" : "array";
         var declared = Value(field, "type");
         var t = declared == null ? "" : Convert.ToString(declared, System.Globalization.CultureInfo.InvariantCulture)!.ToLowerInvariant();
         var hasValue = Has(field, "value");

@@ -69,6 +69,9 @@ final class Reports {
             if (kinds.equals(Set.of("integer", "number"))) return "number";
             return kinds.size() == 1 ? kinds.iterator().next() : null;
         }
+        if (decl.get("bit_labels") != null) {                               // PS-616 (CR-2026-187)
+            return decl.containsKey("join") ? "string" : "array";
+        }
         Object declared = decl.get("type");
         String t = declared == null ? "" : String.valueOf(declared).toLowerCase();
         boolean hasValue = decl.containsKey("value");

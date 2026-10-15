@@ -168,6 +168,10 @@ VOCABULARY: Dict[str, Dict[str, Tuple[Tuple[str, ...], str]]] = {
         "nul": (_DECODERS, "trailing | stop | drop: how an ascii field treats its 0x00 bytes (PS-534)"),
         "terminator": (_DECODERS, "a byte 0 to 255 that ends a variable-length ascii field, in place of length (PS-593)"),
         "checksum": (_DECODERS, "a check value over earlier bytes, verified on decode and computed on encode (PS-585)"),
+        "bit_labels": (_DECODERS, "{bit: label} on an unsigned integer or bit range: the labels of its set bits, a list or joined text (PS-616 to PS-618)"),
+        "join": (_DECODERS, "with bit_labels: the text between labels; the field reports one string (PS-616, PS-617)"),
+        "none": (_DECODERS, "with bit_labels: the label reported where no listed bit is set (PS-616)"),
+        "order": (_DECODERS, "with bit_labels: ascending | descending bit order of the labels (PS-616)"),
         "template": (_DECODERS, "text joined from earlier values on a type: string field, ${name} or ${name:format} (PS-590)"),
         "valid_range": (("py", "go", "cs", "outschema"), "quality flag (_quality)"),
         "resolution": (("py", "go", "cs"), "measurement resolution annotation"),
@@ -411,7 +415,7 @@ HINTS: Dict[Tuple[str, str], str] = {
 
 #: Mappings whose keys are data, not vocabulary: their values are walked, their keys
 #: are not recorded.
-DATA_MAPPINGS = frozenset({"lookup", "enum", "values"})
+DATA_MAPPINGS = frozenset({"lookup", "enum", "values", "bit_labels"})
 #: Lists or scalars-in-lists that carry no keys of their own.
 OPAQUE = frozenset({"parts", "valid_range", "polynomial"})
 

@@ -317,6 +317,10 @@ func checkFieldRules(field map[string]any, at string) error {
 	if err := checkNumeral(field); err != nil {
 		return err
 	}
+	// PS-616, PS-617 (CR-2026-187): bit_labels on an unsigned integer or bit range.
+	if err := checkBitLabels(field); err != nil {
+		return err
+	}
 	// PS-534, PS-593 (CR-2026-177): nul and terminator on an ascii field.
 	if err := checkAsciiText(field); err != nil {
 		return err

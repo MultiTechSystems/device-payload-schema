@@ -3747,6 +3747,58 @@ improved. The Go, Java and C# corpus runners write per-vector reports only when
     `batch` 29), 65 no vector reaches the byte. Most set-and-unread bits come from crafted
     all-0xFF vectors (Dragino 55 schemas, Dingtek 13, Netvox 9).
 
+- **CR-2026-187 (PS-616 to PS-618; la-payload-schema branch `cr/0.5.8-apply-187`, dc8f184, for
+  0.5.8): the labels of a bitmask's set bits.** An unsigned integer or unsigned bit range may
+  declare `bit_labels` (`{bit: label}`, 0 the least significant), with `join` (a string),
+  `none` (a string) and `order` (`ascending`, the default, or `descending`). It reports the
+  labels of the listed set bits in that order, as a list, or as one text joined by `join`;
+  where no listed bit is set, `[none]` (or `none` with `join`), else `[]` or `""`. A reference
+  binds the number, as for a lookup (PS-523). A set bit with no label is not reported, and
+  warns `Field 'f': bit 2 is set and has no label; it is not reported (PS-617)`. An encoder
+  takes a list, or the joined text where `join` is declared, sets the bits of the given labels
+  and no others; order and repeats do not matter, and `[]`, `""` or the `none` label write 0
+  (PS-618). With an empty `join` it splits the text by the longest label first, and a schema
+  where one label is a prefix of another decodes but is refused for encoding, as PS-606 does.
+  - **Load (PS-616, PS-617), the prototype's `check_bit_labels` text, first error per field:**
+    a signed or non-integer type (`... not 's8' (PS-616)`), a bit outside the width, two bits
+    with one label, a label containing a non-empty `join`, a `none` equal to a bit's label, an
+    `order` other than ascending or descending, `join`/`none`/`order` without `bit_labels`, and
+    `bit_labels` beside `lookup`, `add`, `mult`, `div`, `transform`, `polynomial`, `time`,
+    `compute`, `value` or `encoding`. A bit key written as JSON digits (`"3"`) is the bit 3.
+  - **Where:** Python `bit_labels_error`/`bit_labels_errors` (from `schema_iterator_errors`, so
+    the interpreter, the validator and the TS013 generator), `decode_bit_labels` at the end of
+    `_apply_modifiers` (the number kept in `_lookup_numbers`, which `_bind` reads) and
+    `encode_bit_labels` at the top of `_reverse_modifiers`; the generator's `bitLabels` helper
+    in `_apply_modifiers_expr` (the number in `lv`, `_bind_js` binding through `refValue`) and
+    the runtime's `encBitLabels` in `encReverseModifiers`; Go `go/schema/cr187.go`
+    (`checkBitLabels` from `checkFieldRules`, the decode at the end of
+    `applyLookupAndModifiers`, the encode in `reverseLookupLabelMode` and
+    `bitfieldLabelValue`, `bindReference` treating it as a lookup); Java `BitLabels` (from
+    `checkWave4`, `applyGroupMember`, `Encoder.reverseModifiers`, `DecodeContext.recordLookup`);
+    C# `BitLabels.cs` (from `CheckWave4`, `ApplyPostRead`, `ReverseModifiers`,
+    `DecodeContext.Bind`). Each reads the declaration as written (`decl`, `getRaw`, `Node`).
+    `_meta` `reports` is `array`, or `string` with `join` (`reports_of`, `reportsOf`,
+    `Reports.of`, `Meta.ReportsOf`); `generate_output_schema.py` declares the same.
+  - **Measured before:** every implementation ignored the key, reported the number (`{f: 5}`)
+    and failed to encode a label (Python: `could not convert string to float: 'a'`).
+  - **C:** has no bit_labels. `tools/schema_binary.py` refuses `bit_labels`, `join`, `none` and
+    `order` by name (PS-446), and the C harness files the fixture as a C gap.
+  - **Round trips:** an unlabelled set bit is not in the output, so such a vector cannot
+    re-encode; `encode-round-trip.py` files it as the inherent reason `unlabelled-bit`, read
+    from the PS-617 warning.
+  - **Cases:** `tests/cr-2026-187-cases.yaml` (the prototype's `TestCR2026187BitLabels`, 18
+    tests, as decode, encode, `_meta` and load cases), read by `test_cr_2026_187_cases.py`
+    (reference, validator, generator, generated codec and `schema_binary.py`), Go
+    `cr187_test.go`, Java `CR2026187Test`, C# `CR2026_187Tests`. Fixture
+    `_language-conformance/bit-labels.yaml` (ports 1-6: a list from a bit range, ascending with
+    `none`, descending, joined text, an empty join and its `none`, and the unlabelled-bit
+    warning through `expected_warnings`). **Floors:** decode 2901 -> 2909 in Go, Java and C#;
+    re-encode +7 everywhere (Python and Java 2290 -> 2297, C# 2291 -> 2298, Go 2308 -> 2315,
+    plain 2280 -> 2287), `plain fixed` +7 (Python 255 -> 262, Go, Java and C# 249 -> 256).
+  - **Corpus and registry:** no corpus, library, example or registry schema (965 files, 543 in
+    the registry) declares any of the four keys on a field, so none is rejected and no decode
+    or encode output changes.
+
 - **CR-2026-183 (PS-096 amended, PS-605, PS-606; la-payload-schema main, for 0.5.8): encoding
   a bitfield_string's segments.** Decode is unchanged. An encoder removes the declared `prefix`
   and rejects a value without it, then splits the rest on the delimiter and rejects a segment

@@ -1,0 +1,153 @@
+# CR-2026-187 (PS-616 to PS-618): `bit_labels` on an unsigned integer or unsigned bit range
+# reports the labels of its set bits, as a list or, with `join`, as one text; `none` is the
+# label where no listed bit is set and `order` is ascending (the default) or descending. A
+# reference binds the number (PS-523). A set bit with no label is not reported and warned
+# about (PS-617). An encoder sets the bits of the given labels and no others (PS-618).
+#
+# Read by the reference and the generated codec (tests/test_cr_2026_187_cases.py), Go
+# (go/schema/cr187_test.go), Java (CR2026187Test.java) and C# (CR2026_187Tests.cs). C has no
+# bit_labels: tools/schema_binary.py refuses the key (PS-446). Mirrors the spec prototype's
+# TestCR2026187BitLabels case for case.
+#
+#   decode: `schema` (YAML text), `payload` (hex), `expected` (the whole decoded data) and
+#           optionally `warnings` (each must be among the decode's warnings, exactly).
+#   cases:  `schema`, `input` (JSON text) and either `payload` (hex) or `error`.
+#   meta:   `schema`, `payload` and `reports`, what `_meta.fields.f.reports` is (PS-570).
+#   load:   `schema` and `error`, the text the schema's load error contains.
+#
+# The errors and the warning are the spec prototype's text.
+
+decode:
+
+- name: joined_text
+  schema: "name: t\nfields:\n  - {name: sensor_type, type: u8, bit_labels: {0: T/H, 1: CO2, 2: PMx, 3: Gas1, 4: Gas2, 5: Light, 6: Noise, 7: Pressure}, join: ','}\n"
+  payload: "0f"
+  expected: {sensor_type: "T/H,CO2,PMx,Gas1"}
+
+- name: a_list_of_a_bit_range
+  schema: "name: t\nfields:\n  - {name: alarms, type: 'u16[4:11]', consume: 2, bit_labels: {0: low_battery, 3: tamper, 5: leak}}\n"
+  payload: "0090"
+  expected: {alarms: [low_battery, tamper]}
+
+- name: a_list_of_a_bit_range_none_set
+  schema: "name: t\nfields:\n  - {name: alarms, type: 'u16[4:11]', consume: 2, bit_labels: {0: low_battery, 3: tamper, 5: leak}}\n"
+  payload: "0000"
+  expected: {alarms: []}
+
+- name: descending_order
+  schema: "name: t\nfields:\n  - {name: f, type: u8, bit_labels: {0: a, 1: b}, none: None, order: descending}\n"
+  payload: "03"
+  expected: {f: [b, a]}
+
+- name: none_label
+  schema: "name: t\nfields:\n  - {name: f, type: u8, bit_labels: {0: a, 1: b}, none: None, order: descending}\n"
+  payload: "00"
+  expected: {f: [None]}
+
+- name: an_empty_join
+  schema: "name: t\nfields:\n  - {name: f, type: u8, bit_labels: {0: 'Bit0 ', 3: 'Bit3 '}, join: '', none: 'None '}\n"
+  payload: "09"
+  expected: {f: "Bit0 Bit3 "}
+
+- name: an_empty_join_none
+  schema: "name: t\nfields:\n  - {name: f, type: u8, bit_labels: {0: 'Bit0 ', 3: 'Bit3 '}, join: '', none: 'None '}\n"
+  payload: "00"
+  expected: {f: "None "}
+
+- name: an_empty_join_with_a_prefix_label_decodes
+  schema: "name: t\nfields:\n  - {name: f, type: u8, bit_labels: {0: A, 1: AB}, join: ''}\n"
+  payload: "03"
+  expected: {f: "AAB"}
+
+- name: an_unlisted_set_bit_warns
+  schema: "name: t\nfields:\n  - {name: f, type: u8, bit_labels: {0: a}}\n"
+  payload: "05"
+  expected: {f: [a]}
+  warnings: ["Field 'f': bit 2 is set and has no label; it is not reported (PS-617)"]
+
+- name: a_reference_binds_the_number
+  schema: "name: t\nfields:\n  - {name: f, type: u8, bit_labels: {0: a, 1: b}}\n  - {name: twice, type: number, compute: {op: mul, a: $f, b: 2}}\n"
+  payload: "03"
+  expected: {f: [a, b], twice: 6}
+
+cases:
+
+- name: joined_text
+  schema: "name: t\nfields:\n  - {name: sensor_type, type: u8, bit_labels: {0: T/H, 1: CO2, 2: PMx, 3: Gas1, 4: Gas2, 5: Light, 6: Noise, 7: Pressure}, join: ','}\n"
+  input: '{"sensor_type": "Gas1,T/H,CO2,PMx"}'
+  payload: "0f"
+
+- name: a_list_of_a_bit_range_any_order_and_repeats
+  schema: "name: t\nfields:\n  - {name: alarms, type: 'u16[4:11]', consume: 2, bit_labels: {0: low_battery, 3: tamper, 5: leak}}\n"
+  input: '{"alarms": ["tamper", "low_battery", "tamper"]}'
+  payload: "0090"
+
+- name: none_label_writes_zero
+  schema: "name: t\nfields:\n  - {name: f, type: u8, bit_labels: {0: a, 1: b}, none: None, order: descending}\n"
+  input: '{"f": ["None"]}'
+  payload: "00"
+
+- name: an_empty_join
+  schema: "name: t\nfields:\n  - {name: f, type: u8, bit_labels: {0: 'Bit0 ', 3: 'Bit3 '}, join: '', none: 'None '}\n"
+  input: '{"f": "Bit3 Bit0 "}'
+  payload: "09"
+
+- name: an_empty_join_with_a_prefix_label_is_not_encoded
+  schema: "name: t\nfields:\n  - {name: f, type: u8, bit_labels: {0: A, 1: AB}, join: ''}\n"
+  input: '{"f": "AAB"}'
+  error: "Field 'f': with an empty join, one label is a prefix of another, so its text cannot be split; the schema decodes but is not encoded (PS-617)"
+
+- name: an_unknown_label_is_rejected
+  schema: "name: t\nfields:\n  - {name: f, type: u8, bit_labels: {0: a}}\n"
+  input: '{"f": ["z"]}'
+  error: "Field 'f': 'z' is not one of its labels (PS-618)"
+
+meta:
+
+- name: a_list
+  schema: "name: t\nfields:\n  - {name: f, type: u8, bit_labels: {0: a}}\n"
+  payload: "01"
+  reports: array
+
+- name: joined_text
+  schema: "name: t\nfields:\n  - {name: f, type: u8, bit_labels: {0: a}, join: ','}\n"
+  payload: "01"
+  reports: string
+
+load:
+
+- name: signed_type
+  schema: "name: t\nfields:\n  - {name: f, type: s8, bit_labels: {0: a}}\n"
+  error: "Field 'f': bit_labels is declared on an unsigned integer or an unsigned bit range, not 's8' (PS-616)"
+
+- name: bit_outside_the_width
+  schema: "name: t\nfields:\n  - {name: f, type: u8, bit_labels: {8: a}}\n"
+  error: "Field 'f': bit 8 is outside its 8 bits (PS-617)"
+
+- name: two_bits_one_label
+  schema: "name: t\nfields:\n  - {name: f, type: u8, bit_labels: {0: a, 1: a}}\n"
+  error: "Field 'f': two bits have the label 'a' (PS-617)"
+
+- name: a_label_contains_the_join
+  schema: "name: t\nfields:\n  - {name: f, type: u8, bit_labels: {0: 'a,b'}, join: ','}\n"
+  error: "Field 'f': a label contains the join text ',' (PS-617)"
+
+- name: with_a_lookup
+  schema: "name: t\nfields:\n  - {name: f, type: u8, bit_labels: {0: a}, lookup: [x]}\n"
+  error: "Field 'f': bit_labels reports labels, so lookup does not apply (PS-616)"
+
+- name: with_arithmetic
+  schema: "name: t\nfields:\n  - {name: f, type: u8, bit_labels: {0: a}, div: 2}\n"
+  error: "Field 'f': bit_labels reports labels, so div does not apply (PS-616)"
+
+- name: none_is_a_bit_label
+  schema: "name: t\nfields:\n  - {name: f, type: u8, bit_labels: {0: a}, none: a}\n"
+  error: "Field 'f': none is a string that no bit has as its label (PS-616)"
+
+- name: order_other_than_ascending_or_descending
+  schema: "name: t\nfields:\n  - {name: f, type: u8, bit_labels: {0: a}, order: random}\n"
+  error: "Field 'f': order is ascending or descending (PS-616)"
+
+- name: join_without_bit_labels
+  schema: "name: t\nfields:\n  - {name: f, type: u8, join: ','}\n"
+  error: "Field 'f': join, none and order belong to bit_labels (PS-616)"

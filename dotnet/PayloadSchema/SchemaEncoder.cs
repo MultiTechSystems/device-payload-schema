@@ -2880,6 +2880,8 @@ public static class SchemaEncoder
             // The value as given, for a PS-168 rejection to name (PS-552).
             _givenField = field;
             _givenValue = value;
+            if (BitLabels.Declared(field))
+                return BitLabels.Encode(field, value, MessageValue);                 // PS-618
             var reversed = ReverseLookup(value, field.Lookup, field.Name ?? "?");   // PS-169
 
             if (reversed is bool unmatched && field.Lookup is { Count: > 0 })

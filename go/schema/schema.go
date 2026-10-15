@@ -906,6 +906,9 @@ func reverseLookupAnyCode(field Field, value any) (any, error) {
 }
 
 func reverseLookupLabelMode(field Field, value any, strict bool) (any, error) {
+	if hasBitLabels(field) {
+		return encodeBitLabels(field, value) // PS-618 (CR-2026-187)
+	}
 	if field.Lookup == nil && field.LookupArray == nil {
 		return value, nil
 	}
@@ -3088,6 +3091,15 @@ func applyLookupAndModifiers(value any, field Field, ctx *DecodeContext) (any, e
 				return nil, fmt.Errorf("lookup index %d out of bounds for %d entries",
 					intVal, len(field.LookupArray))
 			}
+		}
+	}
+
+	// PS-616 (CR-2026-187): the labels of the set bits; a reference binds the number
+	// (PS-523), as for a lookup.
+	if hasBitLabels(field) {
+		if n, ok := bitLabelNumber(value); ok {
+			ctx.lookupNumber = lookupNumber{owner: field.Name, number: value, set: true}
+			value = decodeBitLabels(field, n, ctx)
 		}
 	}
 
@@ -5624,6 +5636,9 @@ func encodeBitfieldRun(run []Field, data map[string]any, ctx *EncodeContext) err
 
 // bitfieldLabelValue is the number a bit range's enum label stands for.
 func bitfieldLabelValue(value any, gf Field) (float64, error) {
+	if hasBitLabels(gf) {
+		return encodeBitLabels(gf, value) // PS-618 (CR-2026-187)
+	}
 	// A label the lookup refuses outright - a boolean with no key of its own - is
 	// reported with its reason rather than as an undeclared value (PS-513).
 	if _, err := reverseLookupLabel(gf, value); err != nil {

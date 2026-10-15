@@ -153,8 +153,63 @@ function encFits(raw, bits, signed, f, given, rangeType) {   // check_fits
   return raw;
 }
 
+/* encode_bit_labels (PS-618, CR-2026-187): the number with the bits of the given labels set,
+ * every other bit 0; a list, or the joined text where `join` is declared. */
+function encBitLabels(f, v) {
+  var byLabel = {}, labels = [], items, i, k;
+  for (k in f.bit_labels) {
+    if (Object.prototype.hasOwnProperty.call(f.bit_labels, k)) {
+      byLabel["$" + f.bit_labels[k]] = Number(k);
+      labels.push(f.bit_labels[k]);
+    }
+  }
+  var hasJoin = Object.prototype.hasOwnProperty.call(f, "join");
+  var none = f.none === undefined ? null : f.none;
+  if (typeof v === "string" && hasJoin) {
+    if (v === "" || v === none) items = [];
+    else if (f.join) items = v.split(f.join);
+    else {
+      labels.sort(function (a, b) { return b.length - a.length; });
+      for (i = 0; i < labels.length; i++) {
+        for (k = 0; k < labels.length; k++) {
+          if (labels[i] !== labels[k] && labels[k].indexOf(labels[i]) === 0) {
+            encFail("Field '" + f.name + "': with an empty join, one label is a prefix of another, " +
+                    "so its text cannot be split; the schema decodes but is not encoded (PS-617)");
+          }
+        }
+      }
+      items = [];
+      var rest = v;
+      while (rest) {
+        var found = null;
+        for (i = 0; i < labels.length; i++) {
+          if (rest.indexOf(labels[i]) === 0) { found = labels[i]; break; }
+        }
+        if (found === null) encFail("Field '" + f.name + "': " + encPyRepr(rest) + " does not begin with a label (PS-618)");
+        items.push(found);
+        rest = rest.slice(found.length);
+      }
+    }
+  } else if (Array.isArray(v)) {
+    items = v.filter(function (x) { return !(none !== null && x === none); });
+  } else {
+    encFail("Field '" + f.name + "': " + encPyRepr(v) + " is not a list of labels" +
+            (hasJoin ? " or joined text" : "") + " (PS-618)");
+  }
+  var n = 0;
+  for (i = 0; i < items.length; i++) {
+    if (typeof items[i] !== "string" || !Object.prototype.hasOwnProperty.call(byLabel, "$" + items[i])) {
+      encFail("Field '" + f.name + "': " + encPyRepr(items[i]) + " is not one of its labels (PS-618)");
+    }
+    var bit = byLabel["$" + items[i]];
+    if (Math.floor(n / Math.pow(2, bit)) % 2 === 0) n += Math.pow(2, bit);
+  }
+  return n;
+}
+
 function encReverseModifiers(v, f) {                  // _reverse_modifiers
   encGivenRec = { f: f, v: v };
+  if (f.bit_labels) return encBitLabels(f, v);         // PS-618 (CR-2026-187)
   v = encReverseLookup(v, f.lookup, f.name);
   if (typeof v === "boolean" && f.lookup) {
     encFail(v + " is not a label with a key of its own in the lookup for " +
@@ -3445,6 +3500,25 @@ function refValue(label, number) {
   return typeof label === "number" ? label : number;
 }
 
+// --- The labels of a bitmask's set bits (PS-616, PS-617; CR-2026-187) ---
+// `spec.table` is [bit, label] in the declared order. A set bit with no label is not
+// reported and is warned about; no listed bit set reports the `none` label, if any.
+function bitLabels(spec, n, wn) {
+  if (typeof n !== "number") return n;
+  var listed = {}, labels = [], i;
+  for (i = 0; i < spec.table.length; i++) listed[spec.table[i][0]] = true;
+  for (i = 0; Math.pow(2, i) <= n; i++) {
+    if (Math.floor(n / Math.pow(2, i)) % 2 === 1 && !listed[i]) {
+      wn.push("Field '" + spec.name + "': bit " + i + " is set and has no label; it is not reported (PS-617)");
+    }
+  }
+  for (i = 0; i < spec.table.length; i++) {
+    if (Math.floor(n / Math.pow(2, spec.table[i][0])) % 2 === 1) labels.push(spec.table[i][1]);
+  }
+  if (!labels.length && spec.none !== null) labels.push(spec.none);
+  return spec.join !== null ? labels.join(spec.join) : labels;
+}
+
 // --- Lookup default template ---
 // PS-406: a mapping default carrying ${value} names the value it could not map, written
 // in decimal. String() gives the shortest round-tripping decimal with no fraction where
@@ -5197,7 +5271,7 @@ function writeS(buf, pos, size, value, endian) {
         names = [js_name]
         if with_var and field.get('var'):
             names.insert(0, to_js_name(field['var']))
-        if number is None and 'lookup' not in field:
+        if number is None and 'lookup' not in field and 'bit_labels' not in field:
             return [f'vars.{n} = {value};' for n in names]
         if number is None:
             number = f'lv[{json.dumps(field.get("name", ""))}]'
@@ -5297,6 +5371,15 @@ function writeS(buf, pos, size, value, endian) {
                 lk = json.dumps(lookup)
                 expr = f'seqLookup({lk}, {expr})'
             expr = f'(lv[{number_key}] = {pre_lookup}, {expr})'
+        if 'bit_labels' in field:
+            # PS-616 (CR-2026-187): the labels of the set bits; a reference binds the
+            # number before them (`lv`), as for a lookup (PS-523).
+            from schema_interpreter import bit_label_table
+            number_key = json.dumps(field.get('name', ''))
+            spec = json.dumps({'name': str(field.get('name')),
+                               'table': [list(t) for t in bit_label_table(field)],
+                               'join': field.get('join'), 'none': field.get('none')})
+            expr = f'(lv[{number_key}] = {expr}, bitLabels({spec}, lv[{number_key}], wn))'
         if stash:
             bounds = field.get('valid_range')
             if field.get('out_of_range') == 'omit' and isinstance(bounds, (list, tuple)) \
