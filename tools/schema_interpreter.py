@@ -5125,7 +5125,7 @@ def _skip_bit_positions(member: Dict[str, Any], endian: str) -> set:
     return positions
 
 
-def _skip_bit_check(fields: Any, endian: str, warnings: List[str], top: bool = False) -> None:
+def _skip_bit_check(fields: Any, endian: str, notes: List[str], top: bool = False) -> None:
     """PS-607 over one field list read in order, as the spec prototype's `_skip_bit_check`.
     Bytes are tracked from the start of the list; a field whose size the walk cannot know
     ends the tracking, so the check stays silent rather than guess. Nested field lists are
@@ -5139,7 +5139,7 @@ def _skip_bit_check(fields: Any, endian: str, warnings: List[str], top: bool = F
             bits = read.pop(offset, None)
             if bits and len(bits) < 8:
                 where = f"byte {offset}" if state['known'] else "a byte"
-                warnings.append(
+                notes.append(
                     f"{where} is read in part ({_bit_list(bits)}) and {by} advances past "
                     f"it; {_bit_list(set(range(8)) - bits)} "
                     f"{'is' if len(bits) == 7 else 'are'} read by no field. A decoder "
@@ -5156,7 +5156,7 @@ def _skip_bit_check(fields: Any, endian: str, warnings: List[str], top: bool = F
         for key, value in item.items():  # nested lists: walked on their own
             if key in ('fields', 'element', 'trailer', 'default') or \
                     key in _SKIP_BIT_CONSTRUCTS:  # not byte_group (PS-553)
-                _skip_bit_nested(value, endian, warnings)
+                _skip_bit_nested(value, endian, notes)
         kind = str(item.get('type', '')).strip()
         lower = kind.lower()
         lower = _META_TYPE_ALIASES.get(lower, lower)
@@ -5203,36 +5203,37 @@ def _skip_bit_check(fields: Any, endian: str, warnings: List[str], top: bool = F
         lose_track()
 
 
-def _skip_bit_nested(node: Any, endian: str, warnings: List[str]) -> None:
+def _skip_bit_nested(node: Any, endian: str, notes: List[str]) -> None:
     """The field lists within a construct, each checked from its own start."""
     if isinstance(node, list):
         if all(isinstance(item, dict) for item in node):
-            _skip_bit_check(node, endian, warnings)
+            _skip_bit_check(node, endian, notes)
         else:
             for part in node:
-                _skip_bit_nested(part, endian, warnings)
+                _skip_bit_nested(part, endian, notes)
     elif isinstance(node, dict):
         if 'type' in node:
-            _skip_bit_check([node], endian, warnings)
+            _skip_bit_check([node], endian, notes)
             return
         for key, value in node.items():
             if key in ('fields', 'cases', 'default', 'groups', 'tag_fields') or \
                     isinstance(value, list):
                 if key == 'cases' and isinstance(value, dict):
                     for body in value.values():
-                        _skip_bit_nested(body, node.get('endian', endian), warnings)
+                        _skip_bit_nested(body, node.get('endian', endian), notes)
                 else:
-                    _skip_bit_nested(value, node.get('endian', endian), warnings)
+                    _skip_bit_nested(value, node.get('endian', endian), notes)
 
 
-def skip_bit_warnings(schema: Dict[str, Any]) -> List[str]:
-    """The validator warning PS-607 asks for (CR-2026-184), in the spec prototype's words: a
-    byte some of whose bits are read by fields that consume nothing, and which a skip or a
-    `consume` then advances past with other bits read by no field. It never rejects the
-    schema. A byte_group is not checked: PS-553 lets a member leave reserved bits unnamed."""
+def skip_bit_notes(schema: Dict[str, Any]) -> List[str]:
+    """The information note PS-607 allows (CR-2026-184, amended 2026-10-15), in the spec
+    prototype's words: a byte some of whose bits are read by fields that consume nothing,
+    and which a skip or a `consume` then advances past with other bits read by no field.
+    It is information only, never a warning or an error, and never rejects the schema.
+    A byte_group is not checked: PS-553 lets a member leave reserved bits unnamed."""
     schema = expand_refs(schema)[0]
     endian = schema.get('endian', 'big')
-    warnings: List[str] = []
+    notes: List[str] = []
     ports = schema.get('ports')
     if isinstance(ports, dict) and ports:
         for port, entry in ports.items():
@@ -5240,14 +5241,14 @@ def skip_bit_warnings(schema: Dict[str, Any]) -> List[str]:
             found: List[str] = []
             _skip_bit_check(fields if isinstance(fields, list) else [], endian, found,
                             top=True)
-            warnings.extend(f"port {port}: {w}" for w in found)
+            notes.extend(f"port {port}: {w}" for w in found)
     else:
         header = schema.get('header')
         fields = schema.get('fields')
         _skip_bit_check((header if isinstance(header, list) else [])
                         + (fields if isinstance(fields, list) else []),
-                        endian, warnings, top=True)
-    return warnings
+                        endian, notes, top=True)
+    return notes
 
 
 def has_semantic(schema: Dict[str, Any]) -> bool:
