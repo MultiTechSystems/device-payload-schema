@@ -699,6 +699,7 @@ public static partial class SchemaParser
             CheckAnnotations(fieldMap);       // PS-510
             CheckWave4(fieldMap);
             TemplateStrings.Check(fieldMap, aggregates);   // PS-361, PS-590, PS-532, PS-430
+            TimeFields.Parse(fieldMap);       // PS-610 to PS-614 (CR-2026-186)
             CheckLookupTemplate(fieldMap);    // PS-407
             if (fieldMap.TryGetValue("byte_group", out var group))
                 CheckByteGroup(fieldMap, group);   // PS-070, PS-397
@@ -753,6 +754,7 @@ public static partial class SchemaParser
             f.Name = Scalar(name);
         if (fm.TryGetValue("template", out var templateText) && templateText is YamlScalarNode)
             f.Template = Scalar(templateText);                             // PS-590
+        f.Time = TimeFields.Parse(fm);                                     // PS-610 (CR-2026-186)
 
         if (fm.TryGetValue("type", out var typeNode))
         {

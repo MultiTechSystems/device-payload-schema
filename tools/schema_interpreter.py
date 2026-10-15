@@ -22,7 +22,7 @@ import re
 import json
 import math
 from dataclasses import dataclass, field
-from decimal import ROUND_HALF_EVEN, Decimal
+from decimal import ROUND_FLOOR, ROUND_HALF_EVEN, Decimal
 from fractions import Fraction
 from typing import Dict, Any, List, Optional, Tuple, Union
 from enum import Enum
@@ -4057,6 +4057,407 @@ def checksum_unwritten_message(name) -> str:
             f"is reached (PS-587)")
 
 
+# --- CR-2026-186: a field reports a time (PS-610 to PS-615) --------------------------------
+# The spec prototype's format_time, time_from_parts, parse_time, time_input_seconds,
+# expand_time_parts and check_time_fields. Instants are exact Decimal seconds since 1970,
+# so a fractional value does not drift; a millisecond count, `fraction` and %L truncate.
+
+TIME_FORMATS = {
+    'unix': ('since', 'milliseconds'),
+    'iso8601': ('fraction',),
+    'calendar': ('month_labels', 'keys'),
+    'pattern': ('pattern',),
+}
+TIME_COMMON = ('format', 'epoch', 'parts')
+TIME_PARTS = ('year', 'month', 'day', 'hour', 'minute', 'second')
+MONTH_ABBR = ('Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov',
+              'Dec')
+DAY_ABBR = ('Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun')
+_TIME_RFC3339 = re.compile(
+    r'(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(\.\d+)?(Z|\+00:00)')
+_TIME_EPOCH = re.compile(r'\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z')
+_PATTERN_TOKEN = re.compile(r'%(.)', re.S)
+#: The numeric types besides the integers and bit ranges (PS-610).
+TIME_NUMERIC_TYPES = ('number', 'integer', 'f16', 'bf16', 'f32', 'f64', 'f32le16',
+                      'f32be16le', 'udec', 'sdec') + tuple(MINIFLOAT_SIZES)
+#: The types of a part field that reads no bytes (PS-615).
+_TIME_UNWRITTEN_PART_TYPES = ('number', 'integer', 'string', 'boolean')
+
+
+def is_time_field(field_def) -> bool:
+    """A field declaring a `time` mapping (PS-610)."""
+    return isinstance(field_def, dict) and isinstance(field_def.get('time'), dict)
+
+
+def _days_from_civil(y: int, m: int, d: int) -> int:
+    """Days since 1970-01-01 of a proleptic Gregorian date (Howard Hinnant's algorithm)."""
+    y -= m <= 2
+    era = (y if y >= 0 else y - 399) // 400
+    yoe = y - era * 400
+    doy = (153 * (m + (-3 if m > 2 else 9)) + 2) // 5 + d - 1
+    doe = yoe * 365 + yoe // 4 - yoe // 100 + doy
+    return era * 146097 + doe - 719468
+
+
+def _civil_from_days(z: int) -> Tuple[int, int, int]:
+    z += 719468
+    era = (z if z >= 0 else z - 146096) // 146097
+    doe = z - era * 146097
+    yoe = (doe - doe // 1460 + doe // 36524 - doe // 146096) // 365
+    doy = doe - (365 * yoe + yoe // 4 - yoe // 100)
+    mp = (5 * doy + 2) // 153
+    d = doy - (153 * mp + 2) // 5 + 1
+    m = mp + (3 if mp < 10 else -9)
+    return yoe + era * 400 + (m <= 2), m, d
+
+
+def _valid_civil(y, mo, d, h=0, mi=0, s=0) -> bool:
+    if not (1 <= y <= 9999 and 1 <= mo <= 12 and 0 <= h <= 23 and 0 <= mi <= 59
+            and 0 <= s <= 59):
+        return False
+    return 1 <= d <= calendar.monthrange(y, mo)[1]
+
+
+def _civil_seconds(y, mo, d, h=0, mi=0, s=0) -> int:
+    return _days_from_civil(y, mo, d) * 86400 + h * 3600 + mi * 60 + s
+
+
+def time_instant(text) -> Optional[Decimal]:
+    """An `epoch` or `since`: an RFC 3339 date-time in UTC with a Z designator, as Decimal
+    seconds since 1970 (PS-355); None where it is not one."""
+    if not isinstance(text, str) or not _TIME_EPOCH.fullmatch(text):
+        return None
+    return _parse_rfc3339(text)
+
+
+def _parse_rfc3339(text) -> Optional[Decimal]:
+    match = _TIME_RFC3339.fullmatch(text) if isinstance(text, str) else None
+    if not match:
+        return None
+    parts = [int(g) for g in match.groups()[:6]]
+    if not _valid_civil(*parts):
+        return None
+    return Decimal(_civil_seconds(*parts)) + (Decimal(match.group(7)) if match.group(7)
+                                              else Decimal(0))
+
+
+def _time_numeric(field_def) -> bool:
+    t = str(field_def.get('type', ''))
+    return (t in TIME_NUMERIC_TYPES or t in INTEGER_TYPE_INFO
+            or _BIT_RANGE.match(t) is not None)
+
+
+def _computes(field_def) -> bool:
+    return any(k in field_def for k in ('value', 'compute', 'ref', 'polynomial'))
+
+
+def time_field_error(field_def) -> Optional[str]:
+    """PS-610 to PS-614 for one field declaring `time`, in the spec prototype's text and
+    order (check_time_fields); None where it is valid."""
+    name = field_def.get('name')
+    spec = field_def['time']
+    where = f"Field '{name}'"
+    if not isinstance(spec, dict) or spec.get('format') not in TIME_FORMATS:
+        return (f"{where}: `time` declares a format of unix, iso8601, calendar or pattern "
+                f"(PS-610)")
+    fmt = spec['format']
+    extra = sorted(str(k) for k in spec
+                   if k not in TIME_COMMON and k not in TIME_FORMATS[fmt])
+    if extra:
+        return f"{where}: {', '.join(extra)} does not belong to the {fmt} format (PS-610)"
+    if not _time_numeric(field_def) or 'lookup' in field_def:
+        return (f"{where}: `time` is declared on a numeric field, not "
+                f"{field_def.get('type')!r} (PS-610)")
+    for key in ('epoch', 'since'):
+        if key in spec and time_instant(spec[key]) is None:
+            return (f"{where}: `{key}` {spec[key]!r} is not an RFC 3339 date-time in UTC "
+                    f"with a Z designator (PS-355, PS-610)")
+    if 'milliseconds' in spec and not isinstance(spec['milliseconds'], bool):
+        return f"{where}: `milliseconds` is true or false (PS-611)"
+    fraction = spec.get('fraction')
+    if fraction is not None and (isinstance(fraction, bool) or not isinstance(fraction, int)
+                                 or not 1 <= fraction <= 9):
+        return f"{where}: `fraction` is an integer from 1 to 9 (PS-611)"
+    labels = spec.get('month_labels')
+    if labels is not None and not (isinstance(labels, list) and len(labels) == 12
+                                   and all(isinstance(x, str) for x in labels)):
+        return f"{where}: month_labels are exactly twelve strings (PS-411, PS-612)"
+    keys = spec.get('keys')
+    if keys is not None:
+        if not isinstance(keys, dict) or any(k not in TIME_PARTS for k in keys) or not all(
+                isinstance(v, str) and v for v in keys.values()):
+            return f"{where}: keys map part names to member names (PS-412)"
+        names = [keys.get(part, part) for part in TIME_PARTS]
+        if len(set(names)) != len(names):
+            return f"{where}: keys map two parts to one name (PS-412)"
+    if fmt == 'pattern':
+        pattern = spec.get('pattern')
+        if not isinstance(pattern, str):
+            return f"{where}: a pattern format declares `pattern` (PS-613)"
+        tokens = _PATTERN_TOKEN.findall(pattern)
+        for token in tokens:
+            if token not in 'YmdHMSLba%':
+                return f"{where}: %{token} is not a pattern directive (PS-613)"
+        if pattern.count('%') != 2 * tokens.count('%') + len(tokens) - tokens.count('%'):
+            return f"{where}: a pattern ends with a lone % (PS-613)"
+    parts = spec.get('parts')
+    if parts is not None:
+        if field_def.get('type') != 'number' or _computes(field_def):
+            return (f"{where}: `parts` belongs to a `type: number` field that computes "
+                    f"nothing else (PS-614)")
+        if (not isinstance(parts, dict) or any(k not in TIME_PARTS for k in parts)
+                or not all(k in parts for k in ('year', 'month', 'day'))
+                or not all(isinstance(v, str) and v.startswith('$')
+                           for v in parts.values())):
+            return (f"{where}: `parts` maps year, month and day, and optionally hour, "
+                    f"minute and second, to $references (PS-614)")
+        if 'epoch' in spec:
+            return f"{where}: `epoch` does not apply to `parts` (PS-614)"
+    elif field_def.get('type') == 'number' and not _computes(field_def):
+        return f"{where}: a computed `time` field declares `parts` or a computation (PS-614)"
+    return None
+
+
+def time_errors(node) -> List[str]:
+    """PS-610 to PS-614 at load: every field declaring `time`, wherever it sits."""
+    errors = []
+    if isinstance(node, list):
+        for item in node:
+            errors.extend(time_errors(item))
+    elif isinstance(node, dict):
+        if 'time' in node and 'type' in node:
+            error = time_field_error(node)
+            if error:
+                errors.append(error)
+        for key, value in node.items():
+            if key != 'test_vectors' and isinstance(value, (list, dict)):
+                errors.extend(time_errors(value))
+    return errors
+
+
+def _time_decimal(value) -> Decimal:
+    """A decoded number as an exact Decimal: a float by its shortest repr."""
+    if isinstance(value, Decimal):
+        return value
+    if isinstance(value, float):
+        return Decimal(repr(value))
+    return Decimal(int(value))
+
+
+def _floor(value: Decimal) -> int:
+    return int(value.to_integral_value(rounding=ROUND_FLOOR))
+
+
+def _fraction_digits(fraction: Decimal, count: int) -> str:
+    """`count` fractional digits, truncated."""
+    return str(_floor(fraction * (Decimal(10) ** count))).zfill(count)
+
+
+def _js_number(value: Decimal):
+    return int(value) if value == value.to_integral_value() else float(value)
+
+
+def format_time(field_def, seconds) -> Any:
+    """PS-610 to PS-613: the instant `seconds` after the field's epoch, in its format."""
+    spec = field_def['time']
+    epoch = time_instant(spec['epoch']) if 'epoch' in spec else Decimal(0)
+    instant = epoch + _time_decimal(seconds)
+    fmt = spec['format']
+    if fmt == 'unix':
+        count = instant - (time_instant(spec['since']) if 'since' in spec else Decimal(0))
+        if spec.get('milliseconds'):
+            return _floor(count * 1000)
+        return _js_number(count)
+    whole = _floor(instant)
+    fraction = instant - whole
+    days, rest = divmod(whole, 86400)
+    year, month, day = _civil_from_days(days)
+    if not 1 <= year <= 9999:
+        raise FieldError(f"Field '{field_def.get('name')}': the time {instant} s is outside "
+                         f"years 1 to 9999 (PS-610)")
+    hour, minute, second = rest // 3600, rest // 60 % 60, rest % 60
+    if fmt == 'iso8601':
+        text = f'{year:04d}-{month:02d}-{day:02d}T{hour:02d}:{minute:02d}:{second:02d}'
+        if 'fraction' in spec:
+            text += '.' + _fraction_digits(fraction, spec['fraction'])
+        elif fraction:
+            text += '.' + format(fraction.normalize(), 'f').split('.')[1]
+        return text + 'Z'
+    if fmt == 'calendar':
+        labels = spec.get('month_labels')
+        keys = spec.get('keys') or {}
+        values = {'year': year, 'month': labels[month - 1] if labels else month,
+                  'day': day, 'hour': hour, 'minute': minute, 'second': second}
+        return {keys.get(part, part): values[part] for part in TIME_PARTS}
+    out = {'Y': f'{year:04d}', 'm': f'{month:02d}', 'd': f'{day:02d}', 'H': f'{hour:02d}',
+           'M': f'{minute:02d}', 'S': f'{second:02d}', 'L': _fraction_digits(fraction, 3),
+           'b': MONTH_ABBR[month - 1], 'a': DAY_ABBR[(days + 3) % 7], '%': '%'}
+    return _PATTERN_TOKEN.sub(lambda m: out[m.group(1)], spec['pattern'])
+
+
+def time_from_parts(field_def, variables) -> Any:
+    """PS-614: the seconds since 1970 of the UTC instant the referenced parts name, or
+    OMITTED where a part has no value (PS-314). A part that is not a whole number, and
+    parts that name no valid date and time, are errors naming the field."""
+    name = field_def.get('name')
+    parts = field_def['time']['parts']
+    values = {}
+    for part in TIME_PARTS:
+        if part not in parts:
+            continue
+        key = str(parts[part])[1:]
+        value = variables.get(key)
+        if value is None or value is OMITTED or isinstance(value, bool) \
+                or not isinstance(value, (int, float)):
+            return OMITTED
+        if value != int(value):
+            raise FieldError(f"Field '{name}': its {part} is {float(value)!r}, not a whole "
+                             f"number (PS-614)")
+        values[part] = int(value)
+    if not _valid_civil(*(values.get(p, 0) for p in TIME_PARTS)):
+        shown = ', '.join(f"'{p}': {v}" for p, v in values.items())
+        raise FieldError(f"Field '{name}': its parts {{{shown}}} do not name a valid UTC "
+                         f"date and time (PS-614)")
+    return _civil_seconds(*(values.get(p, 0) for p in TIME_PARTS))
+
+
+def time_readback_error(field_def) -> Optional[str]:
+    """PS-615: a pattern that cannot be parsed back to an instant decodes but is not
+    encoded, as PS-606 does; None where it can be."""
+    spec = field_def['time']
+    if spec.get('format') != 'pattern':
+        return None
+    tokens = set(_PATTERN_TOKEN.findall(spec['pattern']))
+    if {'Y', 'd', 'H', 'M', 'S'} <= tokens and tokens & {'m', 'b'}:
+        return None
+    return (f"Field '{field_def.get('name')}': its pattern {spec['pattern']!r} cannot be read "
+            f"back to an instant; the schema decodes but is not encoded (PS-615)")
+
+
+def parse_time(field_def, value) -> Decimal:
+    """PS-615: a time field's value in its format, as Decimal seconds since 1970 (UTC)."""
+    spec = field_def['time']
+    name = field_def.get('name')
+    fmt = spec['format']
+
+    def bad(why: str = '') -> FieldError:
+        return FieldError(f"Field '{name}': {value!r} is not a time in its {fmt} format"
+                          f"{why} (PS-615)")
+
+    def instant(y, mo, d, h, mi, s, frac=Decimal(0)) -> Decimal:
+        if not _valid_civil(y, mo, d, h, mi, s):
+            raise bad()
+        return Decimal(_civil_seconds(y, mo, d, h, mi, s)) + frac
+
+    if fmt == 'unix':
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            raise bad()
+        count = _time_decimal(value)
+        if spec.get('milliseconds'):
+            count /= 1000
+        return count + (time_instant(spec['since']) if 'since' in spec else Decimal(0))
+    if fmt == 'iso8601':
+        parsed = _parse_rfc3339(value)
+        if parsed is None:
+            raise bad()
+        return parsed
+    if fmt == 'calendar':
+        if not isinstance(value, dict):
+            raise bad()
+        keys = spec.get('keys') or {}
+        got = {part: value.get(keys.get(part, part)) for part in TIME_PARTS}
+        labels = spec.get('month_labels')
+        if labels:
+            if got['month'] not in labels:
+                raise bad(f"; month {got['month']!r} is not a label")
+            got['month'] = labels.index(got['month']) + 1
+        if not all(isinstance(v, int) and not isinstance(v, bool) for v in got.values()):
+            raise bad()
+        return instant(*(got[p] for p in TIME_PARTS))
+    error = time_readback_error(field_def)
+    if error:
+        raise FieldError(error)
+    pattern = spec['pattern']
+    regex, groups, pos = '', [], 0
+    for m in _PATTERN_TOKEN.finditer(pattern):
+        regex += re.escape(pattern[pos:m.start()])
+        token = m.group(1)
+        if token == '%':
+            regex += '%'
+        else:
+            regex += {'Y': r'(\d{4})', 'L': r'(\d{3})',
+                      'b': '(' + '|'.join(MONTH_ABBR) + ')',
+                      'a': '(' + '|'.join(DAY_ABBR) + ')'}.get(token, r'(\d{2})')
+            groups.append(token)
+        pos = m.end()
+    regex += re.escape(pattern[pos:])
+    match = re.fullmatch(regex, value) if isinstance(value, str) else None
+    if not match:
+        raise bad()
+    got = {}
+    for token, text in zip(groups, match.groups()):
+        if token in got and got[token] != text:
+            raise bad()
+        got[token] = text
+    month = MONTH_ABBR.index(got['b']) + 1 if 'b' in got else int(got['m'])
+    if 'm' in got and 'b' in got and int(got['m']) != month:
+        raise bad("; its month and month name disagree")
+    frac = Decimal(got['L']) / 1000 if 'L' in got else Decimal(0)
+    result = instant(int(got['Y']), month, int(got['d']), int(got['H']), int(got['M']),
+                     int(got['S']), frac)
+    if 'a' in got:
+        weekday = DAY_ABBR[(_floor(result) // 86400 + 3) % 7]
+        if weekday != got['a']:
+            raise bad(f"; {got['a']} is not that date's weekday")
+    return result
+
+
+def time_input_seconds(field_def, value) -> Any:
+    """PS-615: the number PS-610 reads for a time field's value - seconds since its epoch -
+    which the field's modifiers then invert."""
+    spec = field_def['time']
+    count = parse_time(field_def, value) - (time_instant(spec['epoch']) if 'epoch' in spec
+                                            else Decimal(0))
+    return _js_number(count)
+
+
+def expand_time_parts(fields, data):
+    """PS-615: a `parts` time field's value gives its part fields' values, which the
+    encoder then writes. A part that reads no bytes cannot be written, and the field is
+    refused for encoding. The input itself is not modified."""
+    if not isinstance(data, dict):
+        return data
+    known = {f.get('name'): f for f in fields if isinstance(f, dict)}
+    out = None
+    for field_def in fields:
+        if not is_time_field(field_def) or 'parts' not in field_def['time']:
+            continue
+        name = field_def.get('name')
+        if data.get(name) is None:
+            continue
+        whole = _floor(parse_time(field_def, data[name]))
+        days, rest = divmod(whole, 86400)
+        year, month, day = _civil_from_days(days)
+        moment = {'year': year, 'month': month, 'day': day, 'hour': rest // 3600,
+                  'minute': rest // 60 % 60, 'second': rest % 60}
+        out = dict(data) if out is None else out
+        parts = field_def['time']['parts']
+        for part in TIME_PARTS:
+            if part not in parts:
+                continue
+            key = str(parts[part])[1:]
+            source = known.get(key)
+            if source is not None and source.get('type') in _TIME_UNWRITTEN_PART_TYPES:
+                raise FieldError(f"Field '{name}': its {part} part '{key}' reads no bytes, "
+                                 f"so the schema decodes but is not encoded (PS-615)")
+            given = moment[part]
+            if out.get(key) is not None and out[key] != given:
+                raise FieldError(f"Field '{name}': its {part} is {given}, but '{key}' is "
+                                 f"given {out[key]!r} (PS-615)")
+            out[key] = given
+    return data if out is None else out
+
+
 def schema_iterator_errors(schema):
     """iterator_errors over the top-level and port field lists, and every tlv's reserve.
 
@@ -4071,6 +4472,7 @@ def schema_iterator_errors(schema):
     errors.extend(checksum_placement_errors(schema))                 # PS-608
     errors.extend(bitfield_part_errors(schema))                      # PS-430
     errors.extend(string_template_errors(schema))                    # PS-590
+    errors.extend(time_errors(schema))                               # PS-610 to PS-614
     errors.extend(lookup_type_errors(schema))                        # PS-571
     errors.extend(iterator_errors(schema.get('fields')))
     errors.extend(ipso_instance_errors(schema))                      # PS-548
@@ -4759,6 +5161,9 @@ def reports_of(field_def):
         return next(iter(kinds)) if len(kinds) == 1 else None
     if isinstance(field_def.get('tlv'), dict) and not field_def.get('type'):
         return 'array'                                # `channels` of a merge: false tlv
+    if is_time_field(field_def):                      # PS-610 (CR-2026-186)
+        return {'unix': 'number', 'calendar': 'object'}.get(
+            field_def['time'].get('format'), 'string')
     t = str(field_def.get('type', '')).lower()
     if t == 'repeat':
         return 'array'
@@ -8204,7 +8609,11 @@ class SchemaInterpreter:
             # operation - the defect CR-2026-006 removed from bitfields.
             if field_type in COMPUTED_TYPES:
                 try:
-                    value = self._decode_computed_field(field_def)
+                    if is_time_field(field_def) and 'parts' in field_def['time']:
+                        # PS-614 (CR-2026-186): the instant its parts name.
+                        value = time_from_parts(field_def, self._variables)
+                    else:
+                        value = self._decode_computed_field(field_def)
                     if value is OMITTED:
                         # Zero divisor (PS-278): the field is absent, and decoding of
                         # the rest of the payload continues. A lookup with no entry
@@ -8237,7 +8646,8 @@ class SchemaInterpreter:
                         # (_motorPosPercent, _motorPosRatio and two high-byte helpers)
                         # in its output.
                         if not name.startswith('_'):
-                            result.data[name] = value
+                            result.data[name] = (format_time(field_def, value)
+                                                 if is_time_field(field_def) else value)
                         else:
                             self._record_internal(field_def, value)         # PS-572
                         self._bind(field_def, [name], value)
@@ -8291,7 +8701,10 @@ class SchemaInterpreter:
                     output_name = self._resolve_field_name(field_def, name)
                     if output_name != name:
                         self._produced(field_def, output_name)      # PS-492
-                    result.data[output_name] = value
+                    # PS-610 (CR-2026-186): reported as an instant in its format; a
+                    # reference still binds the number.
+                    result.data[output_name] = (format_time(field_def, value)
+                                                if is_time_field(field_def) else value)
                     # Check valid_range and update quality
                     if field_def.get('valid_range'):
                         quality = self._check_valid_range(value, field_def, result)
@@ -8936,6 +9349,7 @@ class SchemaInterpreter:
         of the input says, and rejects the input where it does not. The input itself is
         not modified.
         """
+        data = expand_time_parts(fields, data)                     # PS-615 (CR-2026-186)
         derived = dict(data)
         if self._trace is not None:
             derived = self._recorded_inputs(fields, data, derived)          # PS-573
@@ -10589,6 +11003,10 @@ class SchemaInterpreter:
         # guard returned it untouched - reverse_lookup was dead code for every label,
         # and the label then reached int() as "invalid literal for int() with base 10:
         # 'Class A'". 69 corpus vectors failed to encode on exactly that.
+        if is_time_field(field_def):
+            # PS-615 (CR-2026-186): the value in its format, as the count of seconds since
+            # the epoch that PS-610 reads; the modifiers below then invert.
+            value = time_input_seconds(field_def, value)
         # The value as given, for a PS-168 rejection to name (PS-552).
         self._encode_given = (field_def, value)     # held, compared by identity
         value = reverse_lookup(value, field_def.get('lookup'),

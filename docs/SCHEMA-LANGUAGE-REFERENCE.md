@@ -1194,6 +1194,49 @@ a value given for it.
 - A reference to an undeclared name, an object or a repeat, a format that is not a part
   format, and `template` beside `value` or off `type: string` are rejected at load.
 
+## Time Fields (`time`)
+
+A numeric field - an integer, float, nibble-decimal or minifloat type, a bit range, or a
+computed `number` or `integer` - may declare `time` (PS-610). Its value after the modifiers
+is a count of seconds since `epoch` (an RFC 3339 UTC instant, 1970-01-01T00:00:00Z where
+absent), and the field is reported as that instant, in UTC, in its `format`. A reference to
+the field still binds the number.
+
+```yaml
+- name: timestamp                    # GPS seconds, as toISOString writes them
+  type: u32
+  add: -17
+  time: {format: iso8601, epoch: "1980-01-06T00:00:00Z", fraction: 3}
+- name: Timestamp                    # as toUTCString writes it
+  type: u32
+  time: {format: pattern, pattern: "%a, %d %b %Y %H:%M:%S GMT"}
+- name: time_stamp                   # from calendar parts decoded earlier
+  type: number
+  time:
+    format: unix
+    milliseconds: true
+    parts: {year: $_year, month: $_month, day: $_day, hour: $_hour}
+```
+
+- `format: unix` reports seconds since 1970, or since `since:`; `milliseconds: true` reports
+  an integer count of milliseconds (PS-611).
+- `format: iso8601` reports `YYYY-MM-DDTHH:MM:SSZ`; `fraction: N` (1 to 9) writes exactly N
+  fractional digits, and without it digits appear only where the value has them (PS-611).
+- `format: calendar` reports `{year, month, day, hour, minute, second}`, with
+  `month_labels:` (twelve names) and `keys:` (part to member name) as PS-411 and PS-412
+  define them (PS-612).
+- `format: pattern` writes `pattern:` with `%Y`, `%m`, `%d`, `%H`, `%M`, `%S`, `%L`
+  (milliseconds), `%b` (`Jan`), `%a` (`Mon`) and `%%` replaced; names are English (PS-613).
+- `parts:` on a `type: number` field maps `year`, `month`, `day` and optionally `hour`,
+  `minute`, `second` to fields decoded earlier; a part that is not whole, or a date that
+  does not exist, is an error naming the field. `epoch` does not apply (PS-614).
+- Milliseconds, `fraction` and `%L` truncate, as JavaScript's `Date` does.
+- An encoder parses the value back in its format (PS-615). A pattern lacking `%Y`, `%m` or
+  `%b`, `%d`, `%H`, `%M` or `%S`, and `parts` naming a field that reads no bytes, decode
+  but are refused for encoding; a `%a` that is not the date's weekday is rejected.
+- `time` on another type or beside `lookup`, an unknown format, or a key of another format
+  is rejected at load.
+
 ## TLV (Type-Length-Value)
 
 Parse tag-based variable content. Supports single and multi-byte tags.

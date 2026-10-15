@@ -4036,6 +4036,64 @@ improved. The Go, Java and C# corpus runners write per-vector reports only when
     2244, C# 2240 -> 2245, Go 2257 -> 2262, plain 2229 -> 2234). No other corpus vector's
     round trip changed (failing sets diffed against master).
 
+- **CR-2026-186 (PS-610 to PS-615; la-payload-schema `cr/0.5.8-apply-186`, for 0.5.8): a field
+  reports a time.** A numeric field (an integer, float, nibble-decimal or minifloat type, a bit
+  range, or a computed `number`/`integer`) may declare `time: {format, epoch, ...}`. Its value
+  after the modifiers counts seconds from `epoch` (1970 where absent), and the field is reported
+  as that UTC instant: `unix` (seconds, or integer `milliseconds`, since 1970 or `since`),
+  `iso8601` (`fraction: N` digits, else digits only where the value has them), `calendar`
+  (PS-410's object, `month_labels` and `keys` inside `time`) or `pattern` (`%Y %m %d %H %M %S %L
+  %b %a %%`). A `type: number` field may take the instant from `parts` decoded earlier (PS-614).
+  - **Spec session rulings beyond the draft, all implemented:** milliseconds, `fraction` and `%L`
+    truncate; `time` beside `lookup` is rejected; a part that is not whole, or parts naming no
+    date, is a decode error naming the field; `type: number` with `time` and neither `parts`
+    nor a computation is rejected at load; a part that reads no bytes (an `idiv`/`mod` part) and
+    a pattern lacking `%Y`, `%m`/`%b`, `%d`, `%H`, `%M` or `%S` decode but are refused for
+    encoding (as PS-606); `%a` is checked against the date on encode.
+  - **One rule decides the hooks:** the value is formatted where it is *reported*, so a
+    reference binds the number and `valid_range` compares it. Encode converts the input to the
+    seconds count at the one choke point before the modifiers invert (`_reverse_modifiers`,
+    `encReverseModifiers`, Go `encodeField`/`rawForField`/`caseTakes`, Java and C#
+    `reverseModifiers`), and `expand_time_parts` runs at the start of every field list's input
+    derivation (`_derive_inputs` and its ports) so the part fields get their values.
+  - **Instants are exact decimals**, as the prototype's `Decimal`: a double enters through its
+    shortest decimal text (Python `repr`, `String(v)`, Go `FormatFloat(-1)` into `big.Rat`, Java
+    `BigDecimal(Double.toString)`, C# `"R"`), and dates use days-from-civil arithmetic, never the
+    host's clock or zone. The generated codec avoids BigInt (whole seconds plus a fraction's
+    digit string), and carries the time runtime only where a schema declares `time`, so no
+    existing codec changed.
+  - **Where:** Python block "CR-2026-186" in `tools/schema_interpreter.py` (`time_field_error`,
+    `time_errors` from `schema_iterator_errors`, `format_time`, `time_from_parts`, `parse_time`,
+    `time_input_seconds`, `expand_time_parts`, `reports_of`); the generator's `TIME_RUNTIME_JS`
+    (`timeOut`, `timeParts`, `timeParse`, `encTimeParts`) and `time_report_js`; Go
+    `go/schema/cr186.go`; Java `TimeField`; C# `TimeFields.cs`. `generate_output_schema.py`
+    types the field by its format, and `validate_schema.py` accepts `parts` as a `number`'s
+    source. Vocabulary: `time` is a field key and a context of its own in
+    `tools/schema_vocabulary.py` and `schemas/payload-schema.json` (closed), with a section in
+    the language reference.
+  - **C:** has no such field; `tools/schema_binary.py` refuses `time` by name (PS-446).
+  - **Measured before:** all five ignored the key and reported the raw number (`54A48E12` from
+    the GPS epoch read 1420070401); a `parts` field was absent in Python, Java and C# and **0 in
+    the generated codec**; an encode of the ISO text failed in Python with `could not convert
+    string to float`. No load case was rejected anywhere.
+  - **Departures:** Go and C# accept a whole double (2015.0) as a calendar member, since their
+    decoders hand JSON numbers on as doubles; the "outside years 1 to 9999" text writes the
+    instant in each language's own decimal form (no test reaches it). A prototype message that
+    prints the parts mapping lists the parts in the order year to second.
+  - **Cases:** `tests/cr-2026-186-cases.yaml` (the prototype's 18 tests as 20 decode, 16 encode,
+    15 load and 4 `_meta` rows), read by `test_cr_2026_186_cases.py` (reference, validator,
+    generator, binary converter), Go `cr186_test.go`, Java `CR2026186Test`, C# `CR2026_186Tests`.
+  - **Fixture** `_language-conformance/time-field.yaml`: an RS1xx calendar per element, MCCI's
+    iso8601 `fraction: 3` from the GPS epoch, `toUTCString` as a pattern, milliseconds with
+    `since`, and date parts; 9 vectors, all round-tripping, mutation score 100%. Floors: decode
+    2901 -> 2910 in Go, Java and C#; re-encode +9 everywhere, all `repeat` (28 -> 37), since
+    port 1 files the schema there (Python and Java 2290 -> 2299, C# 2291 -> 2300, Go 2308 ->
+    2317, plain 2280 -> 2289).
+  - **Corpus and registry:** no schema in `schemas/devices`, `schemas/library`, `examples` or
+    the private registry (543 schemas at 00bd8cd) declares `time`, so none is rejected; decode
+    and re-encode output of all 38802 vectors of the corpus and the registry is identical to
+    master's (Python, diffed).
+
 ## Converting a vendor codec
 
 The converters in `tools/` (`convert_decentlab.py`, `convert_milesight.py`) do the

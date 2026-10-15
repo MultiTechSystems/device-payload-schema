@@ -313,6 +313,10 @@ func checkFieldRules(field map[string]any, at string) error {
 	if err := checkStringTemplate(field); err != nil {
 		return err
 	}
+	// PS-610 to PS-614 (CR-2026-186): a numeric field's `time` mapping.
+	if err := checkTimeField(field); err != nil {
+		return err
+	}
 	// PS-560 (CR-2026-150): numeral is decimal or hex, on an ascii field only.
 	if err := checkNumeral(field); err != nil {
 		return err

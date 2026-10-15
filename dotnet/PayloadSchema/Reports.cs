@@ -53,6 +53,8 @@ public static partial class Meta
     {
         if (Value(field, "_reports") is string forced) return forced;      // a match discriminator
         if (Get(field, "tlv") is YamlMappingNode && !Truthy(Value(field, "type"))) return "array"; // channels
+        if (Get(field, "time") is YamlMappingNode time)                                 // PS-610 (CR-2026-186)
+            return Value(time, "format") switch { "unix" => "number", "calendar" => "object", _ => "string" };
         if (Has(field, "lookup") && Value(field, "lookup") is { } lookup)
         {
             if (lookup is Dictionary<string, object?> m && m.GetValueOrDefault("default") is string d

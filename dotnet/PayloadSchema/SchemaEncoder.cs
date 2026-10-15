@@ -1255,6 +1255,7 @@ public static class SchemaEncoder
         /// </summary>
         Dictionary<string, object?> DeriveInputs(List<SchemaField> fields, Dictionary<string, object?> data)
         {
+            data = TimeFields.ExpandParts(fields, data);                          // PS-615 (CR-2026-186)
             var derived = new Dictionary<string, object?>(data);
             if (_trace != null) RecordedInputs(fields, data, derived);             // PS-573
             foreach (var f in fields)
@@ -2889,6 +2890,10 @@ public static class SchemaEncoder
         /// </remarks>
         object? ReverseModifiers(object? value, SchemaField field)
         {
+            // PS-615 (CR-2026-186): the value in its format, as the count of seconds since
+            // the epoch that PS-610 reads; the modifiers below then invert.
+            if (field.Time != null)
+                value = TimeFields.InputSeconds(field, value);
             // The value as given, for a PS-168 rejection to name (PS-552).
             _givenField = field;
             _givenValue = value;

@@ -123,6 +123,9 @@ type Field struct {
 	// HasTemplate tells an empty template from none.
 	Template    string `json:"template,omitempty" yaml:"template,omitempty"`
 	HasTemplate bool   `json:"-" yaml:"-"`
+	// Time is a numeric field's `time` mapping, reported as an instant (PS-610 to PS-615,
+	// CR-2026-186; see cr186.go). nil where the field declares none.
+	Time map[string]any `json:"-" yaml:"-"`
 	// Nul is an ascii field's treatment of 0x00 bytes: trailing (default), stop or drop
 	// (PS-534). Terminator ends a variable-length ascii field in place of `length`
 	// (PS-593); HasTerminator tells byte 0 from none.
@@ -1291,6 +1294,9 @@ func parseFieldMap(fm map[string]any, node *yaml.Node) Field {
 		f.Template = template
 		f.HasTemplate = true
 	}
+	if spec := asStringMap(fm["time"]); spec != nil {
+		f.Time = spec // PS-610 (CR-2026-186)
+	}
 	if nul, ok := fm["nul"].(string); ok {
 		f.Nul = nul
 	}
@@ -2359,7 +2365,15 @@ func decodeFieldsWithSchema(fields []Field, ctx *DecodeContext, schema *Schema) 
 			// already honoured this; decoding did not, so an intermediate used to
 			// combine two words appeared in the decoded result.
 			if !strings.HasPrefix(field.Name, "_") {
-				result[outputName] = value
+				reported := value
+				if isTimeField(field) {
+					// PS-610 (CR-2026-186): reported as an instant in its format; a
+					// reference still binds the number, and valid_range compares it.
+					if reported, err = formatTime(field, value); err != nil {
+						return nil, err
+					}
+				}
+				result[outputName] = reported
 			} else {
 				ctx.recordInternal(field.decl, value) // PS-572
 			}
@@ -2887,6 +2901,14 @@ func decodeField(field Field, ctx *DecodeContext) (any, error) {
 		// transform stages and the lookup, all in applyLookupAndModifiers below. The
 		// modifiers used to be applied here for a ref and not at all for a compute, so
 		// `mult: 10` beside a compute was ignored with success.
+		if timeHasParts(field) {
+			// PS-614 (CR-2026-186): the instant its parts name, in seconds since 1970.
+			parts, err := ctx.timeFromParts(field)
+			if err != nil || parts == omitted {
+				return parts, err
+			}
+			return finishComputedValue(parts, field, ctx)
+		}
 		if field.Ref != "" || field.Compute != nil {
 			// PS-444: a guard is evaluated before the source, and a failed one's
 			// `else` is the value as declared - not passed through the modifiers, the
@@ -4540,6 +4562,13 @@ func integerRange(t FieldType) (int64, int64, bool) {
 // the rounding that encodeField applies - so a caller can see whether the value could
 // have come from this field at all.
 func rawForField(field Field, value any) (float64, bool) {
+	if isTimeField(field) {
+		seconds, err := timeInputSeconds(field, value) // PS-615 (CR-2026-186)
+		if err != nil {
+			return 0, false
+		}
+		value = seconds
+	}
 	reversed, err := reverseLookupAnyCode(field, value)
 	if err != nil {
 		// A label with no value behind it: this case cannot have written those bytes.
@@ -6049,6 +6078,16 @@ func encodeField(field Field, value any, ctx *EncodeContext) error {
 	endian := field.Endian
 	if endian == "" {
 		endian = ctx.Endian
+	}
+
+	if isTimeField(field) {
+		// PS-615 (CR-2026-186): the value in its format, as the count of seconds since the
+		// epoch that PS-610 reads; the modifiers below then invert.
+		seconds, err := timeInputSeconds(field, value)
+		if err != nil {
+			return err
+		}
+		value = seconds
 	}
 
 	// The value as the input gave it, for a PS-168 rejection to name (CR-2026-135).
