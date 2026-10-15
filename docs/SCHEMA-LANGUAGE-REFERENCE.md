@@ -1241,7 +1241,10 @@ the field still binds the number.
   (milliseconds), `%b` (`Jan`), `%a` (`Mon`) and `%%` replaced; names are English (PS-613).
 - `parts:` on a `type: number` field maps `year`, `month`, `day` and optionally `hour`,
   `minute`, `second` to fields decoded earlier; a part that is not whole, or a date that
-  does not exist, is an error naming the field. `epoch` does not apply (PS-614).
+  does not exist (an all-zero clock), omits the field with a warning naming it, and
+  decoding continues; a rolled-over date is never reported. `epoch` does not apply
+  (PS-614).
+- An instant outside the years 1 to 9999 likewise omits the field with a warning (PS-610).
 - Milliseconds, `fraction` and `%L` truncate, as JavaScript's `Date` does.
 - An encoder parses the value back in its format (PS-615). A pattern lacking `%Y`, `%m` or
   `%b`, `%d`, `%H`, `%M` or `%S`, and `parts` naming a field that reads no bytes, decode

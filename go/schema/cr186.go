@@ -483,8 +483,8 @@ func formatTime(field Field, seconds any) (any, error) {
 	}
 	wholeBig := ratFloor(instant)
 	fraction := new(big.Rat).Sub(instant, new(big.Rat).SetInt(wholeBig))
-	outside := fmt.Errorf("Field '%s': the time %s s is outside years 1 to 9999 (PS-610)",
-		field.Name, ratDecimal(instant))
+	outside := &timeOmitted{fmt.Sprintf("Field '%s': the time %s s is outside years 1 to "+
+		"9999; the field is omitted (PS-610)", field.Name, ratDecimal(instant))}
 	if !wholeBig.IsInt64() {
 		return nil, outside
 	}
@@ -536,9 +536,17 @@ func formatTime(field Field, seconds any) (any, error) {
 	}), nil
 }
 
+// timeOmitted is PS-610/PS-614 as amended 2026-10-15: a time field with no instant to
+// report. formatTime returns it for a year outside 1 to 9999; the decoder omits the field,
+// reports the message as a warning and continues.
+type timeOmitted struct{ msg string }
+
+func (e *timeOmitted) Error() string { return e.msg }
+
 // timeFromParts is PS-614: the seconds since 1970 of the UTC instant the referenced parts
 // name, or `omitted` where a part has no value (PS-314). A part that is not a whole number,
-// and parts that name no valid date and time, are errors naming the field.
+// and parts that name no valid date and time, omit the field with a warning naming it
+// (amended 2026-10-15); decoding continues.
 func (ctx *DecodeContext) timeFromParts(field Field) (any, error) {
 	parts := asStringMap(field.Time["parts"])
 	values := map[string]int64{}
@@ -561,8 +569,9 @@ func (ctx *DecodeContext) timeFromParts(field Field) (any, error) {
 			return omitted, nil
 		}
 		if number != math.Trunc(number) {
-			return nil, fmt.Errorf("Field '%s': its %s is %s, not a whole number (PS-614)",
-				field.Name, part, sampledRepr(number))
+			ctx.Warnings = append(ctx.Warnings, fmt.Sprintf("Field '%s': its %s is %s, not a "+
+				"whole number; the field is omitted (PS-614)", field.Name, part, sampledRepr(number)))
+			return omitted, nil
 		}
 		n := int64(number)
 		if u, ok := value.(uint64); ok {
@@ -575,8 +584,10 @@ func (ctx *DecodeContext) timeFromParts(field Field) (any, error) {
 	}
 	if !validCivil(values["year"], values["month"], values["day"], values["hour"],
 		values["minute"], values["second"]) {
-		return nil, fmt.Errorf("Field '%s': its parts {%s} do not name a valid UTC date and "+
-			"time (PS-614)", field.Name, strings.Join(shown, ", "))
+		ctx.Warnings = append(ctx.Warnings, fmt.Sprintf("Field '%s': its parts {%s} do not "+
+			"name a valid UTC date and time; the field is omitted (PS-614)", field.Name,
+			strings.Join(shown, ", ")))
+		return omitted, nil
 	}
 	return civilSeconds(values["year"], values["month"], values["day"], values["hour"],
 		values["minute"], values["second"]), nil

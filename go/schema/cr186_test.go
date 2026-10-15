@@ -21,6 +21,7 @@ type cr186Case struct {
 	Input    string `yaml:"input"`
 	Expected any    `yaml:"expected"`
 	Error    string `yaml:"error"`
+	Warning  string `yaml:"warning"`
 	Reports  string `yaml:"reports"`
 }
 
@@ -71,6 +72,16 @@ func TestCR186DecodeCases(t *testing.T) {
 			}
 			if decErr != nil {
 				t.Fatalf("Decode: %v", decErr)
+			}
+			if c.Warning != "" { // PS-610, PS-614 (amended): omitted with a warning
+				warned := false
+				warnings, _ := out["_warnings"].([]string)
+				for _, w := range warnings {
+					warned = warned || strings.Contains(w, c.Warning)
+				}
+				if !warned {
+					t.Errorf("warnings = %v; want one containing %q", out["_warnings"], c.Warning)
+				}
 			}
 			delete(out, "_warnings")
 			delete(out, "_quality")

@@ -50,6 +50,8 @@ def test_decode_reference(case):
     else:
         assert out.success, out.errors
         assert out.data == case["expected"]
+        if "warning" in case:  # PS-610, PS-614 (amended): omitted with a warning
+            assert any(case["warning"] in w for w in out.warnings), out.warnings
 
 
 @pytest.mark.parametrize("case", DECODE, ids=[c["name"] for c in DECODE])
@@ -64,6 +66,8 @@ def test_decode_generated_codec(case):
     else:
         assert not out.get("errors"), out
         assert out["data"] == case["expected"]
+        if "warning" in case:  # PS-610, PS-614 (amended): omitted with a warning
+            assert any(case["warning"] in w for w in out.get("warnings") or []), out
 
 
 @pytest.mark.parametrize("case", ENCODE, ids=[c["name"] for c in ENCODE])

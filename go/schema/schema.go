@@ -2381,7 +2381,15 @@ func decodeFieldsWithSchema(fields []Field, ctx *DecodeContext, schema *Schema) 
 					// PS-610 (CR-2026-186): reported as an instant in its format; a
 					// reference still binds the number, and valid_range compares it.
 					if reported, err = formatTime(field, value); err != nil {
-						return nil, err
+						var outside *timeOmitted
+						if !errors.As(err, &outside) {
+							return nil, err
+						}
+						// PS-610 (amended 2026-10-15): no instant to report, so the
+						// field is omitted with a warning and decoding continues.
+						ctx.Warnings = append(ctx.Warnings, outside.msg)
+						ctx.bindReference(field.Name, field, value)
+						continue
 					}
 				}
 				result[outputName] = reported

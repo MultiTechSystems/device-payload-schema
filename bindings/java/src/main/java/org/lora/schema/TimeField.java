@@ -337,8 +337,8 @@ final class TimeField {
         long[] ymd = civilFromDays(days);
         long year = ymd[0], month = ymd[1], day = ymd[2];
         if (year < 1 || year > 9999) {
-            throw new SchemaException.DecodeException("Field '" + field.getName() + "': the time "
-                    + instant.toPlainString() + " s is outside years 1 to 9999 (PS-610)");
+            throw new Omitted("Field '" + field.getName() + "': the time "
+                    + instant.toPlainString() + " s is outside years 1 to 9999; the field is omitted (PS-610)");
         }
         long hour = rest / 3600, minute = rest / 60 % 60, second = rest % 60;
         if (fmt.equals("iso8601")) {
@@ -390,9 +390,18 @@ final class TimeField {
     }
 
     /**
+     * PS-610 as amended 2026-10-15: a time field with no instant to report (a year outside 1
+     * to 9999). The decoder omits the field, reports the message as a warning, and continues.
+     */
+    static final class Omitted extends SchemaException.DecodeException {
+        Omitted(String message) { super(message); }
+    }
+
+    /**
      * time_from_parts: the seconds since 1970 of the UTC instant the referenced parts name, or
      * null where a part has no value (PS-314). A part that is not a whole number, and parts that
-     * name no valid date and time, are errors naming the field (PS-614).
+     * name no valid date and time, omit the field with a warning naming it, and decoding
+     * continues (PS-614 as amended 2026-10-15).
      */
     static Object fromParts(Field field, DecodeContext ctx) {
         Map<?, ?> parts = (Map<?, ?>) spec(field).get("parts");
@@ -405,8 +414,9 @@ final class TimeField {
             double d = n.doubleValue();
             if (Double.isNaN(d) || Double.isInfinite(d)) return null;
             if (d != Math.rint(d)) {
-                throw new SchemaException.DecodeException("Field '" + field.getName() + "': its " + part
-                        + " is " + Meta.pyRepr(d) + ", not a whole number (PS-614)");
+                ctx.addWarning("Field '" + field.getName() + "': its " + part
+                        + " is " + Meta.pyRepr(d) + ", not a whole number; the field is omitted (PS-614)");
+                return null;
             }
             values.put(part, isInt(value) ? n.longValue() : (long) d);
         }
@@ -415,8 +425,9 @@ final class TimeField {
         if (!validCivil(p[0], p[1], p[2], p[3], p[4], p[5])) {
             List<String> shown = new ArrayList<>();
             for (Map.Entry<String, Long> e : values.entrySet()) shown.add("'" + e.getKey() + "': " + e.getValue());
-            throw new SchemaException.DecodeException("Field '" + field.getName() + "': its parts {"
-                    + String.join(", ", shown) + "} do not name a valid UTC date and time (PS-614)");
+            ctx.addWarning("Field '" + field.getName() + "': its parts {"
+                    + String.join(", ", shown) + "} do not name a valid UTC date and time; the field is omitted (PS-614)");
+            return null;
         }
         return civilSeconds(p[0], p[1], p[2], p[3], p[4], p[5]);
     }

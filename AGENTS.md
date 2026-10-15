@@ -4090,7 +4090,7 @@ improved. The Go, Java and C# corpus runners write per-vector reports only when
   %b %a %%`). A `type: number` field may take the instant from `parts` decoded earlier (PS-614).
   - **Spec session rulings beyond the draft, all implemented:** milliseconds, `fraction` and `%L`
     truncate; `time` beside `lookup` is rejected; a part that is not whole, or parts naming no
-    date, is a decode error naming the field; `type: number` with `time` and neither `parts`
+    date, omits the field with a warning (amended 2026-10-15, below); `type: number` with `time` and neither `parts`
     nor a computation is rejected at load; a part that reads no bytes (an `idiv`/`mod` part) and
     a pattern lacking `%Y`, `%m`/`%b`, `%d`, `%H`, `%M` or `%S` decode but are refused for
     encoding (as PS-606); `%a` is checked against the date on encode.
@@ -4137,6 +4137,34 @@ improved. The Go, Java and C# corpus runners write per-vector reports only when
     the private registry (543 schemas at 00bd8cd) declares `time`, so none is rejected; decode
     and re-encode output of all 38802 vectors of the corpus and the registry is identical to
     master's (Python, diffed).
+  - **Amended 2026-10-15 (PS-610, PS-614; la-payload-schema `cr/0.5.8-ps614-omit-warn`,
+    f818685): no instant to report omits the field with a warning, and decoding continues.**
+    Jason's ruling, after the registry's all-zero and all-0xFF frames (cital lorasoil, jooby
+    analog-gasi3/-gasic/-imp4eu) named month 0 and the decode error lost the whole frame. A
+    part that is not whole (`Field 'ts': its year is 2024.5, not a whole number; the field is
+    omitted (PS-614)`), parts naming no valid UTC date and time (`... its parts {...} do not
+    name a valid UTC date and time; the field is omitted (PS-614)`) and an instant outside the
+    years 1 to 9999, from the seconds path or the parts path (`... the time N s is outside
+    years 1 to 9999; the field is omitted (PS-610)`), each omit the field and warn; a
+    rolled-over date is never reported, and a reference still binds the number. Encode is
+    unchanged: an absent time field is a missing input (PS-551). Where: Python `TimeOmitted`
+    (raised by `format_time`/`time_from_parts`, caught at both report sites of
+    `_decode_field_list`); the generated codec's `timeOut`/`timeParts` push to `wn` and give
+    `undefined`; Go `timeOmitted` from `formatTime`, caught in `decodeFieldsWithSchema`, and
+    `timeFromParts` warning itself; Java `TimeField.Omitted`, caught in the field loop, and
+    `fromParts` warning; C# `TimeOmittedException`, caught in `SchemaDecoder`, and `FromParts`
+    warning. The "outside years" text is now reached by a case (`-1000000000000000` in all
+    five). Cases: the two former errors now expect `{}` and the warning (a decode row's new
+    `warning` key), and the prototype's two new tests (`an_invalid_date_omits_only_its_field`,
+    `an_instant_outside_the_years_is_omitted`). Fixture: `time-field.yaml`'s
+    `date_parts_all_zero` (`time_stamp: null`, `expected_warnings` naming the field), which
+    cannot round-trip (`encode-round-trip.py` files it under `internal-field`, the internal
+    parts having no value to write). Floors: decode 2922 -> 2923 in Go, Java and C#;
+    re-encode unchanged. Measured (Python, decode of every vector of the 47 corpus and
+    registry schemas that mention `time:`, registry f11cb0c): only the new fixture vector
+    changes (decode error -> omitted plus warning). No registry vector changes: no registry
+    schema at f11cb0c reaches either rule, and the four units above do not declare `time`
+    there yet, so their move waits on the registry rewrite.
 
 ## Converting a vendor codec
 

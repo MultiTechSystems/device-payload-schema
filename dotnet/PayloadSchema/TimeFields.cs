@@ -298,8 +298,9 @@ internal static class TimeFields
         long days = FloorDiv(whole, 86400), rest = FloorMod(whole, 86400);
         var (year, month, day) = CivilFromDays(days);
         if (!(1 <= year && year <= 9999))
-            throw new FieldErrorException($"Field '{field.Name}': the time "
-                + $"{instant.ToString(CultureInfo.InvariantCulture)} s is outside years 1 to 9999 (PS-610)");
+            throw new TimeOmittedException($"Field '{field.Name}': the time "
+                + $"{instant.ToString(CultureInfo.InvariantCulture)} s is outside years 1 to 9999; "
+                + "the field is omitted (PS-610)");
         long hour = rest / 3600, minute = rest / 60 % 60, second = rest % 60;
         if (format == "iso8601")
         {
@@ -342,7 +343,8 @@ internal static class TimeFields
 
     /// <summary>PS-614: the seconds since 1970 of the UTC instant the referenced parts name,
     /// or null where a part has no value (PS-314). A part that is not a whole number, and
-    /// parts that name no valid date and time, are errors naming the field.</summary>
+    /// parts that name no valid date and time, omit the field with a warning naming it, and
+    /// decoding continues (PS-614 as amended 2026-10-15).</summary>
     internal static object? FromParts(SchemaField field, DecodeContext ctx)
     {
         var values = new List<(string part, long value)>();
@@ -354,16 +356,20 @@ internal static class TimeFields
                 || Helpers.ToFloat64(value) is not (true, var number))
                 return null;
             if (number != Math.Floor(number) || !double.IsFinite(number))
-                throw new FieldErrorException($"Field '{field.Name}': its {part} is "
-                    + $"{Meta.PyRepr(number)}, not a whole number (PS-614)");
+            {
+                ctx.Warnings.Add($"Field '{field.Name}': its {part} is "
+                    + $"{Meta.PyRepr(number)}, not a whole number; the field is omitted (PS-614)");
+                return null;
+            }
             values.Add((part, (long)number));
         }
         long Get(string p) => values.FirstOrDefault(v => v.part == p).value;
         if (!ValidCivil(Get("year"), Get("month"), Get("day"), Get("hour"), Get("minute"), Get("second")))
         {
             var shown = string.Join(", ", values.Select(v => $"'{v.part}': {v.value}"));
-            throw new FieldErrorException($"Field '{field.Name}': its parts {{{shown}}} do not name a "
-                + "valid UTC date and time (PS-614)");
+            ctx.Warnings.Add($"Field '{field.Name}': its parts {{{shown}}} do not name a "
+                + "valid UTC date and time; the field is omitted (PS-614)");
+            return null;
         }
         return CivilSeconds(Get("year"), Get("month"), Get("day"), Get("hour"), Get("minute"), Get("second"));
     }
@@ -512,4 +518,12 @@ internal static class TimeFields
         }
         return output ?? data;
     }
+}
+
+/// <summary>PS-610 as amended 2026-10-15: a time field with no instant to report (a year
+/// outside 1 to 9999). The decoder omits the field, reports the message as a warning, and
+/// continues.</summary>
+public sealed class TimeOmittedException : InvalidOperationException
+{
+    public TimeOmittedException(string message) : base(message) { }
 }

@@ -42,7 +42,7 @@ Generated inventory of this repository: what lives where, what each document cov
 | [`LANGUAGE-ANALYSIS.md`](LANGUAGE-ANALYSIS.md) | This document explains the design decisions behind the Payload Schema language. | 390 |
 | [`OUTPUT-FORMATS.md`](OUTPUT-FORMATS.md) | The Payload Schema decoder can output data in multiple formats for different platforms and... | 638 |
 | [`SCHEMA-DEVELOPMENT-GUIDE.md`](SCHEMA-DEVELOPMENT-GUIDE.md) | Best practices for creating complete, validated payload schemas. | 215 |
-| [`SCHEMA-LANGUAGE-REFERENCE.md`](SCHEMA-LANGUAGE-REFERENCE.md) | Complete reference for the LoRa Alliance Payload Schema specification (v0.5.0). | 2088 |
+| [`SCHEMA-LANGUAGE-REFERENCE.md`](SCHEMA-LANGUAGE-REFERENCE.md) | Complete reference for the LoRa Alliance Payload Schema specification (v0.5.0). | 2091 |
 | [`SESSION-NOTES-2026-02-25.md`](SESSION-NOTES-2026-02-25.md) | The prototype tests were using a custom REQ-xxx-yyy numbering scheme that was inconsistent with the... | 78 |
 | [`SPEC-IMPLEMENTATION-STATUS.md`](SPEC-IMPLEMENTATION-STATUS.md) | Feature support matrix across the reference implementations. | 354 |
 | [`TTN-CODEC-CONVERSION-GUIDE.md`](TTN-CODEC-CONVERSION-GUIDE.md) | Complete guide for AI-assisted conversion of The Things Network device repository codecs to Payload... | 575 |
@@ -130,7 +130,7 @@ Mean quality score 82.7% (PLATINUM 43, GOLD 54, SILVER 264, BRONZE 5, REJECTED 1
 
 | Vendor | Schemas | Vectors | Tiers |
 |---|---|---|---|
-| _language-conformance | 169 | 496 | GOLD 1, SILVER 164, BRONZE 4 |
+| _language-conformance | 169 | 497 | GOLD 1, SILVER 164, BRONZE 4 |
 | milesight | 84 | 1427 | PLATINUM 31, GOLD 36, SILVER 14, REJECTED 3 |
 | decentlab | 58 | 204 | PLATINUM 9, GOLD 13, SILVER 31, BRONZE 1, REJECTED 4 |
 | _library-composed | 49 | 57 | SILVER 49 |
@@ -289,7 +289,7 @@ Mean quality score 82.7% (PLATINUM 43, GOLD 54, SILVER 264, BRONZE 5, REJECTED 1
 | `_language-conformance/tag-component-ref` | 5 | 2 | fields | 79% | SILVER |
 | `_language-conformance/tag-component-reference-binding` | 12 | 2 | ports | 77% | SILVER |
 | `_language-conformance/tag-entry-constants` | 5 | 4 | fields | 81% | SILVER |
-| `_language-conformance/time-field` | 14 | 9 | ports | 90% | SILVER |
+| `_language-conformance/time-field` | 14 | 10 | ports | 90% | SILVER |
 | `_language-conformance/tlv-case-field-list` | 10 | 7 | fields | 88% | SILVER |
 | `_language-conformance/tlv-case-key-patterns` | 6 | 5 | fields | 86% | SILVER |
 | `_language-conformance/tlv-case-of-one-inline-branch` | 3 | 3 | fields | 81% | SILVER |

@@ -4273,8 +4273,15 @@ def _js_number(value: Decimal):
     return int(value) if value == value.to_integral_value() else float(value)
 
 
+class TimeOmitted(FieldError):
+    """PS-610/PS-614 as amended 2026-10-15: a time field with no instant to report (a
+    year outside 1 to 9999, a part that is not whole, parts naming no valid date). The
+    decoder omits the field, reports this message as a warning, and continues."""
+
+
 def format_time(field_def, seconds) -> Any:
-    """PS-610 to PS-613: the instant `seconds` after the field's epoch, in its format."""
+    """PS-610 to PS-613: the instant `seconds` after the field's epoch, in its format.
+    An instant outside the years 1 to 9999 raises TimeOmitted (PS-610)."""
     spec = field_def['time']
     epoch = time_instant(spec['epoch']) if 'epoch' in spec else Decimal(0)
     instant = epoch + _time_decimal(seconds)
@@ -4289,8 +4296,8 @@ def format_time(field_def, seconds) -> Any:
     days, rest = divmod(whole, 86400)
     year, month, day = _civil_from_days(days)
     if not 1 <= year <= 9999:
-        raise FieldError(f"Field '{field_def.get('name')}': the time {instant} s is outside "
-                         f"years 1 to 9999 (PS-610)")
+        raise TimeOmitted(f"Field '{field_def.get('name')}': the time {instant} s is outside "
+                          f"years 1 to 9999; the field is omitted (PS-610)")
     hour, minute, second = rest // 3600, rest // 60 % 60, rest % 60
     if fmt == 'iso8601':
         text = f'{year:04d}-{month:02d}-{day:02d}T{hour:02d}:{minute:02d}:{second:02d}'
@@ -4314,7 +4321,8 @@ def format_time(field_def, seconds) -> Any:
 def time_from_parts(field_def, variables) -> Any:
     """PS-614: the seconds since 1970 of the UTC instant the referenced parts name, or
     OMITTED where a part has no value (PS-314). A part that is not a whole number, and
-    parts that name no valid date and time, are errors naming the field."""
+    parts that name no valid date and time, raise TimeOmitted: the field is omitted with
+    a warning naming it, and decoding continues (PS-614 as amended 2026-10-15)."""
     name = field_def.get('name')
     parts = field_def['time']['parts']
     values = {}
@@ -4327,13 +4335,13 @@ def time_from_parts(field_def, variables) -> Any:
                 or not isinstance(value, (int, float)):
             return OMITTED
         if value != int(value):
-            raise FieldError(f"Field '{name}': its {part} is {float(value)!r}, not a whole "
-                             f"number (PS-614)")
+            raise TimeOmitted(f"Field '{name}': its {part} is {float(value)!r}, not a whole "
+                              f"number; the field is omitted (PS-614)")
         values[part] = int(value)
     if not _valid_civil(*(values.get(p, 0) for p in TIME_PARTS)):
         shown = ', '.join(f"'{p}': {v}" for p, v in values.items())
-        raise FieldError(f"Field '{name}': its parts {{{shown}}} do not name a valid UTC "
-                         f"date and time (PS-614)")
+        raise TimeOmitted(f"Field '{name}': its parts {{{shown}}} do not name a valid UTC "
+                          f"date and time; the field is omitted (PS-614)")
     return _civil_seconds(*(values.get(p, 0) for p in TIME_PARTS))
 
 
@@ -8630,8 +8638,13 @@ class SchemaInterpreter:
             if field_type in COMPUTED_TYPES:
                 try:
                     if is_time_field(field_def) and 'parts' in field_def['time']:
-                        # PS-614 (CR-2026-186): the instant its parts name.
-                        value = time_from_parts(field_def, self._variables)
+                        # PS-614 (CR-2026-186): the instant its parts name. Parts naming
+                        # no date omit the field with a warning (amended 2026-10-15).
+                        try:
+                            value = time_from_parts(field_def, self._variables)
+                        except TimeOmitted as e:
+                            result.warnings.append(str(e))
+                            value = OMITTED
                     else:
                         value = self._decode_computed_field(field_def)
                     if value is OMITTED:
@@ -8666,8 +8679,15 @@ class SchemaInterpreter:
                         # (_motorPosPercent, _motorPosRatio and two high-byte helpers)
                         # in its output.
                         if not name.startswith('_'):
-                            result.data[name] = (format_time(field_def, value)
-                                                 if is_time_field(field_def) else value)
+                            try:
+                                result.data[name] = (format_time(field_def, value)
+                                                     if is_time_field(field_def) else value)
+                            except TimeOmitted as e:
+                                # PS-610 (amended): outside years 1 to 9999, omitted
+                                # with a warning; a reference still binds the number.
+                                result.warnings.append(str(e))
+                                self._bind(field_def, [name], value)
+                                continue
                         else:
                             self._record_internal(field_def, value)         # PS-572
                         self._bind(field_def, [name], value)
@@ -8723,8 +8743,15 @@ class SchemaInterpreter:
                         self._produced(field_def, output_name)      # PS-492
                     # PS-610 (CR-2026-186): reported as an instant in its format; a
                     # reference still binds the number.
-                    result.data[output_name] = (format_time(field_def, value)
-                                                if is_time_field(field_def) else value)
+                    try:
+                        result.data[output_name] = (format_time(field_def, value)
+                                                    if is_time_field(field_def) else value)
+                    except TimeOmitted as e:
+                        # PS-610 (amended 2026-10-15): outside years 1 to 9999, the
+                        # field is omitted with a warning and decoding continues.
+                        result.warnings.append(str(e))
+                        self._bind(field_def, [field_def.get('var'), name], value)
+                        continue
                     # Check valid_range and update quality
                     if field_def.get('valid_range'):
                         quality = self._check_valid_range(value, field_def, result)

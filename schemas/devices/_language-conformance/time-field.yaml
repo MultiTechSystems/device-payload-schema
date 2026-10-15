@@ -3,9 +3,11 @@
 # a calendar object per element (Laird RS1xx), ISO 8601 with three fractional digits from the
 # GPS epoch (MCCI), the text JavaScript's toUTCString writes (Ezurio rs26x), milliseconds since
 # another instant, and an instant derived from date parts read earlier. A reference binds the
-# number, and an encoder parses the instant back, so every vector round-trips.
+# number, and an encoder parses the instant back, so every vector round-trips but one: parts
+# naming no date (an all-zero clock) omit the field with a warning naming it, and decoding
+# continues (PS-614 as amended 2026-10-15); an absent value has nothing to encode.
 #
-# Each port is one format. Rejected schemas, decode errors and the refusals on encode are in
+# Each port is one format. Rejected schemas and the refusals on encode are in
 # tests/cr-2026-186-cases.yaml, since no vector here expects a failure.
 name: probe_time_field
 endian: big
@@ -113,3 +115,10 @@ test_vectors:
     fPort: 5
     payload: "0C 0C 1F 17 3B 3A"
     expected: {time_stamp: "2012-12-31T23:59:58Z"}
+  - name: date_parts_all_zero
+    source: generated
+    fPort: 5
+    payload: "00 00 00 00 00 00"
+    expected: {time_stamp: null}
+    expected_warnings:
+      - ["Field 'time_stamp'", "PS-614"]

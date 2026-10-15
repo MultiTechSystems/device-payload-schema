@@ -14,7 +14,10 @@
 # and C# (CR2026_186Tests.cs). C has no time field (tools/schema_binary.py refuses it, PS-446).
 #
 #   decode: `schema` (YAML text), `payload` (hex) and either `expected` (the whole decoded
-#           data, compared exactly) or `error` (text one of the errors contains).
+#           data, compared exactly) or `error` (text one of the errors contains). A case
+#           with `expected` may add `warning`, text one of the decode's warnings contains:
+#           a time with no instant to report is omitted with a warning, and decoding
+#           continues (PS-610, PS-614 as amended 2026-10-15).
 #   cases:  `schema`, `input` (JSON text) and either `payload` (hex) or `error` (where the
 #           message prints a calendar mapping, only the text after it).
 #   load:   `schema` and `error`, text one of the load errors contains.
@@ -105,15 +108,29 @@ decode:
   payload: "18030b15"
   expected: {ts: 1710190800000}
 
-- name: parts_that_name_no_date_are_an_error
+- name: parts_that_name_no_date_omit_the_field
   schema: "name: t\nendian: big\nfields:\n  - {name: _y, type: u8, add: 2000}\n  - {name: _mo, type: u8}\n  - {name: _d, type: u8}\n  - {name: _h, type: u8}\n  - name: ts\n    type: number\n    time:\n      format: unix\n      milliseconds: true\n      parts: {year: $_y, month: $_mo, day: $_d, hour: $_h}\n"
   payload: "18021e00"
-  error: "Field 'ts': its parts {'year': 2024, 'month': 2, 'day': 30, 'hour': 0} do not name a valid UTC date and time (PS-614)"
+  expected: {}
+  warning: "Field 'ts': its parts {'year': 2024, 'month': 2, 'day': 30, 'hour': 0} do not name a valid UTC date and time; the field is omitted (PS-614)"
 
-- name: a_part_that_is_not_whole_is_an_error
+- name: an_invalid_date_omits_only_its_field
+  schema: "name: t\nendian: big\nfields:\n  - {name: _y, type: u8, add: 2000}\n  - {name: _mo, type: u8}\n  - {name: _d, type: u8}\n  - name: ts\n    type: number\n    time: {format: iso8601, parts: {year: $_y, month: $_mo, day: $_d}}\n  - {name: level, type: u8}\n"
+  payload: "00000007"
+  expected: {level: 7}
+  warning: "Field 'ts': its parts {'year': 2000, 'month': 0, 'day': 0} do not name a valid UTC date and time; the field is omitted (PS-614)"
+
+- name: an_instant_outside_the_years_is_omitted
+  schema: "name: t\nendian: big\nfields:\n  - {name: t, type: s64, time: {format: iso8601}}\n  - {name: x, type: u8}\n"
+  payload: "fffc72815b39800005"
+  expected: {x: 5}
+  warning: "Field 't': the time -1000000000000000 s is outside years 1 to 9999; the field is omitted (PS-610)"
+
+- name: a_part_that_is_not_whole_omits_the_field
   schema: "name: t\nendian: big\nfields:\n  - {name: _y, type: u16, div: 2}\n  - {name: _mo, type: u8}\n  - {name: _d, type: u8}\n  - name: ts\n    type: number\n    time: {format: iso8601, parts: {year: $_y, month: $_mo, day: $_d}}\n"
   payload: "0fd10101"
-  error: "Field 'ts': its year is 2024.5, not a whole number (PS-614)"
+  expected: {}
+  warning: "Field 'ts': its year is 2024.5, not a whole number; the field is omitted (PS-614)"
 
 - name: computed_parts_decode
   schema: "name: t\nendian: big\nfields:\n  - {name: _yyyymm, type: u32}\n  - {name: _y, type: number, compute: {op: idiv, a: $_yyyymm, b: 100}}\n  - {name: _mo, type: number, compute: {op: mod, a: $_yyyymm, b: 100}}\n  - {name: _d, type: u8}\n  - name: ts\n    type: number\n    time: {format: iso8601, parts: {year: $_y, month: $_mo, day: $_d}}\n"

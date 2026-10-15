@@ -1879,8 +1879,17 @@ public class Schema {
                 if (!field.getName().startsWith("_")) {
                     // PS-610 (CR-2026-186): reported as an instant in its format; a
                     // reference still binds the number.
-                    Object reported = TimeField.isTimeField(field)
-                            ? TimeField.format(field, value) : normalizeOutput(value);
+                    Object reported;
+                    try {
+                        reported = TimeField.isTimeField(field)
+                                ? TimeField.format(field, value) : normalizeOutput(value);
+                    } catch (TimeField.Omitted outside) {
+                        // PS-610 (amended 2026-10-15): no instant to report, so the field
+                        // is omitted with a warning; a reference still binds the number.
+                        ctx.addWarning(outside.getMessage());
+                        ctx.bind(field.getName(), field, value);
+                        continue;
+                    }
                     if (reported != null) {
                         String outputName = resolveFieldName(field, ctx);
                         if (!outputName.equals(field.getName())) {

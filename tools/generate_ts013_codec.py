@@ -120,8 +120,9 @@ function timeEpoch(spec, key) { return key in spec ? timeParse3339(spec[key], tr
 function pad2(n) { return (n < 10 ? "0" : "") + n; }
 function pad4(n) { var t = String(n); while (t.length < 4) t = "0" + t; return t; }
 /* PS-610 to PS-613: the instant `v` seconds after the field's epoch, in its format. A value
- * that is no number (absent) passes through. */
-function timeOut(spec, v, name) {
+ * that is no number (absent) passes through. An instant outside the years 1 to 9999 is
+ * omitted (undefined) with a warning pushed to `wn` (PS-610, amended 2026-10-15). */
+function timeOut(spec, v, name, wn) {
   if (typeof v !== "number" || !isFinite(v)) return v;
   var t = tdAdd(timeEpoch(spec, "epoch"), tdText(String(v)));
   if (spec.format === "unix") {
@@ -131,7 +132,10 @@ function timeOut(spec, v, name) {
   }
   var days = Math.floor(t.w / 86400), rest = t.w - days * 86400;
   var ymd = timeCivilFromDays(days), y = ymd[0], mo = ymd[1], d = ymd[2];
-  if (y < 1 || y > 9999) throw new Error("Field '" + name + "': the time " + tdText10(t) + " s is outside years 1 to 9999 (PS-610)");
+  if (y < 1 || y > 9999) {
+    wn.push("Field '" + name + "': the time " + tdText10(t) + " s is outside years 1 to 9999; the field is omitted (PS-610)");
+    return undefined;
+  }
   var h = Math.floor(rest / 3600), mi = Math.floor(rest / 60) % 60, s = rest % 60;
   if (spec.format === "iso8601") {
     var text = pad4(y) + "-" + pad2(mo) + "-" + pad2(d) + "T" + pad2(h) + ":" + pad2(mi) + ":" + pad2(s);
@@ -151,21 +155,27 @@ function timeOut(spec, v, name) {
   return spec.pattern.replace(/%([\s\S])/g, function (_, k) { return out[k]; });
 }
 /* PS-614: the seconds since 1970 of the instant the parts name, or undefined where one has
- * no value. `refs` maps each declared part to its variable. */
-function timeParts(refs, vars, name) {
+ * no value. `refs` maps each declared part to its variable. A part that is not whole, or
+ * parts naming no valid date, give undefined with a warning pushed to `wn` (amended
+ * 2026-10-15). */
+function timeParts(refs, vars, name, wn) {
   var got = {}, shown = [];
   for (var k = 0; k < TIME_PARTS.length; k++) {
     var p = TIME_PARTS[k];
     if (!(p in refs)) continue;
     var v = vars[refs[p]];
     if (typeof v !== "number" || !isFinite(v)) return undefined;
-    if (Math.floor(v) !== v) throw new Error("Field '" + name + "': its " + p + " is " + String(v) + ", not a whole number (PS-614)");
+    if (Math.floor(v) !== v) {
+      wn.push("Field '" + name + "': its " + p + " is " + String(v) + ", not a whole number; the field is omitted (PS-614)");
+      return undefined;
+    }
     got[p] = v;
     shown.push("'" + p + "': " + v);
   }
   var a = TIME_PARTS.map(function (p) { return got[p] || 0; });
   if (!timeValidCivil(a[0], a[1], a[2], a[3], a[4], a[5])) {
-    throw new Error("Field '" + name + "': its parts {" + shown.join(", ") + "} do not name a valid UTC date and time (PS-614)");
+    wn.push("Field '" + name + "': its parts {" + shown.join(", ") + "} do not name a valid UTC date and time; the field is omitted (PS-614)");
+    return undefined;
   }
   return timeCivilSeconds(a[0], a[1], a[2], a[3], a[4], a[5]);
 }
@@ -3433,7 +3443,8 @@ def time_report_js(field: Dict[str, Any], value: str) -> str:
     the value itself. A reference to the field still binds the number."""
     if not isinstance(field.get('time'), dict):
         return value
-    return f'timeOut({json.dumps(field["time"])}, {value}, {json.dumps(str(field.get("name")))})'
+    return (f'timeOut({json.dumps(field["time"])}, {value}, '
+            f'{json.dumps(str(field.get("name")))}, wn)')
 
 
 def name_from_to_js(field: Dict[str, Any], js_name: str) -> Tuple[List[str], str]:
@@ -5070,7 +5081,7 @@ function writeS(buf, pos, size, value, endian) {
                 refs = {part: to_js_name(str(ref)[1:])
                         for part, ref in field['time']['parts'].items()}
                 value_expr = (f'timeParts({json.dumps(refs)}, vars, '
-                              f'{json.dumps(str(field["name"]))})')
+                              f'{json.dumps(str(field["name"]))}, wn)')
                 lines.extend(self._computed_tail(i, field, name, value_expr))
                 return lines
             if 'ref' in field or 'compute' in field:
