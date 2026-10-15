@@ -149,6 +149,8 @@ public class Schema {
         FieldNames.check(raw);
         // CR-2026-156: `sampled` only on a repeat, with a usable interval, order and anchor (PS-569).
         Sampled.check(raw);
+        // CR-2026-174: a checksum on an unsigned integer wide enough for its algorithm (PS-585).
+        Checksum.check(raw);
         // CR-2026-161: a lookup's labels are of one type (PS-571).
         Reports.check(raw);
         Schema schema = new Schema();
@@ -1139,6 +1141,9 @@ public class Schema {
         
         if (fm.get("encoding") instanceof String encoding) f.setEncoding(encoding);
         if (fm.get("numeral") instanceof String numeral) f.setNumeral(numeral);
+        if (fm.get("checksum") instanceof Map<?, ?> checksum) {                 // PS-585
+            f.setChecksum((Map<String, Object>) checksum, String.valueOf(fm.get("type")));
+        }
 
         // byte_group: fields packed into shared bytes. Written either as a list of
         // fields with a sibling `size`, or as {size: N, fields: [...]}.
@@ -1898,8 +1903,19 @@ public class Schema {
             }
 
             case U8, U16, U24, U32, U64, BYTE, UINT -> {
+                int start = ctx.getOffset();
                 byte[] data = ctx.read(length);
                 long raw = ctx.decodeUnsigned(data, fieldEndian);
+                if (field.getChecksum() != null) {
+                    // PS-586 (CR-2026-174): the check value against the bytes it covers,
+                    // from `from` to the byte before the field, read before any modifier.
+                    String mismatch = Checksum.mismatch(field.getName(), field.getChecksum(),
+                            ctx.getData(), start, raw);
+                    if (mismatch != null) {
+                        if (Checksum.warns(field.getChecksum())) ctx.addWarning(mismatch);
+                        else throw new SchemaException.DecodeException(mismatch);
+                    }
+                }
                 if (field.getEncoding() != null) {
                     preEncoding = raw;
                     // A sentinel is a bit pattern, which need not be a valid code: 0xFF is
