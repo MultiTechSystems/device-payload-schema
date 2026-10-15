@@ -1,0 +1,84 @@
+# CR-2026-192 (PS-567, PS-569, PS-615, PS-629): time fields and the Integration Layer.
+#
+# - PS-567/PS-569: a sampled repeat's `at` may name a field decoded before the repeat that
+#   declares `time` with format `unix` or `iso8601`. A `calendar` or `pattern` time field, and
+#   a field decoded after the repeat, are rejected at load.
+# - PS-615: `valid_range` on a time field compares the seconds after the modifiers, and an
+#   encoder that checks a range on write checks that number. No encoder in this repository
+#   checks a range on write (CR-2026-159 pins it), so the rule has nowhere to apply: the
+#   value outside the range is written, where the spec prototype, which does check, rejects it.
+# - PS-629: a time field's `_meta.fields` entry carries `time`: `format`, and `epoch`,
+#   `since`, `milliseconds`, `fraction` and `pattern` where declared, never `parts`,
+#   `month_labels` or `keys`.
+#
+# Read by the reference, the validator and the generated codec
+# (tests/test_cr_2026_192_cases.py), Go (go/schema/cr192_test.go), Java (CR2026192Test.java)
+# and C# (CR2026_192Tests.cs). The codec carries no `_meta`. C has neither a repeat nor a
+# time field (tools/schema_binary.py refuses both, PS-446).
+#
+#   decode: `schema` (YAML text), `payload` (hex) and `expected` (the whole decoded data).
+#   cases:  `schema`, `input` (JSON text) and `payload` (hex).
+#   load:   `schema` and `error`, text one of the load errors contains.
+#   meta:   `schema`, `payload` (hex) and `expected`: for each field named, the `_meta.fields`
+#           keys listed, each compared exactly; a key given as null is absent.
+#
+# The cases are the spec prototype's TestCR2026192TimeFieldsAndTheIL, one row per assertion.
+
+decode:
+
+- name: at_names_a_time_field_decoded_before
+  schema: "name: t\nendian: big\nfields:\n  - {name: _base, type: u32, time: {format: unix}}\n  - name: readings\n    type: repeat\n    count: 2\n    sampled: {interval: 600, at: _base}\n    element: {type: s16, div: 100}\n"
+  payload: "0000000000000000"
+  expected: {readings: [0, 0]}
+
+cases:
+
+- name: the_encoder_writes_a_time_inside_its_range
+  schema: "name: t\nendian: big\nfields:\n  - {name: ts, type: u32, valid_range: [0, 100], time: {format: iso8601}}\n"
+  input: '{"ts": "1970-01-01T00:01:00Z"}'
+  payload: "0000003c"
+
+# The prototype rejects this with "Field 'ts': 120 s is outside its valid_range [0, 100]
+# (PS-615)". PS-615 binds only an encoder that checks a range on write, and none here does.
+- name: no_encoder_here_checks_the_range_on_write
+  schema: "name: t\nendian: big\nfields:\n  - {name: ts, type: u32, valid_range: [0, 100], time: {format: iso8601}}\n"
+  input: '{"ts": "1970-01-01T00:02:00Z"}'
+  payload: "00000078"
+
+load:
+
+- name: at_does_not_name_a_calendar_field
+  schema: "name: t\nendian: big\nfields:\n  - {name: _base, type: u32, time: {format: calendar}}\n  - name: readings\n    type: repeat\n    count: 2\n    sampled: {interval: 600, at: _base}\n    element: {type: u8}\n"
+  error: "Field 'readings': sampled at '_base' is neither rx_time, a unix_epoch or iso8601 timestamps entry, nor a unix or iso8601 time field decoded before the repeat (PS-567) (PS-569)"
+
+- name: at_does_not_name_a_pattern_field
+  schema: "name: t\nendian: big\nfields:\n  - {name: _base, type: u32, time: {format: pattern, pattern: '%Y'}}\n  - name: readings\n    type: repeat\n    count: 2\n    sampled: {interval: 600, at: _base}\n    element: {type: u8}\n"
+  error: "Field 'readings': sampled at '_base' is neither rx_time, a unix_epoch or iso8601 timestamps entry, nor a unix or iso8601 time field decoded before the repeat (PS-567) (PS-569)"
+
+- name: at_does_not_name_a_later_field
+  schema: "name: t\nendian: big\nfields:\n  - name: readings\n    type: repeat\n    count: 1\n    sampled: {interval: 600, at: _base}\n    element: {type: u8}\n  - {name: _base, type: u32, time: {format: unix}}\n"
+  error: "Field 'readings': sampled at '_base' is neither rx_time, a unix_epoch or iso8601 timestamps entry, nor a unix or iso8601 time field decoded before the repeat (PS-567) (PS-569)"
+
+meta:
+
+- name: meta_carries_time
+  schema: "name: t\nendian: big\nfields:\n  - {name: ts, type: u32, time: {format: iso8601, epoch: '1980-01-06T00:00:00Z', fraction: 3}}\n  - name: when\n    type: u32\n    time:\n      format: calendar\n      month_labels: ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9', '10', '11']\n"
+  payload: "0000000000000000"
+  expected:
+    ts: {time: {format: iso8601, epoch: '1980-01-06T00:00:00Z', fraction: 3}}
+    when: {time: {format: calendar}}
+
+- name: meta_carries_unix_keys_and_not_keys
+  schema: "name: t\nendian: big\nfields:\n  - {name: ms, type: u32, time: {format: unix, since: '2020-01-01T00:00:00Z', milliseconds: true}}\n  - {name: p, type: u32, time: {format: pattern, pattern: '%Y-%m-%d'}}\n  - name: c\n    type: u32\n    time:\n      format: calendar\n      keys: {hour: hours}\n  - {name: plain, type: u8}\n"
+  payload: "000000000000000000000000ff"
+  expected:
+    ms: {time: {format: unix, since: '2020-01-01T00:00:00Z', milliseconds: true}}
+    p: {time: {format: pattern, pattern: '%Y-%m-%d'}}
+    c: {time: {format: calendar}}
+    plain: {time: null}
+
+- name: meta_sampled_at_reports_the_name
+  schema: "name: t\nendian: big\nfields:\n  - {name: _base, type: u32, time: {format: unix}}\n  - name: readings\n    type: repeat\n    count: 2\n    sampled: {interval: 600, at: _base}\n    element: {type: s16, div: 100}\n"
+  payload: "0000000000000000"
+  expected:
+    readings: {sampled: {interval: 600, order: newest_first, at: _base}}

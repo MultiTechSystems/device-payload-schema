@@ -3929,7 +3929,8 @@ def sampled_meta(sampled):
 def sampled_errors(schema):
     """PS-569 (CR-2026-156): `sampled` only on a repeat; an interval above 0, a `$`
     reference or {configured: name}; a known order; `at` is rx_time or a unix_epoch or
-    iso8601 timestamps entry. The wording is the spec prototype's check_sampled. A `$`
+    iso8601 timestamps entry, or a unix or iso8601 time field decoded before the repeat
+    (CR-2026-192). The wording is the spec prototype's check_sampled. A `$`
     reference must name a field the repeat can see, which reference_errors holds to
     PS-539 (`interval` is one of its reference keys)."""
     metadata = schema.get('metadata') if isinstance(schema.get('metadata'), dict) else {}
@@ -3940,11 +3941,20 @@ def sampled_errors(schema):
     def bad(field, why):
         errors.append(f"Field '{field.get('name')}': sampled {why} (PS-569)")
 
+    # PS-567 (CR-2026-192): a field declaring `time` of format unix or iso8601, collected in
+    # document order, so a repeat sees only those decoded before it, as check_sampled does.
+    time_fields = set()
+
     def walk(node):
         if isinstance(node, list):
             for item in node:
                 walk(item)
         elif isinstance(node, dict):
+            spec = node.get('time')
+            if ('type' in node and isinstance(spec, dict)
+                    and spec.get('format') in ('unix', 'iso8601')
+                    and isinstance(node.get('name'), str)):
+                time_fields.add(node['name'])
             if 'sampled' in node and 'type' in node:
                 check(node, node['sampled'])
             for key, value in node.items():
@@ -3968,9 +3978,10 @@ def sampled_errors(schema):
             return bad(field, f"order {sampled.get('order')!r} is not newest_first or "
                               f"oldest_first")
         at = sampled.get('at', 'rx_time')
-        if at != 'rx_time' and at not in times:
-            bad(field, f"at {at!r} is neither rx_time nor a unix_epoch or iso8601 "
-                       f"timestamps entry")
+        if at != 'rx_time' and at not in times and at not in time_fields:
+            bad(field, f"at {at!r} is neither rx_time, a unix_epoch or iso8601 "
+                       f"timestamps entry, nor a unix or iso8601 time field decoded "
+                       f"before the repeat (PS-567)")
 
     walk({k: schema.get(k) for k in ('header', 'fields', 'ports', 'definitions')})
     return errors
@@ -5460,6 +5471,11 @@ def lookup_type_errors(node, _top=True):
     return errors
 
 
+# PS-629 (CR-2026-192): the keys of a time field's `time` that `_meta` carries; never `parts`,
+# `month_labels` or `keys`.
+TIME_META_KEYS = ('format', 'epoch', 'since', 'milliseconds', 'fraction', 'pattern')
+
+
 def field_meta(field_def, repeat=None, siblings=None):
     """One `_meta.fields` entry, derived from one declaration (PS-178, PS-493, PS-480,
     PS-371, PS-481). `repeat` is the repeat whose elements the field belongs to, for the
@@ -5472,6 +5488,9 @@ def field_meta(field_def, repeat=None, siblings=None):
     reports = reports_of(field_def)
     if reports is not None:
         entry['reports'] = reports                                       # PS-570
+    if isinstance(field_def.get('time'), dict):                          # PS-629
+        entry['time'] = {k: v for k, v in field_def['time'].items()
+                         if k in TIME_META_KEYS}
     senml = field_def.get('senml') if isinstance(field_def.get('senml'), dict) else {}
     unit = senml.get('unit') or field_def.get('unit')          # PS-178, no conversion
     if unit is not None:

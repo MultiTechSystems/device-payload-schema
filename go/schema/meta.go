@@ -373,6 +373,10 @@ func (s *Schema) metaReference(value any, repeat map[string]any, bare bool, sibl
 	return listing
 }
 
+// timeMetaKeys are the keys of a time field's `time` that `_meta` carries (PS-629,
+// CR-2026-192); never `parts`, `month_labels` or `keys`.
+var timeMetaKeys = []string{"format", "epoch", "since", "milliseconds", "fraction", "pattern"}
+
 // fieldMeta mirrors field_meta: one `_meta.fields` entry from one declaration (PS-178,
 // PS-493, PS-480, PS-371, PS-481). repeat is the repeat whose elements the field belongs
 // to, for the per-element references of PS-373 and PS-375.
@@ -384,6 +388,15 @@ func (s *Schema) fieldMeta(decl map[string]any, repeat map[string]any, siblings 
 	}
 	if reports := reportsOf(decl); reports != "" {
 		entry["reports"] = reports // PS-570
+	}
+	if spec := asStringMap(decl["time"]); spec != nil { // PS-629
+		carried := map[string]any{}
+		for _, key := range timeMetaKeys {
+			if v, ok := spec[key]; ok {
+				carried[key] = v
+			}
+		}
+		entry["time"] = carried
 	}
 	senml := asStringMap(decl["senml"])
 	if senml == nil {

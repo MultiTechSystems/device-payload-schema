@@ -471,7 +471,7 @@
               },
               "at": {
                 "type": "string",
-                "description": "The time of the newest sample: `rx_time` (default) or the name of a `metadata.timestamps` entry of mode unix_epoch or iso8601 (PS-567)."
+                "description": "The time of the newest sample: `rx_time` (default), the name of a `metadata.timestamps` entry of mode unix_epoch or iso8601, or the name of a field decoded before the repeat declaring `time` of format unix or iso8601 (PS-567)."
               }
             },
             "required": ["interval"],

@@ -4274,6 +4274,44 @@ improved. The Go, Java and C# corpus runners write per-vector reports only when
     schema at f11cb0c reaches either rule, and the four units above do not declare `time`
     there yet, so their move waits on the registry rewrite.
 
+- **CR-2026-192 (PS-567, PS-569 and PS-615 amended, PS-629; la-payload-schema
+  `cr/0.5.8-apply-192`, c06f347, for 0.5.8): time fields and the Integration Layer.**
+  - **PS-567/PS-569:** a `sampled` repeat's `at` may also name a field decoded before the
+    repeat that declares `time` with format `unix` or `iso8601`. As the prototype's
+    `check_sampled`, the walk collects such fields in source order as it goes, so a field
+    after the repeat, a `calendar` or `pattern` time field, and anything else are refused
+    with its text: `Field 'readings': sampled at '_base' is neither rx_time, a unix_epoch or
+    iso8601 timestamps entry, nor a unix or iso8601 time field decoded before the repeat
+    (PS-567) (PS-569)` (the CR-2026-156 case's text changed with it). Python
+    `sampled_errors`, Go `checkSampled` (`cr156.go`), Java `Sampled.check`, C#
+    `CheckSampled` (`Sampled.cs`). `_meta...sampled.at` already reported the name.
+  - **PS-615 (range on write): no encoder here checks a range on write**, measured before:
+    Python, the TS013 runtime, Go, Java, C# and C all write a value outside `valid_range`
+    (CR-2026-159's `valid_range_is_not_checked_on_encode` pins it; C has no `valid_range`),
+    so the rule binds none of them and nothing changed. The shared case records it: the
+    prototype rejects `1970-01-01T00:02:00Z` under `valid_range: [0, 100]`, and all five
+    here write `00000078`. On decode `valid_range` already compared the seconds (CR-186).
+  - **PS-629:** a time field's `_meta.fields` entry carries `time` right after `reports`:
+    `format`, and `epoch`, `since`, `milliseconds`, `fraction` and `pattern` where declared,
+    in declaration order; never `parts`, `month_labels` or `keys`. Python `field_meta`
+    (`TIME_META_KEYS`), Go `fieldMeta` (`timeMetaKeys`, `meta.go`), Java `Meta.fieldMeta`
+    (`TIME_META_KEYS`), C# `Meta.FieldMeta` (`TimeMetaKeys`). The codec carries no `_meta`;
+    C has neither a time field nor a repeat.
+  - **Cases:** `tests/cr-2026-192-cases.yaml` (the prototype's six tests: 1 decode, 2 encode,
+    3 load, 3 `_meta`), read by `test_cr_2026_192_cases.py` (reference, validator,
+    generator and codec), Go `cr192_test.go`, Java `CR2026192Test`, C# `CR2026_192Tests`.
+  - **Fixture** `_language-conformance/time-anchored-history.yaml`: a unix anchor (newest
+    first) and an iso8601 one from the GPS epoch (oldest first), each with `expected_meta`;
+    2 vectors, both round-trip, mutation score 100%. Floors: decode 2917 -> 2919 in Go, Java
+    and C#; re-encode +2 everywhere, `repeat` 37 -> 39 (Python and Java 2305 -> 2307, C#
+    2306 -> 2308, Go 2323 -> 2325, plain 2295 -> 2297).
+  - **Corpus and registry** (Python `interpret`, every vector, against master bb24a4c): no
+    schema is newly rejected and no decoded value changes; the only difference is the new
+    `time` entry in `_meta`, on 1145 vectors in 38 schemas - `time-field.yaml` (9) and 37
+    registry schemas (1136 vectors) that the registry's LC-03 rewrite (57e3227, on its
+    master) gave `time`. No registry `sampled` declares `at`, so none is anchored at a field
+    yet. Encoding is untouched.
+
 ## Converting a vendor codec
 
 The converters in `tools/` (`convert_decentlab.py`, `convert_milesight.py`) do the

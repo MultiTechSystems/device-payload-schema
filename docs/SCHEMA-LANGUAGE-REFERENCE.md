@@ -1159,8 +1159,10 @@ its `element` or its `fields` form:
   (its value after modifiers is the seconds), or `{configured: name}`, a device setting the
   frame does not carry and the integration supplies.
 - `order` is `newest_first` (the default) or `oldest_first`.
-- `at` is the time of the newest sample: `rx_time` (the default) or the name of a
-  `metadata.timestamps` entry whose mode is `unix_epoch` or `iso8601`.
+- `at` is the time of the newest sample: `rx_time` (the default), the name of a
+  `metadata.timestamps` entry whose mode is `unix_epoch` or `iso8601`, or the name of a field
+  decoded before the repeat that declares `time` with format `unix` or `iso8601` (PS-610),
+  whose instant is the anchor (CR-2026-192).
 
 Element k of N was sampled at `at` - k x `interval` for `newest_first`, and at `at` -
 (N - 1 - k) x `interval` for `oldest_first`. `sampled` is an annotation: decoding and
@@ -1169,7 +1171,8 @@ carries it with the defaults written (PS-568): `{"interval": {"configured": "his
 "order": "newest_first", "at": "rx_time"}`, a reference as `{"field": "period"}`. A schema is
 rejected at load where `sampled` is on a field that is not a repeat, the interval is absent,
 not above 0, a bare string without `$` or a mapping other than `configured`, the order is
-neither value, or `at` names no `unix_epoch`/`iso8601` entry (PS-569). Python, Go, Java and
+neither value, or `at` names neither a `unix_epoch`/`iso8601` entry nor a `unix`/`iso8601`
+time field decoded before the repeat (PS-569); a `calendar` or `pattern` time field is no anchor. Python, Go, Java and
 C# implement it; the C binary form has no repeat.
 
 ## Nested Objects
@@ -1316,6 +1319,11 @@ the field still binds the number.
   but are refused for encoding; a `%a` that is not the date's weekday is rejected.
 - `time` on another type or beside `lookup`, an unknown format, or a key of another format
   is rejected at load.
+- `valid_range` on a time field compares the seconds after the modifiers (PS-615). No
+  encoder here range-checks on write, so an instant outside the range is written as any
+  other value is.
+- `_meta.fields.<name>.time` carries `format`, and `epoch`, `since`, `milliseconds`,
+  `fraction` and `pattern` where declared; never `parts`, `month_labels` or `keys` (PS-629).
 
 ## TLV (Type-Length-Value)
 

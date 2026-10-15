@@ -86,6 +86,9 @@ func checkSampled(raw map[string]any, order keyOrder) error {
 			}
 		}
 	}
+	// PS-567 (CR-2026-192): fields declaring `time` of format unix or iso8601, collected in
+	// source order, so a repeat sees only those decoded before it, as check_sampled does.
+	timeFields := map[string]bool{}
 	bad := func(field map[string]any, why string) error {
 		name := "None"
 		if s, ok := field["name"].(string); ok {
@@ -126,8 +129,8 @@ func checkSampled(raw map[string]any, order keyOrder) error {
 		}
 		if at, ok := sm["at"]; ok {
 			name, isString := at.(string)
-			if !(isString && (name == "rx_time" || times[name])) {
-				return bad(field, fmt.Sprintf("at %s is neither rx_time nor a unix_epoch or iso8601 timestamps entry", sampledRepr(at)))
+			if !(isString && (name == "rx_time" || times[name] || timeFields[name])) {
+				return bad(field, fmt.Sprintf("at %s is neither rx_time, a unix_epoch or iso8601 timestamps entry, nor a unix or iso8601 time field decoded before the repeat (PS-567)", sampledRepr(at)))
 			}
 		}
 		return nil
@@ -145,6 +148,15 @@ func checkSampled(raw map[string]any, order keyOrder) error {
 		m := asStringMap(node)
 		if m == nil {
 			return nil
+		}
+		if _, has := m["type"]; has {
+			if spec := asStringMap(m["time"]); spec != nil {
+				if f := spec["format"]; f == "unix" || f == "iso8601" {
+					if name, ok := m["name"].(string); ok {
+						timeFields[name] = true
+					}
+				}
+			}
 		}
 		if _, has := m["sampled"]; has && m["type"] != nil {
 			if err := check(m); err != nil {

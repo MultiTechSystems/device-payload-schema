@@ -382,6 +382,11 @@ public static partial class Meta
         return listing;
     }
 
+    /// <summary>PS-629 (CR-2026-192): the keys of a time field's time that _meta carries; never
+    /// parts, month_labels or keys.</summary>
+    static readonly HashSet<string> TimeMetaKeys = new()
+        { "format", "epoch", "since", "milliseconds", "fraction", "pattern" };
+
     /// <summary>
     /// One `_meta.fields` entry, derived from one declaration (PS-178, PS-493, PS-480,
     /// PS-371, PS-481). <paramref name="repeat"/> is the repeat whose elements the field
@@ -396,6 +401,14 @@ public static partial class Meta
             entry["type"] = declaredType;
         if (ReportsOf(field) is { } reports)
             entry["reports"] = reports;    // PS-570
+        if (Get(field, "time") is YamlMappingNode time)                        // PS-629
+        {
+            var carried = new Dictionary<string, object?>();
+            foreach (var kv in time.Children)
+                if (kv.Key is YamlScalarNode k && k.Value is { } key && TimeMetaKeys.Contains(key))
+                    carried[key] = FromYaml(kv.Value);
+            entry["time"] = carried;
+        }
         var senml = Get(field, "senml") as YamlMappingNode;
         var senmlUnit = Value(senml, "unit");
         var unit = Truthy(senmlUnit) ? senmlUnit : Value(field, "unit");      // PS-178
