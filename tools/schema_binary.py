@@ -322,6 +322,13 @@ def field_errors(field: Dict, schema_endian: str = 'big') -> List[str]:
         refuse("`consume: 0` on a byte string",
                "the C interpreter has no non-consuming byte string (PS-588)")
 
+    from schema_interpreter import is_peeked_number
+    if is_peeked_number(field):
+        # CR-2026-182: a whole number that reads in place (PS-603). The C interpreter
+        # advances past every whole field, so the fields after it would read other bytes.
+        refuse("`consume: 0` on a whole numeric field",
+               "the C interpreter has no whole field that reads in place (PS-603)")
+
     if 'match' in field and not field.get('type'):
         refuse("`match`", "this format has no inline match record")
     ftype = str(field.get('type', ''))

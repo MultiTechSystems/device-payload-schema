@@ -1904,16 +1904,63 @@ function encPeekDisagreement(peeks, frame) {          // peek_disagreement
   return "A field writes bits a peek before it set otherwise (PS-551)";
 }
 
-/* PS-588 (CR-2026-175): a bytes, hex or ascii field declaring `consume: 0` (is_echo). */
+/* PS-588 (CR-2026-175): a bytes, hex or ascii field declaring `consume: 0`, or a whole
+ * numeric one (PS-603, CR-2026-182) (is_echo). */
 function encIsEcho(f) {
-  return (f.type === "bytes" || f.type === "hex" || f.type === "ascii") && f.consume === 0;
+  return (f.type === "bytes" || f.type === "hex" || f.type === "ascii" || encIsPeekedNumber(f))
+    && f.consume === 0;
+}
+
+var ENC_WHOLE_SIZES = { f16: 2, bf16: 2, f32: 4, f64: 8, uflt16: 2, sflt16: 2, sflt24: 3, udec: 1, sdec: 1 };
+
+function encWholeSize(t) {                             // whole_number_size
+  if (has_(ENC_WORD_ORDERED, t)) return 4;
+  if (has_(ENC_TYPES, t)) return ENC_TYPES[t][0];
+  return has_(ENC_WHOLE_SIZES, t) ? ENC_WHOLE_SIZES[t] : null;
+}
+
+function encIsPeekedNumber(f) {                        // is_peeked_number
+  return f.consume === 0 && encWholeSize(String(f.type)) !== null;
+}
+
+/* PS-604 (CR-2026-182): what a whole number decodes from `span` - its type, arithmetic and
+ * lookup, as a decoder applies them; null where it has no value. */
+function encWholeValue(f, span, endian) {
+  var t = String(f.type), v;
+  if (f.endian === "big" || f.endian === "little") endian = f.endian;
+  try {
+    if (has_(ENC_WORD_ORDERED, t)) v = readWordOrdered(span, 0, ENC_WORD_ORDERED[t][0], ENC_WORD_ORDERED[t][1]);
+    else if (has_(ENC_TYPES, t)) {
+      v = ENC_TYPES[t][1] ? readS(span, 0, ENC_TYPES[t][0], endian) : readU(span, 0, ENC_TYPES[t][0], endian);
+      if (f.encoding) v = decodeEncoding(v, f.encoding, ENC_TYPES[t][0]);
+    }
+    else if (t === "f16") v = readF16(span, 0, endian);
+    else if (t === "bf16") v = readBf16(span, 0, endian);
+    else if (t === "f32") v = readF32(span, 0, endian);
+    else if (t === "f64") v = readF64(span, 0, endian);
+    else if (t === "udec" || t === "sdec") {
+      var hi = span[0] >> 4;
+      if (t === "sdec" && hi >= 8) hi -= 16;
+      v = hi + (span[0] & 0x0F) * 0.1;
+    } else v = decodeMinifloat(t, readU(span, 0, ENC_WHOLE_SIZES[t], endian));
+  } catch (e) { return null; }
+  if (typeof v !== "number" || !isFinite(v)) return null;
+  v = encForward(v, f);
+  if (typeof v !== "number" || !isFinite(v)) return null;
+  var lk = f.lookup;
+  if (lk === undefined || lk === null) return v + 0;
+  if (Array.isArray(lk)) return v >= 0 && v < lk.length && v === Math.floor(v) ? lk[v] : null;
+  if (has_(lk, String(v))) return lk[String(v)];
+  if (has_(f, "default") && typeof f["default"] === "string") return lookupTemplate(f["default"], v);
+  return null;
 }
 
 /* PS-589: each one given a value is listed in `ec` as {p, f, given, n} (Frame.echoes): n
  * its byte count from the input, null for `remaining`, which reaches the frame's end. */
-function encEchoShifted(ec, by) { return { p: ec.p + by, f: ec.f, given: ec.given, n: ec.n }; }
+function encEchoShifted(ec, by) { return { p: ec.p + by, f: ec.f, given: ec.given, n: ec.n, endian: ec.endian }; }
 
 function encEchoLength(f, data) {                     // echo_length
+  if (encIsPeekedNumber(f)) return encWholeSize(String(f.type));   // PS-604
   var raw = f.length === undefined ? 1 : f.length;
   if (typeof raw === "string") {
     var text = raw.trim();
@@ -1963,11 +2010,13 @@ function encCheckEchoes(arr) {                        // check_echoes
     var n = ec.n === null ? Math.max(0, arr.length - ec.p) : ec.n, written;
     if (ec.p + n > arr.length) written = "too few bytes";
     else {
-      var found = encEchoValue(ec.f, Array.prototype.slice.call(arr, ec.p, ec.p + n));
+      var span = Array.prototype.slice.call(arr, ec.p, ec.p + n);
+      var found = encIsPeekedNumber(ec.f) ? encWholeValue(ec.f, span, ec.endian) : encEchoValue(ec.f, span);
       if (found !== null && JSON.stringify(found) === JSON.stringify(ec.given)) return;
       written = found === null ? "too few bytes" : encEchoText(found);
     }
-    encFail("Field '" + ec.f.name + "' is given " + encEchoText(ec.given) + ", but the other fields write " + written + " over its span (PS-589)");
+    encFail("Field '" + ec.f.name + "' is given " + encEchoText(ec.given) + ", but the other fields write " + written +
+            " over its span (" + (encIsPeekedNumber(ec.f) ? "PS-604" : "PS-589") + ")");
   });
 }
 
@@ -2336,7 +2385,7 @@ function encListIn(out, fields, data, ctx, top, entry) {
     if (encIsEcho(f)) {
       // PS-589 (CR-2026-175): it re-reads bytes the other fields write, so it writes none
       // and is not required; a value given for it is checked where the frame closes.
-      if (name && encHas(data, name)) fr.ec.push({ p: fr.out.length, f: f, given: data[name], n: encEchoLength(f, data) });
+      if (name && encHas(data, name)) fr.ec.push({ p: fr.out.length, f: f, given: data[name], n: encEchoLength(f, data), endian: ctx.endian });
       return;
     }
     if (encIsLiteral(f)) return;
@@ -4102,6 +4151,15 @@ function writeS(buf, pos, size, value, endian) {
             self.indent -= 1
             lines.append(f'{i}  }}')
             return lines
+        from schema_interpreter import is_peeked_number
+        if is_peeked_number(field):
+            # PS-603 (CR-2026-182): a whole number declaring `consume: 0` is read as it
+            # would be, and the position put back, so the fields after it read it again.
+            uid = f'_pk{self._next_uid()}'
+            inner = dict(field)
+            del inner['consume']
+            return ([f'{self._i()}  var {uid} = pos;'] + self._gen_decode_field(inner)
+                    + [f'{self._i()}  pos = {uid};'])
         lines = []
         i = self._i()
         # PS-422, PS-426: `encoding` only on uN and only a named code; no `match_value`.

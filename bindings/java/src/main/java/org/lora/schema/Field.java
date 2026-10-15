@@ -224,7 +224,30 @@ public class Field {
      */
     public boolean isEcho() {
         return consumeDeclared && consume == 0
-                && (type == FieldType.BYTES || type == FieldType.HEX || type == FieldType.ASCII);
+                && (type == FieldType.BYTES || type == FieldType.HEX || type == FieldType.ASCII
+                    || isPeekedNumber());
+    }
+
+    /**
+     * A whole numeric field declaring `consume: 0` (PS-603, CR-2026-182): an integer, a
+     * float, a minifloat, `udec`/`sdec` or a word-ordered variant. It reads its value in
+     * place and leaves the read position; an encoder writes nothing for it (PS-604).
+     */
+    public boolean isPeekedNumber() {
+        return consumeDeclared && consume == 0 && wholeNumberSize(type) > 0;
+    }
+
+    /** The byte width of a whole numeric type (PS-453), 0 for any other. */
+    static int wholeNumberSize(FieldType t) {
+        if (t == null) return 0;
+        return switch (t) {
+            case U8, I8, S8, UDEC, SDEC -> 1;
+            case U16, I16, S16, F16, BF16, UFLT16, SFLT16 -> 2;
+            case U24, I24, S24, SFLT24 -> 3;
+            case U32, I32, S32, F32, U32LE16, S32LE16, F32LE16, U32BE16LE, S32BE16LE, F32BE16LE -> 4;
+            case U64, I64, S64, F64 -> 8;
+            default -> 0;
+        };
     }
 
     public int getBitBaseBytes() { return bitBaseBytes; }

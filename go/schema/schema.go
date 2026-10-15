@@ -2547,6 +2547,9 @@ func extractRange(base uint64, signed bool, start, bits int) any {
 }
 
 func decodeField(field Field, ctx *DecodeContext) (any, error) {
+	if isPeekedNumber(field) {
+		return decodeInPlace(field, ctx) // PS-603 (CR-2026-182)
+	}
 	// Bit ranges are handled before the type switch: the type string carries the
 	// range, so it never matches a plain type name.
 	if match := bitRangePattern.FindStringSubmatch(string(field.Type)); match != nil {

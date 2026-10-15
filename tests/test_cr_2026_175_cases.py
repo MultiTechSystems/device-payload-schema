@@ -124,7 +124,9 @@ def test_a_byte_string_echo_is_not_warned(ftype):
 
 def test_consume_zero_elsewhere_is_still_warned():
     result = validate_schema({"name": "t", "fields": [
-        {"name": "w", "type": "u16", "consume": 0}, {"name": "a", "type": "u8"}]})
+        # A whole number reads in place since CR-2026-182 (PS-603); a base64 does not.
+        {"name": "w", "type": "base64", "length": 2, "consume": 0},
+        {"name": "a", "type": "u8"}]})
     assert any("PS-453" in w for w in result.schema_warnings), result.schema_warnings
 
 

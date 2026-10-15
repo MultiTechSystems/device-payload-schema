@@ -59,7 +59,7 @@ from validate_schema import (  # noqa: E402
     is_encode_vector,
     warnings_match,
 )
-from schema_interpreter import expand_refs  # noqa: E402
+from schema_interpreter import expand_refs, is_peeked_number  # noqa: E402
 
 CORPUS = REPO_ROOT / "schemas" / "devices"
 
@@ -168,6 +168,9 @@ def field_source(field, schema_endian):
         # CR-2026-175: field_def_t's `consume` is a bit range's and a bool's; a byte
         # string always advances, so a re-read (PS-588) is an interpreter gap.
         return None, "the interpreter has no non-consuming byte string (PS-588)"
+    if is_peeked_number(field):
+        # CR-2026-182: a whole field reads in place (PS-603); every C field advances.
+        return None, "the interpreter has no whole field that reads in place (PS-603)"
 
     # A field's own `endian:` wins over the schema's. The C interpreter has carried
     # this since it had a field struct (`field_def_t.endian`, applied in

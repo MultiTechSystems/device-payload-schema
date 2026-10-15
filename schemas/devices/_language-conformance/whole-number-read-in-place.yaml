@@ -1,0 +1,130 @@
+# A whole numeric field - an integer, a float or a nibble decimal - declaring `consume: 0`
+# reads its value from the bytes at the read position and leaves the position where it
+# was, so the fields after it read the same bytes again (PS-603, CR-2026-182). Every
+# implementation used to advance past it, so a frame kind peeked ahead of the cases that
+# read it again ran past the end of the payload. An encoder writes nothing for it, and a
+# value given for it must equal what the bytes the other fields write decode to (PS-604),
+# so each vector round-trips.
+name: probe_whole_number_read_in_place
+endian: big
+ports:
+  1:
+    fields:
+    - name: _kind
+      type: u8
+      consume: 0
+    - match:
+        field: $_kind
+        cases:
+          1:
+          - name: kind
+            type: u8
+          - name: temperature
+            type: s16
+            div: 10
+          2:
+          - name: kind
+            type: u8
+          - name: battery
+            type: u8
+  2:
+    fields:
+    - name: word
+      type: u16
+      consume: 0
+    - name: hi
+      type: u8
+    - name: lo
+      type: u8
+  3:
+    fields:
+    - name: level
+      type: f32
+      consume: 0
+    - name: raw
+      type: u32
+  4:
+    fields:
+    - name: reading
+      type: s16
+      endian: little
+      div: 10
+      consume: 0
+    - name: first
+      type: u8
+    - name: second
+      type: u8
+  5:
+    fields:
+    - name: tenths
+      type: udec
+      consume: 0
+    - name: code
+      type: u8
+test_vectors:
+- name: kind_read_again_by_the_first_case
+  source: generated
+  fPort: 1
+  payload: "01 00 D7"
+  expected:
+    kind: 1
+- name: reading_after_the_kind
+  source: generated
+  fPort: 1
+  payload: "01 00 D7"
+  expected:
+    temperature: 21.5
+- name: second_case_selected_in_place
+  source: generated
+  fPort: 1
+  payload: "02 50"
+  expected:
+    battery: 80
+- name: word_read_in_place
+  source: generated
+  fPort: 2
+  payload: "12 34"
+  expected:
+    word: 4660
+- name: first_byte_of_the_word_read_again
+  source: generated
+  fPort: 2
+  payload: "12 34"
+  expected:
+    hi: 18
+- name: float_read_in_place
+  source: generated
+  fPort: 3
+  payload: "41 20 00 00"
+  expected:
+    level: 10
+- name: float_bytes_read_again
+  source: generated
+  fPort: 3
+  payload: "41 20 00 00"
+  expected:
+    raw: 1092616192
+- name: little_endian_scaled_negative
+  source: generated
+  fPort: 4
+  payload: "FE FF"
+  expected:
+    reading: -0.2
+- name: low_byte_read_again
+  source: generated
+  fPort: 4
+  payload: "FE FF"
+  expected:
+    first: 254
+- name: nibble_decimal_read_in_place
+  source: generated
+  fPort: 5
+  payload: "25"
+  expected:
+    tenths: 2.5
+- name: nibble_byte_read_again
+  source: generated
+  fPort: 5
+  payload: "25"
+  expected:
+    code: 37

@@ -1954,6 +1954,13 @@ public class Schema {
      */
     private Object decodeField(Field field, DecodeContext ctx, boolean fieldRules) {
         try {
+            if (field.isPeekedNumber()) {
+                // PS-603 (CR-2026-182): a whole number declaring `consume: 0` reads in place.
+                int start = ctx.getOffset();
+                Object value = decodeFieldBody(field, ctx, fieldRules);
+                ctx.setOffset(start);
+                return value;
+            }
             return decodeFieldBody(field, ctx, fieldRules);
         } catch (SchemaException.BufferUnderflow e) {
             // PS-535: the innermost field that read past the end is named; an enclosing
@@ -3285,6 +3292,18 @@ public class Schema {
                 return value;
             }
         }
+    }
+
+    /**
+     * What a whole number that does not consume decodes from {@code span} (PS-604,
+     * CR-2026-182): its type, arithmetic and lookup, as a decoder applies them; null where
+     * it has no value.
+     */
+    Object peekedNumberValue(Field field, byte[] span) {
+        Object value = decodeField(field, new DecodeContext(span, getEndian()));
+        if (value instanceof Double d && d == 0.0) return 0.0;      // PS-566
+        return value instanceof Number || value instanceof String || value instanceof Boolean
+                ? value : null;
     }
 
     private Object formatBytes(byte[] data, String format, String separator) {

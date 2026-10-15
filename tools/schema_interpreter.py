@@ -361,12 +361,36 @@ def fill_checksums(frame: bytes, placed: list, written: Optional[list] = None) -
 NON_CONSUMING_TYPES = ('bytes', 'hex', 'ascii')
 
 
-def is_echo(field_def) -> bool:
-    """A `bytes`, `hex` or `ascii` field declaring `consume: 0` (PS-588): it reads and
-    reports its span and leaves the read position, so later fields read the bytes again."""
-    return (isinstance(field_def, dict) and field_def.get('type') in NON_CONSUMING_TYPES
-            and 'consume' in field_def and field_def.get('consume') == 0
+def _declares_consume_zero(field_def) -> bool:
+    return ('consume' in field_def and field_def.get('consume') == 0
             and not isinstance(field_def.get('consume'), bool))
+
+
+def whole_number_size(ftype) -> Optional[int]:
+    """The byte width of a whole numeric type (PS-453): an integer `uN`/`sN` or an alias,
+    a float, a minifloat, `udec`/`sdec` or a word-ordered variant; None for anything else."""
+    if not isinstance(ftype, str):
+        return None
+    if ftype in INTEGER_TYPE_INFO:
+        return INTEGER_TYPE_INFO[ftype][0]
+    return _FIXED_TYPE_SIZES.get(ftype)
+
+
+def is_peeked_number(field_def) -> bool:
+    """A whole numeric field declaring `consume: 0` (PS-603, CR-2026-182): it reads its
+    value in place and leaves the read position, so later fields read the bytes again."""
+    return (isinstance(field_def, dict) and whole_number_size(field_def.get('type')) is not None
+            and _declares_consume_zero(field_def))
+
+
+def is_echo(field_def) -> bool:
+    """A field that re-reads bytes the fields after it consume: a `bytes`, `hex` or `ascii`
+    field declaring `consume: 0` (PS-588), or a whole numeric one (PS-603). It writes no
+    bytes on encode, and a value given for it is checked against the frame (PS-589,
+    PS-604)."""
+    return (isinstance(field_def, dict)
+            and (field_def.get('type') in NON_CONSUMING_TYPES or is_peeked_number(field_def))
+            and _declares_consume_zero(field_def))
 
 
 def frame_echoes(data) -> list:
@@ -377,6 +401,8 @@ def frame_echoes(data) -> list:
 def echo_length(field_def, data) -> Optional[int]:
     """The byte count of a non-consuming byte string, read from the input it is encoded
     with: None for `remaining`, which reaches the end of the frame it is checked in."""
+    if is_peeked_number(field_def):
+        return whole_number_size(field_def.get('type'))     # PS-604
     raw = field_def.get('length', 1)
     if isinstance(raw, str):
         text = raw.strip()
@@ -424,21 +450,26 @@ def check_echoes(frame) -> None:
     string equals what the field decodes from the bytes the other fields wrote over its
     span, or the input is rejected naming the field."""
     data = bytes(frame)
-    for position, field_def, given, length in frame_echoes(frame):
+    for position, field_def, given, length, *decoder in frame_echoes(frame):
         if length is None:
             length = max(0, len(data) - position)
         if position + length > len(data):
             written = 'too few bytes'
         else:
             try:
-                found = echo_value(field_def, data[position:position + length])
+                span = data[position:position + length]
+                # A whole number decodes through its own type, arithmetic and lookup
+                # (PS-604); the interpreter hands its decoder in with the echo.
+                found = decoder[0](span) if decoder and decoder[0] else echo_value(
+                    field_def, span)
             except ValueError:
                 found = None
             if found is not None and normalize_output(found) == normalize_output(given):
                 continue
             written = echo_text(found) if found is not None else 'too few bytes'
+        rule = 'PS-604' if is_peeked_number(field_def) else 'PS-589'
         raise ValueError(f"Field '{field_def.get('name')}' is given {echo_text(given)}, but "
-                         f"the other fields write {written} over its span (PS-589)")
+                         f"the other fields write {written} over its span ({rule})")
 
 
 def peek_disagreement(peeks, frame: bytes) -> str:
@@ -501,14 +532,14 @@ class FrameBuffer:
         self.checksums = []         # PS-587 (CR-2026-174), as Frame
         self.echoes = []        # CR-2026-175 (PS-589): see Frame.echoes
 
-    def echo(self, field_def, data) -> None:
+    def echo(self, field_def, data, decoder=None) -> None:
         """PS-589: a non-consuming byte string writes nothing and is not required; a value
         given for it is checked where the frame closes. It reads from the position a
         decoder is at, which is the start of any bytes still pending."""
         name = field_def.get('name')
         if name and data.get(name) is not None:
             self.echoes.append((len(self.buf), field_def, data[name],
-                                echo_length(field_def, data)))
+                                echo_length(field_def, data), decoder))
 
     def cover(self, position: int, mask: bytes) -> None:
         if len(self.covered) < position + len(mask):
@@ -1099,6 +1130,8 @@ def fixed_element_size(fields):
             return None
         ftype = str(field.get('type', ''))
         base = INTEGER_TYPE_INFO.get(ftype)
+        if is_peeked_number(field):
+            continue                    # reads in place, advancing nothing (PS-603)
         if ftype in _FIXED_TYPE_SIZES or base:
             total += _FIXED_TYPE_SIZES.get(ftype) or base[0]
         elif ftype in COMPUTED_TYPES or is_literal(field) or is_echo(field):
@@ -5518,13 +5551,48 @@ class SchemaInterpreter:
                     return self._decode_field_endian(field_def, buf, pos)
                 finally:
                     self._meta_depth -= 1
-            return self._decode_field_endian(field_def, buf, pos)
+            value, end = self._decode_field_endian(field_def, buf, pos)
+            # PS-603 (CR-2026-182): a whole number declaring `consume: 0` reads in place.
+            return value, (pos if is_peeked_number(field_def) else end)
         except BufferUnderflow as exc:
             # PS-535: the innermost field that read past the end is named; an enclosing
             # object or repeat passes its member's error through unchanged.
             if exc.named:
                 raise
             raise name_underflow(exc, field_def.get('name'), field_def.get('type')) from exc
+
+    def _echo_decoder(self, field_def: Dict[str, Any]):
+        """PS-604 (CR-2026-182): what a whole number that does not consume decodes from
+        the bytes over its span, as a decoder reads it; None for a byte string, which
+        echo_value decodes. A span that does not decode is no value."""
+        if not is_peeked_number(field_def):
+            return None
+        endian = self.endian
+
+        def decode(span: bytes) -> Any:
+            saved = self.endian
+            # The decode's own tables are scratch here: what this records is no output.
+            tables = {k: getattr(self, k, None)
+                      for k in ('_lookup_numbers', '_pre_lookup', '_labels')}
+            self._lookup_numbers, self._pre_lookup = IdentityTable(), IdentityTable()
+            self.endian = endian
+            try:
+                value = self._decode_field_endian(field_def, span, 0)[0]
+                if value is None:
+                    return None
+                value = self._apply_modifiers(value, field_def)
+                return None if value is OMITTED else value
+            except (BufferUnderflow, ValueError, TypeError):
+                return None
+            finally:
+                self.endian = saved
+                for key, table in tables.items():
+                    if table is None:
+                        if hasattr(self, key):
+                            delattr(self, key)
+                    else:
+                        setattr(self, key, table)
+        return decode
 
     def _produced(self, field_def: Dict[str, Any], key: Optional[str] = None) -> None:
         """PS-490: record the declaration about to report `key` (its name by default).
@@ -8078,7 +8146,7 @@ class SchemaInterpreter:
             # it is checked where the frame closes.
             if is_echo(field_def):
                 try:
-                    output.echo(field_def, data)
+                    output.echo(field_def, data, self._echo_decoder(field_def))
                 except ValueError as e:
                     result.errors.append(error_text(f"Error encoding {name}: ", e))
                 continue
@@ -9312,7 +9380,7 @@ class SchemaInterpreter:
                 out.extend(padding(length))             # CR-2026-141: no value
                 continue
             if is_echo(f):
-                out.echo(f, data)               # PS-589 (CR-2026-175): writes nothing
+                out.echo(f, data, self._echo_decoder(f))   # PS-589, PS-604: writes nothing
                 continue
             if is_literal(f):
                 continue            # PS-359: a literal writes no bytes
