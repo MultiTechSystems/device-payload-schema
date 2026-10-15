@@ -52,6 +52,9 @@ internal static class Numeral
             : ((ulong)abs).ToString(System.Globalization.CultureInfo.InvariantCulture);
         var sign = n < 0 ? "-" : "";
         int width = fixedLength ?? sign.Length + digits.Length;
+        if (fixedLength == null && n < 0 && numeral == "hex")                    // PS-168, PS-595
+            throw new FieldErrorException($"Field '{name}': {SchemaEncoder.JsNumber(value)} is negative, "
+                + "which a hex numeral cannot write (PS-168)");
         if ((n < 0 && numeral == "hex") || sign.Length + digits.Length > width)
             throw new FieldErrorException($"Field '{name}': {SchemaEncoder.JsNumber(value)} does not fit "
                 + $"{fixedLength ?? digits.Length} {numeral} digits (PS-168)");

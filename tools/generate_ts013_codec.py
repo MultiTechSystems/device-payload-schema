@@ -285,6 +285,9 @@ function encNumeral(f, value, fixed) {
   var digits = f.numeral === "hex" ? Math.abs(n).toString(16).toUpperCase() : String(Math.abs(n));
   var sign = n < 0 ? "-" : "";
   var width = fixed !== null ? fixed : sign.length + digits.length;
+  if (fixed === null && n < 0 && f.numeral === "hex") {
+    encFail("Field '" + f.name + "': " + String(value) + " is negative, which a hex numeral cannot write (PS-168)");
+  }
   if ((n < 0 && f.numeral === "hex") || sign.length + digits.length > width) {
     encFail("Field '" + f.name + "': " + String(value) + " does not fit " + (fixed !== null ? fixed : digits.length) + " " + f.numeral + " digits (PS-168)");
   }
@@ -479,6 +482,8 @@ function encFieldInner(out, f, value, endian, ctx) {  // _encode_field_inner
   if (encIsLiteral(f)) return;                       // PS-359: a literal writes nothing
   if (type === "string" || type === "ascii") {        // encode_ascii (PS-537)
     var fixed = typeof f.length === "number" && f.length >= 0 ? f.length : null;
+    var term = type === "ascii" && f.terminator !== undefined && f.terminator !== null ? f.terminator : null;
+    if (term !== null) fixed = null;                  // PS-593: a terminated field has no width
     if (f.numeral && type === "ascii") value = encNumeral(f, value, fixed);   // encode_numeral (PS-561)
     var text = String(value), u = [], high = false;
     for (var c = 0; c < text.length; c++) {
@@ -489,10 +494,17 @@ function encFieldInner(out, f, value, endian, ctx) {  // _encode_field_inner
       if (code > 0x7F) high = true;
       u.push(code);                                  // PS-538: the byte of the same number
     }
+    if (term !== null && u.indexOf(term) >= 0) {      // PS-595
+      encFail("Field '" + f.name + "': the value holds its terminator byte 0x" + ("0" + term.toString(16).toUpperCase()).slice(-2) + " (PS-595)");
+    }
+    if (f.nul === "stop" && u.indexOf(0) >= 0) {       // PS-595
+      encFail("Field '" + f.name + "': a nul: stop value holds a 0x00 byte (PS-595)");
+    }
     if (fixed !== null && u.length > fixed) {
       encFail("Field '" + f.name + "': an ascii value of " + u.length + " bytes is longer than its length of " + fixed + " (PS-537)");
     }
     if (high) ctx.wa.push("Field '" + f.name + "': a character above U+007F in an ascii value (PS-537)");
+    if (term !== null) { for (var t = 0; t < u.length; t++) out.push(u[t]); out.push(term); return; }   // PS-595
     encPad(out, u, fixed !== null ? fixed : u.length);
     return;
   }
@@ -4718,7 +4730,16 @@ function writeS(buf, pos, size, value, endian) {
             # `length: remaining` consumes to the end of the payload (PS-014); a name is a
             # preceding field (PS-464).
             lines.append(f'{i}  var {js_name} = "";')
-            lines.append(f'{i}  var {js_name}_n = {length_to_js(field)};')
+            if ftype == 'ascii' and field.get('terminator') is not None:
+                # PS-593 (CR-2026-177): the text runs to the first terminator byte; a
+                # payload that ends first is an underflow naming the field.
+                term = int(field['terminator'])
+                lines.append(
+                    f'{i}  var {js_name}_n = (function () {{ var _e = buf.indexOf({term}, pos); '
+                    f'if (_e < 0) throw underflow("no terminator byte 0x{term:02X} before the '
+                    f'end of the payload (PS-593)"); return _e - pos; }})();')
+            else:
+                lines.append(f'{i}  var {js_name}_n = {length_to_js(field)};')
             # A declared length the payload cannot supply is an error, as in every
             # interpreter; the loops below stopped at the end and reported what was left.
             lines.append(f'{i}  need(buf, pos, {js_name}_n);')
@@ -4738,9 +4759,17 @@ function writeS(buf, pos, size, value, endian) {
                 from schema_interpreter import ASCII_HIGH_BYTE_WARNING
                 warning = json.dumps(ASCII_HIGH_BYTE_WARNING.format(field.get('name')))
                 lines.append(f'{i}  if (/[\\u0080-\\u00ff]/.test({js_name})) wn.push({warning});')
-                lines.append(f'{i}  {js_name} = {js_name}.replace(/\\u0000+$/, "");')
+                nul = field.get('nul', 'trailing')              # PS-534 (CR-2026-177)
+                if nul == 'stop':
+                    lines.append(f'{i}  {js_name} = {js_name}.split("\\u0000")[0];')
+                elif nul == 'drop':
+                    lines.append(f'{i}  {js_name} = {js_name}.replace(/\\u0000/g, "");')
+                else:
+                    lines.append(f'{i}  {js_name} = {js_name}.replace(/\\u0000+$/, "");')
                 if echo:
                     lines.append(f'{i}  pos = {js_name}_p0;')
+                elif field.get('terminator') is not None:
+                    lines.append(f'{i}  pos += 1;')              # PS-593: consumed, not reported
                 if field.get('numeral'):
                     # PS-560: the whole text is a numeral of the declared base, or an error
                     # naming the field; parseInt alone would take a prefix.

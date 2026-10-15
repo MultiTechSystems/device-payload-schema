@@ -1,0 +1,25 @@
+# A terminator byte other than 0x00, with `numeral` (PS-593, PS-594, CR-2026-177): the text
+# the terminator leaves is read as a decimal integer, and an encoder writes the digits with
+# no fill, since there is no length to fill to (PS-595).
+name: probe_ascii_terminator_numeral
+endian: big
+fields:
+- name: rssi
+  type: ascii
+  terminator: 0x2C
+  numeral: decimal
+- name: count
+  type: u8
+test_vectors:
+- name: negative_value
+  source: generated
+  payload: "2D36352C07"
+  expected: {rssi: -65, count: 7}
+- name: two_digits
+  source: generated
+  payload: "34322C09"
+  expected: {rssi: 42, count: 9}
+- name: zero
+  source: generated
+  payload: "302C01"
+  expected: {rssi: 0, count: 1}
