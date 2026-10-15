@@ -449,6 +449,11 @@ func caseClaims(fields []Field, optional bool, out []caseClaim) []caseClaim {
 		if f.Name == "" || strings.HasPrefix(f.Name, "_") {
 			continue
 		}
+		if checksumOf(f) != nil {
+			// PS-587 (CR-2026-174): computed, never taken from the input, so never required.
+			out = append(out, caseClaim{f, true})
+			continue
+		}
 		if isLiteralField(f) || isComputedField(f) || isEcho(f) {
 			// A literal or computed field writes no bytes, but only this case reports it,
 			// so it claims its name, never required: a literal where the input gives its

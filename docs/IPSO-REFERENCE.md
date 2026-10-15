@@ -66,7 +66,7 @@ fields:
     unit: "°C"
     ipso: 3303
     senml: {unit: "Cel"}
-    semantic: "temperature.ambient"
+    semantic: "air.temperature"
 ```
 
 ## Adding New IPSO Objects

@@ -254,6 +254,7 @@ final class Meta {
             entry.put("senml", out);
         }
         if (truthy(fieldDef.get("description"))) entry.put("description", fieldDef.get("description"));
+        if (fieldDef.get("semantic") instanceof String semantic) entry.put("semantic", semantic); // PS-600
         if ("repeat".equals(declaredType) && Wave6a.isElementRepeat(fieldDef)) {
             // PS-531: the element's own entry, nested, without its name; the repeat keeps
             // `type: repeat` and its identity.
