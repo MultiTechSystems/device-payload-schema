@@ -225,6 +225,10 @@ final class Meta {
         return fieldMeta(fieldDef, repeat, null);
     }
 
+    /** PS-629 (CR-2026-192): the keys of a time field's time that _meta carries; never parts, month_labels or keys. */
+    static final java.util.Set<String> TIME_META_KEYS =
+            java.util.Set.of("format", "epoch", "since", "milliseconds", "fraction", "pattern");
+
     /**
      * As {@link #fieldMeta(Map, Map)}; {@code siblings} are the element repeats of the field
      * list the field is declared in, which a {@code $name[i]} names (PS-546).
@@ -235,6 +239,15 @@ final class Meta {
         if (declaredType != null) entry.put("type", declaredType);
         String reports = Reports.of(fieldDef);
         if (reports != null) entry.put("reports", reports);                               // PS-570
+        if (fieldDef.get("time") instanceof Map<?, ?> time) {                             // PS-629
+            Map<String, Object> carried = new LinkedHashMap<>();
+            for (Map.Entry<?, ?> e : time.entrySet()) {
+                if (TIME_META_KEYS.contains(String.valueOf(e.getKey()))) {
+                    carried.put(String.valueOf(e.getKey()), e.getValue());
+                }
+            }
+            entry.put("time", carried);
+        }
         Map<?, ?> senml = fieldDef.get("senml") instanceof Map<?, ?> s ? s : Map.of();
         Object unit = truthy(senml.get("unit")) ? senml.get("unit") : fieldDef.get("unit");
         if (unit != null) entry.put("unit", reference(unit, repeat, false, siblings));   // PS-178

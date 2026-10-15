@@ -1,0 +1,77 @@
+# A history anchored at a time the frame carries (PS-567, PS-629, CR-2026-192). A device
+# buffers a few readings of one measurement at a fixed interval and sends them with the time
+# of the newest one, as a count of seconds. The arrays name that field as their anchor, so an
+# integration places each sample from it rather than from the receive time.
+#
+#   - port 1: Unix seconds, reported as a number; newest first, every 900 s;
+#   - port 2: seconds from the GPS epoch, reported as ISO 8601 with three fractional digits;
+#     oldest first, every 60 s.
+#
+# `_meta` carries each time field's `time` declaration (its format and the keys that recover
+# the instant), and each array's `sampled` with the anchor's name. The decoded output is the
+# fields as read. An anchor that is a calendar or a pattern, or one decoded after the array,
+# is rejected at load; tests/cr-2026-192-cases.yaml holds those.
+name: probe_time_anchored_history
+endian: big
+ports:
+  1:
+    fields:
+      - name: measured_at
+        type: u32
+        time: {format: unix}
+      - name: temperature
+        type: repeat
+        count: 3
+        element: {type: s16, div: 10, unit: Cel}
+        sampled: {interval: 900, at: measured_at}
+  2:
+    fields:
+      - name: taken
+        type: u32
+        time: {format: iso8601, epoch: "1980-01-06T00:00:00Z", fraction: 3}
+      - name: level
+        type: repeat
+        count: 2
+        element: {type: u16}
+        sampled: {interval: 60, order: oldest_first, at: taken}
+test_vectors:
+  - name: unix_anchor_newest_first
+    source: generated
+    fPort: 1
+    payload: "68EF1920 00D7 00D2 FFDD"
+    expected:
+      measured_at: 1760500000
+      temperature: [21.5, 21.0, -3.5]
+    expected_meta:
+      schema: probe_time_anchored_history
+      fPort: 1
+      fields:
+        measured_at:
+          type: u32
+          reports: number
+          time: {format: unix}
+        temperature:
+          type: repeat
+          reports: array
+          element: {type: s16, reports: number, unit: Cel, display_unit: Cel}
+          sampled: {interval: 900, order: newest_first, at: measured_at}
+  - name: iso8601_anchor_oldest_first
+    source: generated
+    fPort: 2
+    payload: "5619529B 0102 0A0B"
+    expected:
+      taken: "2025-10-14T18:02:03.000Z"
+      level: [258, 2571]
+    expected_meta:
+      schema: probe_time_anchored_history
+      fPort: 2
+      fields:
+        taken:
+          type: u32
+          reports: string
+          time: {format: iso8601, epoch: "1980-01-06T00:00:00Z", fraction: 3}
+        level:
+          type: repeat
+          reports: array
+          element: {type: u16, reports: integer}
+          sampled: {interval: 60, order: oldest_first, at: taken}

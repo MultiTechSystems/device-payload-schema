@@ -65,7 +65,7 @@ cases:
 
 - name: at_names_no_timestamp
   schema: "name: t\nversion: 1\nfields:\n  - name: pm25\n    type: repeat\n    until: end\n    element: {type: u16, unit: ug/m3}\n    sampled: {interval: 60, at: sampled_time}\n"
-  error: "Field 'pm25': sampled at 'sampled_time' is neither rx_time nor a unix_epoch or iso8601 timestamps entry (PS-569)"
+  error: "Field 'pm25': sampled at 'sampled_time' is neither rx_time, a unix_epoch or iso8601 timestamps entry, nor a unix or iso8601 time field decoded before the repeat (PS-567) (PS-569)"
 
 - name: sampled_on_a_u8
   schema: "name: t\nversion: 1\nfields:\n  - {name: v, type: u8, sampled: {interval: 60}}\n"

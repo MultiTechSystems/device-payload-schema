@@ -47,18 +47,26 @@ final class Sampled {
                 }
             }
         }
+        // PS-567 (CR-2026-192): fields declaring time of format unix or iso8601, collected in
+        // source order, so a repeat sees only those decoded before it, as check_sampled does.
+        Set<String> timeFields = new HashSet<>();
         for (String key : new String[] {"header", "fields", "ports", "definitions"}) {
-            walk(raw.get(key), times);
+            walk(raw.get(key), times, timeFields);
         }
     }
 
-    private static void walk(Object node, Set<String> times) {
+    private static void walk(Object node, Set<String> times, Set<String> timeFields) {
         if (node instanceof List<?> list) {
-            for (Object item : list) walk(item, times);
+            for (Object item : list) walk(item, times, timeFields);
         } else if (node instanceof Map<?, ?> map) {
-            if (map.containsKey("sampled") && map.get("type") != null) checkField(map, times);
+            if (map.containsKey("type") && map.get("time") instanceof Map<?, ?> spec
+                    && ("unix".equals(spec.get("format")) || "iso8601".equals(spec.get("format")))
+                    && map.get("name") instanceof String name) {
+                timeFields.add(name);
+            }
+            if (map.containsKey("sampled") && map.get("type") != null) checkField(map, times, timeFields);
             for (Map.Entry<?, ?> e : map.entrySet()) {
-                if (!"test_vectors".equals(String.valueOf(e.getKey()))) walk(e.getValue(), times);
+                if (!"test_vectors".equals(String.valueOf(e.getKey()))) walk(e.getValue(), times, timeFields);
             }
         }
     }
@@ -69,7 +77,7 @@ final class Sampled {
                 + "': sampled " + why + " (PS-569)");
     }
 
-    private static void checkField(Map<?, ?> field, Set<String> times) {
+    private static void checkField(Map<?, ?> field, Set<String> times, Set<String> timeFields) {
         if (!"repeat".equals(field.get("type"))) {
             throw bad(field, "is defined only on a repeat, not on " + field.get("type"));
         }
@@ -99,9 +107,11 @@ final class Sampled {
         }
         if (sampled.containsKey("at")) {
             Object at = sampled.get("at");
-            if (!(at instanceof String s && (s.equals("rx_time") || times.contains(s)))) {
-                throw bad(field, "at " + repr(at)
-                        + " is neither rx_time nor a unix_epoch or iso8601 timestamps entry");
+            if (!(at instanceof String s
+                    && (s.equals("rx_time") || times.contains(s) || timeFields.contains(s)))) {
+                throw bad(field, "at " + repr(at) + " is neither rx_time, a unix_epoch or iso8601 "
+                        + "timestamps entry, nor a unix or iso8601 time field decoded before the "
+                        + "repeat (PS-567)");
             }
         }
     }

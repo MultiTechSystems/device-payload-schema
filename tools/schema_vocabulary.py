@@ -280,7 +280,7 @@ VOCABULARY: Dict[str, Dict[str, Tuple[Tuple[str, ...], str]]] = {
     "sampled": {
         "interval": (("py", "go", "java", "cs"), "seconds, a $ reference or {configured: name} (PS-567)"),
         "order": (("py", "go", "java", "cs"), "newest_first | oldest_first (PS-567)"),
-        "at": (("py", "go", "java", "cs"), "rx_time or a timestamps entry naming the newest sample's time (PS-567)"),
+        "at": (("py", "go", "java", "cs"), "rx_time, a timestamps entry, or a unix or iso8601 time field decoded before the repeat, naming the newest sample's time (PS-567)"),
     },
     "senml": {
         "name": (("score",), "SenML record name"),

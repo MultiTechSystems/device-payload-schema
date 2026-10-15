@@ -45,24 +45,31 @@ public static partial class SchemaParser
                     && ts.GetValueOrDefault("mode") is "unix_epoch" or "iso8601")
                     times.Add(name);
         }
+        // PS-567 (CR-2026-192): fields declaring time of format unix or iso8601, collected in
+        // source order, so a repeat sees only those decoded before it, as check_sampled does.
+        var timeFields = new HashSet<string>();
         foreach (var key in new[] { "header", "fields", "ports", "definitions" })
-            WalkSampled(NameKey(root, key), times);
+            WalkSampled(NameKey(root, key), times, timeFields);
     }
 
-    static void WalkSampled(YamlNode? node, HashSet<string> times)
+    static void WalkSampled(YamlNode? node, HashSet<string> times, HashSet<string> timeFields)
     {
         if (node is YamlSequenceNode seq)
         {
-            foreach (var item in seq.Children) WalkSampled(item, times);
+            foreach (var item in seq.Children) WalkSampled(item, times, timeFields);
         }
         else if (node is YamlMappingNode map)
         {
+            if (NameKey(map, "type") != null && Meta.FromYaml(NameKey(map, "time")) is Dictionary<string, object?> spec
+                && spec.GetValueOrDefault("format") is "unix" or "iso8601"
+                && Meta.FromYaml(NameKey(map, "name")) is string timeName)
+                timeFields.Add(timeName);
             if (NameKey(map, "sampled") is { } sampled && NameKey(map, "type") is { } type
                 && Meta.FromYaml(type) != null)
-                CheckSampledField(map, sampled, times);
+                CheckSampledField(map, sampled, times, timeFields);
             foreach (var kv in map.Children)
                 if (!(kv.Key is YamlScalarNode k && k.Value == "test_vectors"))
-                    WalkSampled(kv.Value, times);
+                    WalkSampled(kv.Value, times, timeFields);
         }
     }
 
@@ -72,7 +79,8 @@ public static partial class SchemaParser
         return new InvalidOperationException($"Field '{name}': sampled {why} (PS-569)");
     }
 
-    static void CheckSampledField(YamlMappingNode field, YamlNode sampledNode, HashSet<string> times)
+    static void CheckSampledField(YamlMappingNode field, YamlNode sampledNode, HashSet<string> times,
+        HashSet<string> timeFields)
     {
         var type = Meta.FromYaml(NameKey(field, "type"));
         if (!(type is string t && t == "repeat"))
@@ -93,8 +101,10 @@ public static partial class SchemaParser
             throw BadSampled(field, $"interval {PyRepr(interval)} is not a number of seconds above 0, a $ reference or {{configured: name}}");
         if (sampled.TryGetValue("order", out var order) && !(order is "newest_first" or "oldest_first"))
             throw BadSampled(field, $"order {PyRepr(order)} is not newest_first or oldest_first");
-        if (sampled.TryGetValue("at", out var at) && !(at is string a && (a == "rx_time" || times.Contains(a))))
-            throw BadSampled(field, $"at {PyRepr(at)} is neither rx_time nor a unix_epoch or iso8601 timestamps entry");
+        if (sampled.TryGetValue("at", out var at)
+            && !(at is string a && (a == "rx_time" || times.Contains(a) || timeFields.Contains(a))))
+            throw BadSampled(field, $"at {PyRepr(at)} is neither rx_time, a unix_epoch or iso8601 timestamps entry, "
+                + "nor a unix or iso8601 time field decoded before the repeat (PS-567)");
     }
 
     /// <summary>What Python's str() writes for a field's type in "not on {type}".</summary>
