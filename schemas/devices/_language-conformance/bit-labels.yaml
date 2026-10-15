@@ -97,4 +97,4 @@ test_vectors:
   expected:
     modes: [eco]
   expected_warnings:
-    - ["bit 2", "PS-617"]
+    - ["Field 'modes'", "bit 2", "PS-617"]
