@@ -1,0 +1,82 @@
+# CR-2026-181 (PS-601, PS-602; PS-527 and PS-551 amended): an encoder writes a byte string
+# exactly as given.
+#
+# Port 1 is the registry's Tektelic orca tracker shape: one name, `id`, under a 6-byte
+# entry declared first and a 3-byte one after. A 3-byte id was zero-padded into the
+# 6-byte entry (`b0010203c4` re-encoded as `0a010203000000c4`); a value of another byte
+# count is no value for an entry whose length differs, so it goes back to its own. Tag
+# 0xC0's key names an internal length field, which the value's byte count fixes: it was a
+# missing input (PS-434). Port 2 holds the two rejections, as encode vectors: a value whose
+# byte count is not the length (PS-602) and malformed hex (PS-601).
+name: bytes_encode_exact
+version: 1
+endian: big
+ports:
+  1:
+    fields:
+      - tlv:
+          tag_size: 1
+          cases:
+            0x0A:
+              - {name: id, type: bytes, length: 6}
+              - {name: rssi, type: s8}
+            0xB0:
+              - {name: id, type: bytes, length: 3}
+              - {name: rssi, type: s8}
+            0xC0:
+              - {name: _len, type: u8}
+              - {name: key, type: bytes, length: _len, format: 'hex:upper', separator: ':'}
+  2:
+    fields:
+      - {name: eui, type: bytes, length: 8}
+test_vectors:
+  - name: three_byte_id_goes_back_to_its_entry
+    fport: 1
+    payload: "B0010203C4"
+    source: generated
+    expected:
+      id: "010203"
+      rssi: -60
+  - name: six_byte_id_goes_back_to_its_entry
+    fport: 1
+    payload: "0A0A0B0C0D0E0F05"
+    source: generated
+    expected:
+      id: "0a0b0c0d0e0f"
+      rssi: 5
+  - name: key_fixes_its_internal_length
+    fport: 1
+    payload: "C003A1B2C3"
+    source: generated
+    expected:
+      key: "A1:B2:C3"
+  - name: empty_key_fixes_a_zero_length
+    fport: 1
+    payload: "C000"
+    source: generated
+    expected:
+      key: ""
+  - name: eight_bytes_decode
+    fport: 2
+    payload: "0011223344556677"
+    source: generated
+    expected:
+      eui: "0011223344556677"
+  - name: encode_short_value_is_not_padded
+    description: "seven bytes for a length of 8: PS-602 names the field"
+    fport: 2
+    input:
+      eui: "00112233445566"
+    source: spec-example
+    expected_error:
+      requirement: PS-602
+      at: eui
+  - name: encode_malformed_hex_is_not_written
+    description: "an odd digit count: PS-601 names the field"
+    fport: 2
+    input:
+      eui: "0011223344556677a"
+    source: spec-example
+    expected_error:
+      requirement: PS-601
+      at: eui

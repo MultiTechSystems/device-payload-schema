@@ -1203,6 +1203,26 @@ public static class SchemaEncoder
             if (_trace != null) RecordedInputs(fields, data, derived);             // PS-573
             foreach (var f in fields)
             {
+                if (Cr181.IsByteString(f.Type) && f.LengthRef != null
+                    && data.TryGetValue(f.Name, out var byteValue) && byteValue != null)
+                {
+                    // PS-602, PS-551 (CR-2026-181): the value's byte count fixes the field its
+                    // length names; a given value that differs is rejected.
+                    int count = Cr181.Input(f, byteValue).Length;
+                    var lengthSource = SizeSource(fields, f.LengthRef);
+                    var lengthName = lengthSource?.Name ?? f.LengthRef;
+                    if (!derived.TryGetValue(lengthName, out var givenLength) || givenLength == null)
+                    {
+                        if (Derivable(lengthSource) && !IsPeek(fields, lengthSource!))
+                            derived[lengthName] = (long)count;
+                        continue;
+                    }
+                    var bound = ReferenceBinding(givenLength, lengthSource);
+                    if (bound is not bool && Helpers.ToFloat64(bound) is (true, var n) && n != count)
+                        throw new FieldErrorException($"Field '{f.Name}' is given {count} bytes, but "
+                            + $"'{lengthName}', its length, is {MessageValue(bound)} (PS-602)");
+                    continue;
+                }
                 if (f.Type == FieldType.Repeat)
                 {
                     var records = RepeatRecords(f, data);
@@ -2253,6 +2273,31 @@ public static class SchemaEncoder
             }
         }
 
+        /// <summary>A repeat takes a list whose elements its members take (CR-2026-181), so a
+        /// list of 3-byte ids goes to the case whose element declares `length: 3`, not a 6-byte
+        /// one declared first (the registry's Tektelic orca tracker).</summary>
+        static (bool fits, bool exact) RepeatTakes(SchemaField f, List<object?> items)
+        {
+            bool exact = true;
+            foreach (var item in items)
+            {
+                if (item == null) continue;
+                var record = f.ElementName != null
+                    ? new Dictionary<string, object?> { [f.ElementName] = item }
+                    : item as Dictionary<string, object?>;
+                if (record == null) continue;
+                foreach (var member in f.Fields)
+                {
+                    if (string.IsNullOrEmpty(member.Name)
+                        || !record.TryGetValue(member.Name, out var v) || v == null) continue;
+                    var (fits, memberExact) = CaseTakes(member, v);
+                    if (!fits) return (false, false);
+                    exact = exact && memberExact;
+                }
+            }
+            return (true, exact);
+        }
+
         /// <summary>
         /// The reference's _case_takes (CR-2026-148, PS-527 amended): whether a tlv case's
         /// field can take a value, and whether it reproduces it exactly. Fits: the value
@@ -2266,6 +2311,13 @@ public static class SchemaEncoder
         /// </summary>
         static (bool fits, bool exact) CaseTakes(SchemaField f, object? value)
         {
+            if (Cr181.IsByteString(f.Type))                        // CR-2026-181 (PS-527)
+            {
+                var took = Cr181.Takes(f, value);
+                return (took, took);
+            }
+            if (f.Type == FieldType.Repeat && value is List<object?> items)
+                return RepeatTakes(f, items);
             var reversed = ReverseLookup(value, f.Lookup);
             if (reversed is bool) return (true, true);
             var (ok, given) = Helpers.ToFloat64(reversed);
@@ -3151,18 +3203,10 @@ public static class SchemaEncoder
                     long whole = (long)Math.Floor(n / 10.0);
                     return new[] { (byte)(((whole & 0x0F) << 4) | (n - whole * 10)) };
                 }
-                case FieldType.Base64:
-                {
-                    var raw = Convert.FromBase64String(value?.ToString() ?? "");
-                    return Pad(raw, field.Length > 0 ? field.Length : raw.Length);
-                }
                 case FieldType.Skip:
                     return new byte[field.Length > 0 ? field.Length : 0];
-                case FieldType.Bytes or FieldType.Hex:
-                {
-                    var raw = ToBytes(field, value);
-                    return Pad(raw, EncodeLength(field, raw.Length));
-                }
+                case FieldType.Bytes or FieldType.Hex or FieldType.Base64:
+                    return Cr181.Encode(field, value);      // CR-2026-181: PS-081, PS-601, PS-602
                 case FieldType.String or FieldType.Boolean when field.Value != null:
                     // A literal came from no bytes, so it writes none.
                     return Array.Empty<byte>();
@@ -3299,52 +3343,6 @@ public static class SchemaEncoder
                         $"{value} does not fit {size} unsigned bytes");
             }
             return Helpers.EncodeUint((ulong)value, size, endian);
-        }
-
-        /// <summary>The byte count to write for a variable-length field.</summary>
-        static int EncodeLength(SchemaField field, int natural)
-            // `length: remaining` has no fixed count when encoding (PS-014) - the value
-            // supplies it. It arrives as the negative sentinel the parser stores.
-            => field.Length > 0 ? field.Length : Math.Max(0, natural);
-
-        static byte[] Pad(byte[] raw, int length)
-        {
-            if (raw.Length == length) return raw;
-            var output = new byte[length];
-            Array.Copy(raw, output, Math.Min(raw.Length, length));
-            return output;
-        }
-
-        static byte[] ToBytes(SchemaField field, object? value)
-        {
-            if (value is byte[] raw) return raw;
-            if (value is List<object?> list)
-                return list.Select(item =>
-                {
-                    var (ok, numeric) = Helpers.ToFloat64(item);
-                    return (byte)(ok ? (long)numeric & 0xFF : 0);
-                }).ToArray();
-            // CR-2026-008/PS-281 makes the decoder report a byte sequence as a lowercase
-            // hex string, so that is the form encoding has to accept for a round trip.
-            // The declared format and separator say how the value was rendered (PS-079,
-            // PS-391); only ':' was stripped, so "0a-0b" could not be read back.
-            if (field.Format == "base64")
-                return Convert.FromBase64String(value?.ToString() ?? "");
-            var text = (value?.ToString() ?? "").Replace(" ", "");
-            text = !string.IsNullOrEmpty(field.Separator) ? text.Replace(field.Separator, "") : text.Replace(":", "");
-            if (text.Length % 2 != 0)
-                throw new InvalidOperationException($"field '{field.Name}': expected hex, got "
-                    + $"'{value}' (odd number of digits)");
-            var output = new byte[text.Length / 2];
-            for (int i = 0; i < output.Length; i++)
-            {
-                if (!byte.TryParse(text.AsSpan(i * 2, 2),
-                        System.Globalization.NumberStyles.HexNumber,
-                        System.Globalization.CultureInfo.InvariantCulture, out output[i]))
-                    throw new InvalidOperationException(
-                        $"field '{field.Name}': expected hex, got '{value}'");
-            }
-            return output;
         }
 
         /// <summary>Inclusive bounds a field of this type can hold, or null if not an integer.</summary>

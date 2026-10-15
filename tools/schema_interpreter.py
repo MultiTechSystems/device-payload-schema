@@ -908,22 +908,6 @@ def integer_range(field_type: str):
     return 0, (1 << (8 * size)) - 1
 
 
-def encode_length(field_def, natural: int) -> int:
-    """The byte count to write for a variable-length field.
-
-    `length: remaining` has no fixed count when encoding (PS-014) - the value supplies
-    it. Slicing with the word itself raised "slice indices must be integers", which is
-    how radio-bridge's stored downlink failed to re-encode.
-    """
-    raw = field_def.get('length', natural)
-    if isinstance(raw, str):
-        return max(0, int(natural))
-    try:
-        return max(0, int(raw))
-    except (TypeError, ValueError):
-        return max(0, int(natural))
-
-
 def resolve_length(field_def, buf, pos, default=1, variables=None):
     """Resolve a field's byte count, honouring `length: remaining` (PS-014).
 
@@ -1039,6 +1023,82 @@ def format_bytes(field_def, data: bytes):
         return list(data)
     digits = '%02X' if fmt == 'hex:upper' else '%02x'
     return str(field_def.get('separator', '')).join(digits % b for b in data)
+
+
+#: The types whose value is a byte string an encoder writes as given (PS-081, PS-071).
+BYTE_STRING_TYPES = ('bytes', 'hex', 'base64')
+_HEX_TEXT = re.compile(r'(?:[0-9A-Fa-f]{2})*')
+_BASE64_TEXT = re.compile(r'[A-Za-z0-9+/]*={0,2}')
+
+
+def byte_string_input(field_def, value) -> bytes:
+    """CR-2026-181 (PS-081, PS-601): a `bytes`, `hex` or `base64` field's input as bytes.
+
+    A string is read in the field's own format, never guessed: base64 (padded or not) for
+    `format: base64` and the `base64` type, otherwise hex in either case, with the field's
+    declared `separator` or without; any of them takes an array of integers 0 to 255.
+    Anything malformed is rejected naming the field, in the spec prototype's words
+    (`byte_string_value`): this wrapped array elements with `& 0xFF`, decoded base64
+    leniently, and stripped spaces from hex.
+    """
+    name = field_def.get('name')
+    if isinstance(value, (bytes, bytearray)):
+        return bytes(value)
+    if isinstance(value, (list, tuple)):
+        if not all(isinstance(b, (int, float)) and not isinstance(b, bool)
+                   and math.isfinite(b) and b == int(b) and 0 <= b <= 255 for b in value):
+            raise FieldError(f"Field '{name}': an array element is not an integer from 0 "
+                             f"to 255 (PS-601)")
+        return bytes(int(b) for b in value)
+    if not isinstance(value, str):
+        raise FieldError(f"Field '{name}': a {json_type_name(value)} is not a byte string "
+                         f"value (PS-081)")
+    ftype = field_def.get('type')
+    if ftype == 'base64' or (ftype == 'bytes' and field_def.get('format') == 'base64'):
+        text = value.strip()
+        padded = text + '=' * (-len(text) % 4)
+        if not _BASE64_TEXT.fullmatch(padded) or len(padded.rstrip('=')) % 4 == 1:
+            raise FieldError(f"Field '{name}': '{value}' is not valid base64 (PS-601)")
+        import base64 as b64
+        return b64.b64decode(padded)
+    separator = field_def.get('separator') if ftype == 'bytes' else None
+    text = value.replace(str(separator), '') if separator else value
+    if not _HEX_TEXT.fullmatch(text):
+        with_separator = " with separator '%s'" % separator if separator else ''
+        raise FieldError(f"Field '{name}': '{value}' is not well-formed hex{with_separator} "
+                         f"(PS-601)")
+    return bytes.fromhex(text)
+
+
+def json_type_name(value) -> str:
+    """The JSON type of an input value, as a message names it."""
+    if isinstance(value, bool):
+        return 'boolean'
+    if isinstance(value, (int, float)):
+        return 'number'
+    if isinstance(value, dict):
+        return 'object'
+    return 'null' if value is None else type(value).__name__
+
+
+def byte_string_named_length(field_def) -> Optional[str]:
+    """The field a byte string's `length` names (PS-464), or None for a literal length,
+    `remaining` or none."""
+    if field_def.get('type') not in BYTE_STRING_TYPES:
+        return None
+    length = field_def.get('length')
+    if not isinstance(length, str) or length.strip().lower() == 'remaining':
+        return None
+    return length.strip().lstrip('$') or None
+
+
+def check_byte_string_length(field_def, raw: bytes) -> bytes:
+    """PS-602: a literal `length` is the value's byte count; nothing is cut or padded."""
+    length = field_def.get('length')
+    if isinstance(length, int) and not isinstance(length, bool) and len(raw) != length:
+        raise FieldError(f"Field '{field_def.get('name')}' is given {len(raw)} bytes for a "
+                         f"length of {length} (PS-602)")
+    return raw
 
 
 _FIXED_TYPE_SIZES = {
@@ -7541,13 +7601,35 @@ class SchemaInterpreter:
                 return None
         return None
 
+    def _derive_byte_count(self, fields: List[Dict[str, Any]], field_def: Dict[str, Any],
+                           ref: str, data: Dict[str, Any],
+                           derived: Dict[str, Any]) -> None:
+        """PS-602: a byte string's value fixes the field its `length` names, as a
+        repeat's list fixes its count (PS-551). Derived where the input omits it; a given
+        value that differs is rejected. Neither was checked: the value's own length was
+        written whatever the field said."""
+        count = len(byte_string_input(field_def, data[field_def['name']]))
+        source = self._size_source(fields, ref)
+        name = source['name'] if source is not None else ref
+        if derived.get(name) is None:
+            if self._derivable(source) and not self._is_peek(fields, source):
+                derived[name] = count
+            return
+        given = self._encode_reference(name, derived)
+        if isinstance(given, (int, float)) and not isinstance(given, bool) \
+                and given != count:
+            raise FieldError(f"Field '{field_def['name']}' is given {count} bytes, but "
+                             f"'{name}', its length, is {message_value(given)} (PS-602)")
+
     def _derive_inputs(self, fields: List[Dict[str, Any]],
                        data: Dict[str, Any]) -> Dict[str, Any]:
         """PS-551: the values this field list's input omits but the rest of it fixes.
 
         - a repeat's `count: $n` or `byte_length: $n` field, from the list given;
         - a match's `field: $d` discriminator, from the one case whose fields are given;
-        - a flagged construct's mask field, from the groups given.
+        - a flagged construct's mask field, from the groups given;
+        - the field a `bytes`, `hex` or `base64` field's `length` names, from the value's
+          byte count (PS-602, CR-2026-181).
 
         A supplied value is kept: the construct checks that it agrees with what the rest
         of the input says, and rejects the input where it does not. The input itself is
@@ -7558,6 +7640,10 @@ class SchemaInterpreter:
             derived = self._recorded_inputs(fields, data, derived)          # PS-573
         for f in fields:
             if not isinstance(f, dict):
+                continue
+            ref = byte_string_named_length(f)
+            if ref is not None and data.get(f.get('name')) is not None:
+                self._derive_byte_count(fields, f, ref, data, derived)
                 continue
             if f.get('type') == 'repeat':
                 records = self._repeat_records(f, data)
@@ -8865,7 +8951,36 @@ class SchemaInterpreter:
         No tolerance applies to either test. The test this replaces asked that the value
         reverse to an integer within an absolute 1e-9, which refused every float field
         (an f32 of 21.8) and 0xfffffe through `div: 100` (16777214.000000002).
+
+        CR-2026-181 amends it again: a `bytes`, `hex` or `base64` field takes a value
+        that is well formed (PS-601) and, where its `length` is a literal, has that many
+        bytes (PS-602). A 3-byte id offered to a 6-byte case went there and was padded.
         """
+        if field_def.get('type') in BYTE_STRING_TYPES:
+            try:
+                check_byte_string_length(field_def, byte_string_input(field_def, value))
+            except ValueError:
+                return False, False
+            return True, True
+        if field_def.get('type') == 'repeat' and isinstance(value, (list, tuple)):
+            # A repeat takes a list whose elements its members take, so a Tektelic
+            # `devices` list of 3-byte ids goes to the case whose element declares
+            # `length: 3`, not the 6-byte one declared first (CR-2026-181).
+            members, element_name = repeat_members(field_def)
+            exact = True
+            for item in value:
+                record = {element_name: item} if element_name is not None else item
+                if not isinstance(record, dict):
+                    continue
+                for member in members:
+                    name = member.get('name') if isinstance(member, dict) else None
+                    if record.get(name) is None:
+                        continue
+                    fit, member_exact = self._case_takes(member, record[name])
+                    if not fit:
+                        return False, False
+                    exact = exact and member_exact
+            return True, exact
         given = reverse_lookup(value, field_def.get('lookup'))
         if not isinstance(given, (int, float)) or isinstance(given, bool):
             return True, True
@@ -9292,37 +9407,12 @@ class SchemaInterpreter:
             return bytes(length)
         
         if field_type == 'bytes':
-            # Accepts every form a `bytes` field can arrive in, because CR-2026-008
-            # makes the decoder report one as a lowercase hex string (PS-281) and
-            # encode(decode(payload)) has to keep round-tripping. Falling through to
-            # `bytes(length)` used to emit zeros for anything that was not already a
-            # bytes object, so a hex string round-tripped to 00000000 silently.
-            if isinstance(value, (bytes, bytearray)):
-                raw = bytes(value)
-            elif isinstance(value, str) and field_def.get('format') == 'base64':
-                import base64 as b64
-                raw = b64.b64decode(value)
-            elif isinstance(value, str):
-                text = value.replace(' ', '')
-                separator = field_def.get('separator')
-                if separator:
-                    text = text.replace(str(separator), '')
-                try:
-                    raw = bytes.fromhex(text)
-                except ValueError as exc:
-                    raise ValueError(
-                        "bytes field %r: expected hex, got %r (%s)"
-                        % (field_def.get('name'), value, exc)
-                    )
-            elif isinstance(value, (list, tuple)):
-                raw = bytes(int(b) & 0xFF for b in value)
-            else:
-                raise ValueError(
-                    "bytes field %r: cannot encode %s"
-                    % (field_def.get('name'), type(value).__name__)
-                )
-            length = encode_length(field_def, len(raw))
-            return raw[:length].ljust(length, b'\x00')
+            # Accepts every form a `bytes` field can arrive in (PS-081), because
+            # CR-2026-008 makes the decoder report one as a lowercase hex string (PS-281)
+            # and encode(decode(payload)) has to keep round-tripping. CR-2026-181: a
+            # malformed value (PS-601) or one whose byte count is not a literal `length`
+            # (PS-602) is rejected naming the field; this cut and zero-padded it.
+            return check_byte_string_length(field_def, byte_string_input(field_def, value))
         
         if is_literal(field_def):
             # A literal came from no bytes, so it writes none (PS-359).
@@ -9339,17 +9429,10 @@ class SchemaInterpreter:
             return encode_ascii(field_def.get('name'), value, fixed,
                                 self._encode_warnings)
         
-        if field_type == 'hex':
-            length = encode_length(field_def, len(str(value)) // 2)
-            return bytes.fromhex(str(value).replace(' ', ''))[:length].ljust(length, b'\x00')
-        
-        if field_type == 'base64':
-            import base64 as b64
-            length = field_def.get('length', 0)
-            decoded = b64.b64decode(str(value))
-            if length:
-                return decoded[:length].ljust(length, b'\x00')
-            return decoded
+        if field_type in ('hex', 'base64'):
+            # PS-601 and PS-602 apply to the hex and base64 types as to `bytes` with that
+            # format (CR-2026-181); both cut and zero-padded to `length`.
+            return check_byte_string_length(field_def, byte_string_input(field_def, value))
         
         if field_type == 'enum':
             return self._encode_enum(field_def, value)

@@ -353,33 +353,69 @@ function encMinifloat(type, value) {                  // encode_minifloat
   return sign + f;
 }
 
-function encLength(f, natural) {                      // encode_length
-  var raw = f.length === undefined ? natural : f.length;
-  if (typeof raw === "string") return Math.max(0, natural);
-  var n = parseInt(raw, 10);
-  return isNaN(n) ? Math.max(0, natural) : Math.max(0, n);
-}
-
 function encPad(out, bytes, length) {
   for (var i = 0; i < length; i++) out.push(i < bytes.length ? bytes[i] & 0xFF : 0);
 }
 
-function encHex(text, what) {
-  text = String(text).replace(/ /g, "");
-  if (text.length % 2 || /[^0-9a-fA-F]/.test(text)) encFail(what + ": expected hex, got " + JSON.stringify(text));
-  var out = [];
-  for (var i = 0; i < text.length; i += 2) out.push(parseInt(text.substr(i, 2), 16));
-  return out;
-}
-
 function encBase64(text) {
   var A = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-  var s = String(text).replace(/[^A-Za-z0-9+/]/g, ""), out = [], bits = 0, acc = 0;
+  var s = String(text), out = [], bits = 0, acc = 0;
   for (var i = 0; i < s.length; i++) {
-    acc = (acc << 6) | A.indexOf(s.charAt(i)); bits += 6;
+    acc = ((acc << 6) | A.indexOf(s.charAt(i))) & 0xFFFF; bits += 6;
     if (bits >= 8) { bits -= 8; out.push((acc >> bits) & 0xFF); }
   }
   return out;
+}
+
+// byte_string_input (CR-2026-181, PS-081, PS-601): a bytes, hex or base64 field's input
+// as bytes, in the spec prototype's words (byte_string_value). A string is read in the
+// field's own format: base64, padded or not, for `format: base64` and the base64 type;
+// otherwise hex in either case, with the declared separator or without. An array gives
+// integers 0 to 255. Anything malformed is rejected naming the field: this padded, cut,
+// masked array elements with & 0xFF and dropped characters that were not base64.
+function encByteString(f, value) {
+  var name = "Field '" + f.name + "'";
+  if (Array.isArray(value)) {
+    if (!value.every(function (x) { return typeof x === "number" && isFinite(x) && Math.floor(x) === x && x >= 0 && x <= 255; })) {
+      encFail(name + ": an array element is not an integer from 0 to 255 (PS-601)");
+    }
+    return value.slice();
+  }
+  if (typeof value !== "string") {
+    var jt = value === null ? "null" : typeof value === "object" ? "object" : typeof value;
+    encFail(name + ": a " + jt + " is not a byte string value (PS-081)");
+  }
+  var t = String(f.type);
+  if (t === "base64" || (t === "bytes" && f.format === "base64")) {
+    var text = value.trim(), padded = text + "====".slice(0, (4 - text.length % 4) % 4);
+    if (!/^[A-Za-z0-9+\/]*={0,2}$/.test(padded) || padded.replace(/=+$/, "").length % 4 === 1) {
+      encFail(name + ": '" + value + "' is not valid base64 (PS-601)");
+    }
+    return encBase64(padded.replace(/=+$/, ""));
+  }
+  var sep = t === "bytes" && f.separator ? String(f.separator) : "";
+  var hx = sep ? value.split(sep).join("") : value;
+  if (!/^(?:[0-9A-Fa-f]{2})*$/.test(hx)) {
+    encFail(name + ": '" + value + "' is not well-formed hex" + (sep ? " with separator '" + sep + "'" : "") + " (PS-601)");
+  }
+  var out = [];
+  for (var i = 0; i < hx.length; i += 2) out.push(parseInt(hx.substr(i, 2), 16));
+  return out;
+}
+
+// byte_string_named_length: the field a byte string's `length` names (PS-464), or null.
+function encByteLengthRef(f) {
+  if (["bytes", "hex", "base64"].indexOf(String(f.type)) < 0) return null;
+  if (typeof f.length !== "string" || f.length.trim().toLowerCase() === "remaining") return null;
+  return f.length.trim().replace(/^\$/, "") || null;
+}
+
+// check_byte_string_length (PS-602): a literal length is the value's byte count.
+function encByteStringLength(f, raw) {
+  if (typeof f.length === "number" && raw.length !== f.length) {
+    encFail("Field '" + f.name + "' is given " + raw.length + " bytes for a length of " + f.length + " (PS-602)");
+  }
+  return raw;
 }
 
 /* PS-168 for udec/sdec (check_nibble_decimal): 0 to 15.9, or -8 to 7.9, in tenths. */
@@ -464,16 +500,10 @@ function encFieldInner(out, f, value, endian, ctx) {  // _encode_field_inner
     for (var s = 0; s < n; s++) out.push(0);
     return;
   }
-  if (type === "bytes") {
-    var raw;
-    if (Array.isArray(value)) raw = value.map(function (x) { return Number(x) & 0xFF; });
-    else if (typeof value === "string" && f.format === "base64") raw = encBase64(value);
-    else if (typeof value === "string") {
-      var text = value.replace(/ /g, "");
-      if (f.separator) text = text.split(String(f.separator)).join("");
-      raw = encHex(text, "bytes field " + JSON.stringify(f.name));
-    } else encFail("bytes field " + JSON.stringify(f.name) + ": cannot encode " + typeof value);
-    encPad(out, raw, encLength(f, raw.length));
+  if (type === "bytes" || type === "hex" || type === "base64") {   // CR-2026-181
+    // PS-601, PS-602: written exactly as given; a malformed value or one whose byte
+    // count is not a literal length is rejected naming the field.
+    encByteStringLength(f, encByteString(f, value)).forEach(function (x) { out.push(x); });
     return;
   }
   if (encIsLiteral(f)) return;                       // PS-359: a literal writes nothing
@@ -494,16 +524,6 @@ function encFieldInner(out, f, value, endian, ctx) {  // _encode_field_inner
     }
     if (high) ctx.wa.push("Field '" + f.name + "': a character above U+007F in an ascii value (PS-537)");
     encPad(out, u, fixed !== null ? fixed : u.length);
-    return;
-  }
-  if (type === "hex") {
-    var h = encHex(value, "hex field " + JSON.stringify(f.name));
-    encPad(out, h, encLength(f, Math.floor(String(value).length / 2)));
-    return;
-  }
-  if (type === "base64") {
-    var d = encBase64(value);
-    if (f.length) encPad(out, d, f.length); else encPad(out, d, d.length);
     return;
   }
   if (type === "enum") {                             // _encode_enum
@@ -1428,6 +1448,28 @@ function encForward(v, f) {
 // its largest. Exact: the arithmetic re-applied to the raw value written, through the
 // type's storage, gives the value under binary64 equality. No tolerance anywhere.
 function encCaseTakes(f, value) {
+  if (["bytes", "hex", "base64"].indexOf(String(f.type)) >= 0) {   // CR-2026-181
+    try { encByteStringLength(f, encByteString(f, value)); } catch (e) { return [false, false]; }
+    return [true, true];
+  }
+  if (f.type === "repeat" && Array.isArray(value)) {
+    // A repeat takes a list whose elements its members take (CR-2026-181), so a list of
+    // 3-byte ids goes to the case whose element declares `length: 3`.
+    var el = f.element && typeof f.element === "object" && !f.fields, ex = true;
+    for (var ri = 0; ri < value.length; ri++) {
+      var rec = value[ri];
+      var pairs = el ? [[f.element, rec]] : (rec && typeof rec === "object" && !Array.isArray(rec)
+        ? (f.fields || []).filter(function (m) { return m && typeof m === "object"; })
+            .map(function (m) { return [m, rec[m.name]]; }) : []);
+      for (var pi = 0; pi < pairs.length; pi++) {
+        if (pairs[pi][1] === undefined || pairs[pi][1] === null) continue;
+        var tk = encCaseTakes(pairs[pi][0], pairs[pi][1]);
+        if (!tk[0]) return [false, false];
+        ex = ex && tk[1];
+      }
+    }
+    return [true, ex];
+  }
   var g = encReverseLookup(value, f.lookup);
   if (typeof g !== "number" || typeof g === "boolean") return [true, true];
   var raw;
@@ -2116,7 +2158,22 @@ function encDerive(fields, data, ctx) {                 // _derive_inputs
   if (ctx.rec) encRecordedInputs(fields, data, d, ctx);   // PS-573
   (fields || []).forEach(function (f) {
     if (!f || typeof f !== "object") return;
-    var src;
+    var src, lref = encByteLengthRef(f);
+    if (lref !== null && data[f.name] !== undefined && data[f.name] !== null) {
+      // PS-602: a byte string's value fixes the field its length names (_derive_byte_count).
+      var count = encByteString(f, data[f.name]).length;
+      src = encSizeSource(fields, lref);
+      var ln = src ? src.name : lref;
+      if (d[ln] === undefined || d[ln] === null) {
+        if (encDerivable(src) && !encIsPeek(fields, src)) d[ln] = count;
+        return;
+      }
+      var lg = encReference(ln, d);
+      if (typeof lg === "number" && lg !== count) {
+        encFail("Field '" + f.name + "' is given " + count + " bytes, but '" + ln + "', its length, is " + String(lg) + " (PS-602)");
+      }
+      return;
+    }
     if (f.type === "repeat") {
       var records = encRecords(f, data);
       if (records === null) return;

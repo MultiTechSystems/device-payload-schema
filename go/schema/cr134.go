@@ -221,6 +221,11 @@ func deriveInputs(fields []Field, data map[string]any, ctx *EncodeContext) (map[
 	}
 	for _, f := range fields {
 		switch {
+		case isByteStringType(f.Type) && f.LengthRef != "" && data[f.Name] != nil:
+			// PS-602: a byte string's value fixes the field its length names (CR-2026-181).
+			if err := deriveByteCount(fields, f, data, absent, set, derived); err != nil {
+				return nil, err
+			}
 		case f.Type == TypeRepeat || f.Type == TypeRepeatLower:
 			records, ok := repeatRecords(f, data)
 			if !ok {
