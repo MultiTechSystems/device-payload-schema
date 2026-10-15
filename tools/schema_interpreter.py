@@ -2492,6 +2492,53 @@ def parse_bitfield_segment(segment: str, bits: int, fmt: Any, name: Any) -> int:
     return number & ((1 << bits) - 1)
 
 
+def split_by_width(text: str, parts: List[Any], name: Any, value: Any) -> List[str]:
+    """PS-606 (CR-2026-183): with an empty delimiter, split by each part's `:N` width. Every
+    part must declare a width that holds its largest value, and none may be sdecimal, or the
+    field cannot be encoded (it still decodes); a value of any other length is rejected."""
+    widths = []
+    for part in parts:
+        bits = int(part[1])
+        base, width = parse_part_format(part[2] if len(part) > 2 else 'decimal')
+        largest = len(format_part_number((1 << bits) - 1, base, None)) if bits else 1
+        if base == 'sdecimal' or width is None or largest > width:
+            raise FieldError(f"Field '{name}': with an empty delimiter every part needs a "
+                             f":N width that holds its largest value, and none may be "
+                             f"sdecimal, so this field cannot be encoded (PS-606)")
+        widths.append(width)
+    if len(text) != sum(widths):
+        raise FieldError(f"Field '{name}': {value!r} has {len(text)} characters for parts "
+                         f"of widths {widths} (PS-606)")
+    segments, at = [], 0
+    for width in widths:
+        segments.append(text[at:at + width])
+        at += width
+    return segments
+
+
+def bitfield_segments(field_def: Dict[str, Any], value: str) -> List[str]:
+    """A bitfield_string value's segments, one per part (PS-096 steps 1 and 2): the declared
+    prefix removed - a value without it is rejected (PS-605) - then split on the delimiter,
+    or by width where it is empty (PS-606). A segment count other than the part count is
+    rejected, never filled or cut (PS-605)."""
+    name = field_def.get('name')
+    parts = [p for p in field_def.get('parts', []) if len(p) >= 2]
+    text = value
+    prefix = field_def.get('prefix', '')
+    if prefix:
+        if not text.startswith(prefix):
+            raise FieldError(f"Field '{name}': {value!r} does not begin with its prefix "
+                             f"{prefix!r} (PS-605)")
+        text = text[len(prefix):]
+    delimiter = field_def.get('delimiter', '.')
+    segments = (split_by_width(text, parts, name, value) if delimiter == ''
+                else text.split(delimiter))
+    if len(segments) != len(parts):
+        raise FieldError(f"Field '{name}': {value!r} has {len(segments)} segment(s) for "
+                         f"{len(parts)} part(s) (PS-605)")
+    return segments
+
+
 def bitfield_part_errors(node, _top=True):
     """PS-430: every bitfield_string part's format, walked over the whole schema."""
     errors = []
@@ -8481,24 +8528,17 @@ class SchemaInterpreter:
     
     def _encode_bitfield_string(self, field_def: Dict[str, Any], value: str) -> bytes:
         """Encode bitfield_string: parse string back into packed integer bytes."""
-        parts = field_def.get('parts', [])
-        delimiter = field_def.get('delimiter', '.')
-        prefix = field_def.get('prefix', '')
+        parts = [p for p in field_def.get('parts', []) if len(p) >= 2]
         length = field_def.get('length', 2)
-        
-        if prefix and value.startswith(prefix):
-            value = value[len(prefix):]
-        
-        segments = value.split(delimiter)
+        # PS-605, PS-606 (CR-2026-183): the prefix required, the segment count checked, an
+        # empty delimiter split by width.
+        segments = bitfield_segments(field_def, value)
         int_val = 0
         
-        for i, part in enumerate(parts):
-            if len(part) < 2:
-                continue
+        for part, seg in zip(parts, segments):
             bit_off = int(part[0])
             bit_len = int(part[1])
             fmt = part[2] if len(part) > 2 else 'decimal'
-            seg = segments[i] if i < len(segments) else '0'
             # PS-096, PS-431, PS-583: parsed by the part's format, a value the width cannot
             # hold rejected rather than masked.
             int_val |= parse_bitfield_segment(seg, bit_len, fmt, field_def.get('name')) << bit_off

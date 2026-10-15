@@ -749,7 +749,15 @@ a format carrying `:N`.
 Encoding parses each segment by its format: leading zeros are accepted, hex in either case,
 and a `-` only on `sdecimal` (PS-096, PS-431). A segment the part's width cannot hold - 0 to
 2^w - 1, or -2^(w-1) to 2^(w-1) - 1 for `sdecimal` - is rejected naming the field and the
-segment, never masked (PS-583).
+segment, never masked (PS-583). A value without the declared `prefix`, or with a segment
+count other than the part count, is rejected; a missing part is never filled with 0 and an
+extra segment never ignored (PS-605).
+
+With `delimiter: ""` the parts are joined with nothing between them, and an encoder splits
+the value by each part's `:N` width (PS-606). That needs every part to declare a width that
+holds its largest value (`hex:2` for 8 bits, `decimal:3`) and no part to be `sdecimal`; a
+field that does not meet this still decodes, but is refused for encoding, and a value whose
+length differs from the sum of the widths is rejected.
 
 ## Test Vectors
 

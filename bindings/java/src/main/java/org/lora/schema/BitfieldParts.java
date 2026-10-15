@@ -91,4 +91,73 @@ final class BitfieldParts {
         if (number.signum() < 0) number = number.add(BigInteger.ONE.shiftLeft(bits));
         return number.longValue();
     }
+
+    /**
+     * CR-2026-183 (PS-096, PS-605, PS-606): a value's segments, one per part. The declared
+     * prefix is required, the rest split on the delimiter, or by each part's {@code :N} width
+     * where the delimiter is empty; a segment count other than the part count is rejected,
+     * never filled or cut. Mirrors bitfield_segments and split_by_width.
+     */
+    static java.util.List<String> segments(String name, String prefix, String delimiter,
+            java.util.List<java.util.List<Object>> parts, String value) {
+        String text = value;
+        if (prefix != null && !prefix.isEmpty()) {
+            if (!text.startsWith(prefix)) {
+                throw new SchemaException.EncodeException("Field '" + name + "': "
+                        + Meta.pyRepr(value) + " does not begin with its prefix "
+                        + Meta.pyRepr(prefix) + " (PS-605)");
+            }
+            text = text.substring(prefix.length());
+        }
+        java.util.List<String> segments;
+        if ("".equals(delimiter)) {
+            segments = splitByWidth(text, parts, name, value);
+        } else {
+            segments = java.util.Arrays.asList(
+                    text.split(Pattern.quote(delimiter == null ? "." : delimiter), -1));
+        }
+        if (segments.size() != parts.size()) {
+            throw new SchemaException.EncodeException("Field '" + name + "': " + Meta.pyRepr(value)
+                    + " has " + segments.size() + " segment(s) for " + parts.size()
+                    + " part(s) (PS-605)");
+        }
+        return segments;
+    }
+
+    /** PS-606: split by width; a part lacking a width for its largest value, or sdecimal,
+     *  makes the field unencodable (it still decodes). */
+    private static java.util.List<String> splitByWidth(String text,
+            java.util.List<java.util.List<Object>> parts, String name, String value) {
+        java.util.List<Integer> widths = new java.util.ArrayList<>();
+        int total = 0;
+        for (java.util.List<Object> part : parts) {
+            int bits = ((Number) part.get(1)).intValue();
+            Format f = parse(part.size() > 2 ? part.get(2) : "decimal");
+            int largest = bits > 0
+                    ? formatNumber(false, BigInteger.ONE.shiftLeft(bits).subtract(BigInteger.ONE),
+                            f.base(), 0).length()
+                    : 1;
+            if ("sdecimal".equals(f.base()) || f.width() == 0 || largest > f.width()) {
+                throw new SchemaException.EncodeException("Field '" + name + "': with an empty "
+                        + "delimiter every part needs a :N width that holds its largest value, "
+                        + "and none may be sdecimal, so this field cannot be encoded (PS-606)");
+            }
+            widths.add(f.width());
+            total += f.width();
+        }
+        if (text.length() != total) {
+            StringBuilder list = new StringBuilder("[");
+            for (int i = 0; i < widths.size(); i++) list.append(i == 0 ? "" : ", ").append(widths.get(i));
+            throw new SchemaException.EncodeException("Field '" + name + "': " + Meta.pyRepr(value)
+                    + " has " + text.length() + " characters for parts of widths " + list
+                    + "] (PS-606)");
+        }
+        java.util.List<String> out = new java.util.ArrayList<>();
+        int at = 0;
+        for (int w : widths) {
+            out.add(text.substring(at, at + w));
+            at += w;
+        }
+        return out;
+    }
 }
