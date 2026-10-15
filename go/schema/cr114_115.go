@@ -118,7 +118,7 @@ func asciiHighByteWarning(name string) string {
 // value is valid text and re-encodes to the same bytes, and drops trailing 0x00 padding
 // only (PS-534, PS-538). A byte above 0x7F adds PS-073's warning. Go returned the bytes
 // themselves, which are not a valid UTF-8 string and so not a valid JSON one.
-func decodeASCII(name string, data []byte, ctx *DecodeContext) string {
+func decodeASCII(name string, data []byte, ctx *DecodeContext, nul string) string {
 	runes := make([]rune, len(data))
 	high := false
 	for i, b := range data {
@@ -130,7 +130,7 @@ func decodeASCII(name string, data []byte, ctx *DecodeContext) string {
 	if high {
 		ctx.Warnings = append(ctx.Warnings, asciiHighByteWarning(name))
 	}
-	return strings.TrimRight(string(runes), "\x00")
+	return applyNulMode(string(runes), nul) // PS-534
 }
 
 // encodeASCII writes `ascii` text (PS-537): a character above U+00FF, or a value longer
@@ -138,7 +138,7 @@ func decodeASCII(name string, data []byte, ctx *DecodeContext) string {
 // byte of the same number with a warning; a short value is padded with 0x00. fixed < 0
 // means the length is not fixed (`remaining`, a reference), and the value supplies it.
 // Every encoder truncated silently, and wrote UTF-8, which could split a character.
-func encodeASCII(name, text string, fixed int, ctx *EncodeContext) ([]byte, error) {
+func encodeASCII(name, text string, fixed int, ctx *EncodeContext, nul string, terminator int) ([]byte, error) {
 	out := make([]byte, 0, len(text))
 	high := false
 	for _, r := range text {
@@ -152,6 +152,22 @@ func encodeASCII(name, text string, fixed int, ctx *EncodeContext) ([]byte, erro
 		}
 		out = append(out, byte(r))
 	}
+	if terminator >= 0 { // PS-595
+		for _, b := range out {
+			if int(b) == terminator {
+				return nil, &asciiEncodeError{fmt.Sprintf(
+					"Field '%s': the value holds its terminator byte 0x%02X (PS-595)", name, terminator)}
+			}
+		}
+	}
+	if nul == "stop" { // PS-595
+		for _, b := range out {
+			if b == 0 {
+				return nil, &asciiEncodeError{fmt.Sprintf(
+					"Field '%s': a nul: stop value holds a 0x00 byte (PS-595)", name)}
+			}
+		}
+	}
 	if fixed >= 0 && len(out) > fixed {
 		return nil, &asciiEncodeError{fmt.Sprintf(
 			"Field '%s': an ascii value of %d bytes is longer than its length of %d (PS-537)",
@@ -160,6 +176,9 @@ func encodeASCII(name, text string, fixed int, ctx *EncodeContext) ([]byte, erro
 	if high && ctx != nil {
 		ctx.Warnings = append(ctx.Warnings, fmt.Sprintf(
 			"Field '%s': a character above U+007F in an ascii value (PS-537)", name))
+	}
+	if terminator >= 0 {
+		return append(out, byte(terminator)), nil // PS-595
 	}
 	for fixed >= 0 && len(out) < fixed {
 		out = append(out, 0)

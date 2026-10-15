@@ -122,12 +122,14 @@ def test_an_unreferenced_definition_is_held_to_it_too():
     assert IPSO_MESSAGE in SchemaInterpreter(schema).decode(b"\x01").errors
 
 
-def test_the_legacy_semantic_ipso_is_outside_ps_510():
+def test_the_legacy_semantic_ipso_is_withdrawn():
+    """CR-2026-179 (PS-470): `semantic` is a TTN normalized path, a string; the legacy
+    `semantic: {ipso: N}` is rejected, `ipso:` being the IPSO annotation."""
     schema = {
         "name": "p",
         "fields": [{"name": "t", "type": "u8", "semantic": {"ipso": 3303}}],
     }
-    assert annotation_schema_errors(schema) == []
+    assert any("PS-470" in e for e in annotation_schema_errors(schema))
 
 
 CORPUS = ["schemas/devices/**/*.yaml", "schemas/library/**/*.yaml", "examples/**/*.yaml"]

@@ -422,6 +422,9 @@ func (s *Schema) fieldMeta(decl map[string]any, repeat map[string]any, siblings 
 	if truthy(decl["description"]) {
 		entry["description"] = decl["description"]
 	}
+	if semantic, ok := decl["semantic"].(string); ok {
+		entry["semantic"] = semantic // PS-600 (CR-2026-179)
+	}
 	_, element := rawRepeatMembers(decl)
 	switch {
 	case declaredType == "repeat" && element != "":

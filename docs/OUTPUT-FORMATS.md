@@ -372,7 +372,7 @@ fields:
     unit: "%RH"
     ipso: {object: 3304, instance: 0, resource: 5700}
     senml: {name: "humidity", unit: "%RH"}
-    semantic: "air.humidity"
+    semantic: "air.relativeHumidity"
   - name: pressure        # hPa: SenML's unit is Pa, so no annotation
     type: u16
     div: 10
@@ -389,7 +389,7 @@ fields:
     unit: "V"
     ipso: {object: 3316, instance: 0, resource: 5700}
     senml: {name: "vbat", unit: "V"}
-    semantic: "battery.voltage"
+    semantic: "battery"
 test_vectors:
   - name: example
     payload: "0929 82 2794 0352 21"

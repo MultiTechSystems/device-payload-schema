@@ -47,6 +47,10 @@ final class Numeral {
                 ? Long.toHexString(Math.abs(n)).toUpperCase() : Long.toString(Math.abs(n));
         String sign = n < 0 ? "-" : "";
         int width = fixed != null ? fixed : sign.length() + digits.length();
+        if (fixed == null && n < 0 && "hex".equals(numeral)) {          // PS-168, PS-595
+            throw new SchemaException.FieldEncodeException("Field '" + name + "': " + n
+                    + " is negative, which a hex numeral cannot write (PS-168)");
+        }
         if ((n < 0 && "hex".equals(numeral)) || sign.length() + digits.length() > width) {
             throw new SchemaException.FieldEncodeException("Field '" + name + "': " + n
                     + " does not fit " + (fixed != null ? fixed : digits.length()) + " "

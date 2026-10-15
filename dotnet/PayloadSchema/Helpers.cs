@@ -23,7 +23,8 @@ public static class Helpers
     /// with PS-073's warning. Encoding.ASCII wrote `?` for it. Mirrors decode_ascii in
     /// tools/schema_interpreter.py.
     /// </summary>
-    public static string DecodeAscii(string? name, ReadOnlySpan<byte> raw, List<string> warnings)
+    public static string DecodeAscii(string? name, ReadOnlySpan<byte> raw, List<string> warnings,
+        string? nul = null)
     {
         var chars = new char[raw.Length];
         bool high = false;
@@ -34,7 +35,7 @@ public static class Helpers
         }
         if (high)
             warnings.Add($"Field '{name}': a byte above 0x7F in an ascii value (PS-073, PS-538)");
-        return new string(chars).TrimEnd('\0');
+        return AsciiText.ApplyNulMode(new string(chars), nul);                 // PS-534
     }
 
     /// <summary>
@@ -45,16 +46,23 @@ public static class Helpers
     /// encode_ascii in tools/schema_interpreter.py. UTF-8 was written and then truncated,
     /// which could split a character ("ABCé" to 414243c3).
     /// </summary>
-    public static byte[] EncodeAscii(string? name, string text, int? length, List<string> warnings)
+    public static byte[] EncodeAscii(string? name, string text, int? length, List<string> warnings,
+        string? nul = null, int? terminator = null)
     {
         foreach (var ch in text)
             if (ch > 0xFF)
                 throw new FieldErrorException($"Field '{name}': an ascii value holds a character "
                     + "above U+00FF, which has no byte (PS-537)");
+        if (terminator is int term && text.Any(ch => ch == term))                // PS-595
+            throw new FieldErrorException($"Field '{name}': the value holds its terminator byte "
+                + $"0x{term:X2} (PS-595)");
+        if (nul == "stop" && text.Contains('\0'))                               // PS-595
+            throw new FieldErrorException($"Field '{name}': a nul: stop value holds a 0x00 byte (PS-595)");
+        if (terminator != null) length = null;                                 // PS-593: no width
         if (length is int fixedLength && text.Length > fixedLength)
             throw new FieldErrorException($"Field '{name}': an ascii value of {text.Length} bytes "
                 + $"is longer than its length of {fixedLength} (PS-537)");
-        var output = new byte[length ?? text.Length];
+        var output = new byte[length ?? text.Length + (terminator != null ? 1 : 0)];
         bool high = false;
         for (int i = 0; i < text.Length; i++)
         {
@@ -63,6 +71,7 @@ public static class Helpers
         }
         if (high)
             warnings.Add($"Field '{name}': a character above U+007F in an ascii value (PS-537)");
+        if (terminator is int endByte) output[text.Length] = (byte)endByte;     // PS-595
         return output;
     }
 

@@ -1,0 +1,26 @@
+# An ascii field with `terminator` has no length: the text runs to the first terminator
+# byte, which is consumed and not reported (PS-593, PS-072, CR-2026-177). The next field
+# reads after it. An encoder writes the value and then the terminator, no padding (PS-595).
+# A missing terminator and a value holding its terminator are held by
+# tests/cr-2026-177-cases.yaml, since no vector kind expects a failure.
+name: probe_ascii_terminator
+endian: big
+fields:
+- name: version
+  type: ascii
+  terminator: 0x00
+- name: battery
+  type: u8
+test_vectors:
+- name: text_then_nul_then_a_field
+  source: generated
+  payload: "312E320064"
+  expected: {version: "1.2", battery: 100}
+- name: empty_text
+  source: generated
+  payload: "0007"
+  expected: {version: "", battery: 7}
+- name: longer_text
+  source: generated
+  payload: "322E31342E3300FF"
+  expected: {version: "2.14.3", battery: 255}

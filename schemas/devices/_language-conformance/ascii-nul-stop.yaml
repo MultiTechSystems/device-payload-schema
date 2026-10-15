@@ -1,0 +1,35 @@
+# An ascii field with `nul: stop` ends its value before the first 0x00 byte and leaves the
+# rest of the field unreported (PS-534, CR-2026-177): C-style text in a fixed-width field,
+# the bytes after the NUL left over from an earlier, longer string. A next field reads after
+# the whole span. Whitespace is never trimmed. Only a vector padded with 0x00 re-encodes to
+# its payload; the leftover bytes of the others are not in the decoded value.
+name: probe_ascii_nul_stop
+endian: big
+fields:
+- name: model
+  type: ascii
+  length: 8
+  nul: stop
+- name: battery
+  type: u8
+test_vectors:
+- name: leftover_after_the_nul_is_not_reported
+  source: generated
+  payload: "454D33313000585964"
+  expected: {model: "EM310", battery: 100}
+- name: nul_padding_round_trips
+  source: generated
+  payload: "454D33313000000007"
+  expected: {model: "EM310", battery: 7}
+- name: no_nul_takes_the_whole_span
+  source: generated
+  payload: "454D33313058595A09"
+  expected: {model: "EM310XYZ", battery: 9}
+- name: a_leading_nul_is_empty_text
+  source: generated
+  payload: "004142434445464705"
+  expected: {model: "", battery: 5}
+- name: whitespace_is_kept
+  source: generated
+  payload: "412000420000000003"
+  expected: {model: "A ", battery: 3}
