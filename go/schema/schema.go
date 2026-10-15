@@ -4799,7 +4799,7 @@ func encodeTLV(field Field, data map[string]any, ctx *EncodeContext) error {
 		if iok && ri != rj {
 			return ri < rj
 		}
-		return claimWidth(entries[i].required) > claimWidth(entries[j].required)
+		return mergedClaimWidth(entries[i].required, repeat) > mergedClaimWidth(entries[j].required, repeat)
 	})
 
 	queues := map[string][]any{}
@@ -4816,12 +4816,15 @@ func encodeTLV(field Field, data map[string]any, ctx *EncodeContext) error {
 			}
 		}
 	}
+	// CR-2026-173: a merged object is placed by leaf path, at every depth.
 	pending := map[string]map[string]bool{}
+	given := map[string]map[string]bool{}
 	for name := range plan.members {
-		if obj, ok := data[name].(map[string]any); ok {
+		if leaves := plan.givenLeaves(name, data); leaves != nil {
+			given[name] = leaves
 			pending[name] = map[string]bool{}
-			for m := range obj {
-				pending[name][m] = true
+			for pk := range leaves {
+				pending[name][pk] = true
 			}
 		}
 	}
@@ -4889,22 +4892,18 @@ func encodeTLV(field Field, data map[string]any, ctx *EncodeContext) error {
 								complete = false
 								break
 							}
-							sub, fresh := map[string]any{}, false
-							for _, m := range f.Fields {
-								if m.Name == "" {
-									continue
-								}
-								v, ok := obj[m.Name]
-								if !ok {
+							leaves, fresh := mergedLeafKeys(f), false
+							for pk := range leaves {
+								if !given[f.Name][pk] {
 									complete = false
 									break
 								}
-								sub[m.Name] = v
-								fresh = fresh || pending[f.Name][m.Name]
+								fresh = fresh || pending[f.Name][pk]
 							}
 							if !complete {
 								break
 							}
+							sub := valueAt(obj, leaves)
 							values[f.Name] = sub
 							if fresh {
 								taken++
@@ -4938,8 +4937,10 @@ func encodeTLV(field Field, data map[string]any, ctx *EncodeContext) error {
 					for name, v := range values {
 						entryData[name] = v
 						if repeat.mode(name) == "merge" {
-							for m := range v.(map[string]any) {
-								delete(pending[name], m)
+							done := map[string]bool{}
+							leafPaths(v.(map[string]any), plan.objects[name], nil, done)
+							for pk := range done {
+								delete(pending[name], pk)
 							}
 						} else {
 							queues[name] = queues[name][1:]
@@ -4976,11 +4977,7 @@ func encodeTLV(field Field, data map[string]any, ctx *EncodeContext) error {
 	sort.Strings(pendingNames)
 	for _, name := range pendingNames {
 		if len(pending[name]) > 0 {
-			left := []string{}
-			for m := range pending[name] {
-				left = append(left, "'"+m+"'")
-			}
-			sort.Strings(left)
+			left := dottedPaths(pending[name])
 			return fmt.Errorf("tlv: no case takes the members [%s] of the merged object '%s' in full (PS-527)",
 				strings.Join(left, ", "), name)
 		}

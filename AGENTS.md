@@ -232,10 +232,10 @@ implementation has a runner that reads the same YAML and the same vectors:
 
 | Implementation | Runner | Decode floor | Re-encode floor |
 |---|---|---|---|
-| Python | `tests/test_corpus_conformance.py` | every vector | 2282 |
-| Go | `go/schema/corpus_conformance_test.go` | 2893 | 2300 (plain API 2272) |
-| C# | `dotnet/PayloadSchema.Tests/CorpusConformanceTests.cs` | 2893 | 2283 |
-| Java | `bindings/java/.../CorpusConformanceTest.java` | 2893 | 2282 |
+| Python | `tests/test_corpus_conformance.py` | every vector | 2285 |
+| Go | `go/schema/corpus_conformance_test.go` | 2896 | 2303 (plain API 2275) |
+| C# | `dotnet/PayloadSchema.Tests/CorpusConformanceTests.cs` | 2896 | 2286 |
+| Java | `bindings/java/.../CorpusConformanceTest.java` | 2896 | 2285 |
 | C | `tools/c-corpus-harness.py` (builds each expressible schema through the struct API) | 575 of 575 attempted | n/a |
 
 These figures move with every schema added. `make check-floors` prints each floor beside
@@ -832,10 +832,10 @@ exercised to the best-covered part of the project:
 
 | | Runner | Round-trips |
 |---|---|---|
-| Python | `tests/test_encode_round_trip.py` | 2282 |
-| Go | `go/schema/corpus_encode_test.go` | 2300 (plain 2272) |
-| Java | `bindings/java/.../CorpusEncodeRoundTripTest.java` | 2282 |
-| C# | `dotnet/.../CorpusEncodeRoundTripTests.cs` | 2283 |
+| Python | `tests/test_encode_round_trip.py` | 2285 |
+| Go | `go/schema/corpus_encode_test.go` | 2303 (plain 2275) |
+| Java | `bindings/java/.../CorpusEncodeRoundTripTest.java` | 2285 |
+| C# | `dotnet/.../CorpusEncodeRoundTripTests.cs` | 2286 |
 | C | `src/test_encoder.c`, built by `make test-c` (unit tests, not a corpus round trip) | n/a |
 
 - **A name may be an object under one tag and a scalar under another, and a tlv encoder
@@ -2449,6 +2449,48 @@ improved. The Go, Java and C# corpus runners write per-vector reports only when
     and `tlv-repeat-merge-shared-last` (the shared `last` member in both written cases).
     CR-2026-128 moved decode +1 and re-encode +2 in all four: shared-last, and
     tlv-repeat-object-collect, which now round-trips.
+- **CR-2026-173 (PS-525 to PS-527 amended, for 0.5.7): `on_repeat: merge` combines nested
+  objects at every depth.** Where two entries report parts of one nested object
+  (`settings.heating_control`), the merge recurses instead of reporting a member twice. A
+  leaf is a scalar, an array, or an object member declaring `on_repeat: last` (it replaces
+  the object whole). In the prototype's text:
+  - decode: `tlv: the merged object 'settings' reports its member 'heating_control.mode'
+    twice (PS-525)`;
+  - load: `tlv: cases share the member 'heating_control.mode' of the merged object
+    'settings' without `on_repeat: last` (PS-526)` and `tlv: the merged object 'settings'
+    declares 'heating_control' as an object in one case and as a value in another
+    (PS-526)`; a case naming one path twice counts once (registry tektelic
+    `values_to_transmit`);
+  - encode: each case is written for its leaves at every depth (`value_at`), a stray leaf
+    is named by path (`is given ['heating_control.fan']`), and a merged object counts its
+    leaves for case order.
+  - **Where:** Python `merged_members`, `leaf_paths`, `value_at`, `tlv_repeat_modes`,
+    `combine_repeated`, `tlv_encode_plan` (now with `objects`) and `_encode_tlv`; the TS013
+    generator ships `members`/`objects` as paths in `__on_repeat`, decodes through
+    `tlvMerge` and encodes through `encMergedLeaves`/`encLeafPaths`/`encValueAt`; Go
+    `mergedMembers`, `mergeObjects`, `leafPaths`, `valueAt`, `mergedLeafKeys` (`cr110.go`);
+    Java `OnRepeat.mergedMembers`/`merge`/`leafPaths`/`valueAt`/`typedMembers`; C#
+    `SchemaParser.MergedMembers`/`TypedMembers`/`LeafPaths`/`ValueAt` (`OnRepeat.cs`) and
+    `SchemaDecoder.CombineRepeated`. A path is keyed with a NUL separator (a name may hold a
+    dot) and written `a.b` in messages. C has no `on_repeat` (`schema_binary.py` refuses it).
+  - **Measured before:** all five rejected a nested object two cases declare at load (PS-526
+    on the nested object's name) and failed the decode with a member reported twice.
+  - **Emission order, which counting leaves would have changed:** entries holding parts of one
+    merged object now go out in case declaration order, as `test_merge_encodes_in_case_
+    declaration_order` already required; ranking by width had emitted the widest case first
+    (Python `position`, the runtime's `q`, Java and C# `sub`; Go keeps ascending tag or
+    `TLVOrder`). Without it, 7 registry tektelic round trips were lost.
+  - **Measured** (Python, every corpus and registry schema with `on_repeat`, 39): no decode
+    output or load verdict changed; round trips 2430 -> 2432 (vs133 2, emission order), none
+    lost; wt401's 24 `pir_config` vectors, whose members sit in a nameless inline match,
+    still fail to encode but now name the stray member (PS-527) where they said PS-442.
+  - **Cases:** `tests/cr-2026-173-cases.yaml` (the prototype's nine tests and two more),
+    read by `test_cr_2026_173_cases.py` (reference, generated codec, validator), Go
+    `cr173_test.go`, Java `CR2026173Test`, C# `CR2026_173Tests`. Fixture
+    `_language-conformance/tlv-nested-merge.yaml` (two tags filling one nested object, one
+    tag alone, three levels): decode floors +3 in Go, Java and C# (2842 -> 2845), re-encode
+    +3 everywhere, all `tlv` (Python and Java 2239 -> 2242, C# 2240 -> 2243, Go 2257 ->
+    2260, plain 2229 -> 2232).
 - **CR-2026-115 (PS-535): a read or skip past the end names the field**, in the spec
   prototype's words, identical in Python, Go, Java, C#, the generated codec and C (spec main
   c932961): `Field 'n': Buffer underflow: need 2 bytes at offset 0, but only 1 remaining

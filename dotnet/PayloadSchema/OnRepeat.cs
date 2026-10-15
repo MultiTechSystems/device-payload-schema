@@ -79,6 +79,7 @@ public static partial class SchemaParser
         var modes = new Dictionary<string, string>();
         var last = new Dictionary<string, HashSet<string>>();
         var shared = new Dictionary<(string obj, string member), List<YamlMappingNode>>();
+        var objects = new Dictionary<string, HashSet<string>>();   // paths combined as objects
         var sharedOrder = new List<(string obj, string member)>();
         var fallback = "collect";
         if (Get(tlv, "on_repeat") is { } d)
@@ -126,34 +127,144 @@ public static partial class SchemaParser
                     modes[name] = mode;
                 if (mode == "merge")
                 {
+                    // CR-2026-173: a member that is an object is combined member by member
+                    // too. PS-526 concerns two cases declaring a leaf; one case naming a
+                    // member twice counts once.
                     if (!last.TryGetValue(name, out var members))
                         last[name] = members = new HashSet<string>();
-                    if (Get(decl, "fields") is YamlSequenceNode memberSeq)
-                        foreach (var m in memberSeq.Children)
+                    var inCase = new HashSet<string>();
+                    foreach (var (path, mm, memberIsObject) in MergedMembers(Get(decl, "fields"), new List<string>()))
+                    {
+                        var pk = PathKey(path);
+                        if (memberIsObject)
                         {
-                            if (m is not YamlMappingNode mm || Get(mm, "name") is not YamlScalarNode mn
-                                || string.IsNullOrEmpty(mn.Value)) continue;
-                            var key = (name, mn.Value!);
-                            if (!shared.TryGetValue(key, out var decls))
-                            {
-                                shared[key] = decls = new List<YamlMappingNode>();
-                                sharedOrder.Add(key);
-                            }
-                            decls.Add(mm);
-                            if (YamlString(Get(mm, "on_repeat")) == "last") members.Add(mn.Value!);
+                            if (!objects.TryGetValue(name, out var os)) objects[name] = os = new HashSet<string>();
+                            os.Add(pk);
+                            continue;
                         }
+                        if (!inCase.Add(pk)) continue;
+                        var key = (name, pk);
+                        if (!shared.TryGetValue(key, out var decls))
+                        {
+                            shared[key] = decls = new List<YamlMappingNode>();
+                            sharedOrder.Add(key);
+                        }
+                        decls.Add(mm);
+                        if (YamlString(Get(mm, "on_repeat")) == "last") members.Add(pk);
+                    }
                 }
             }
         }
-        // CR-2026-128: merged cases share a member only where it declares `last` (PS-526).
         foreach (var key in sharedOrder)
         {
             var decls = shared[key];
+            var dotted = Dotted(key.member);
+            if (objects.TryGetValue(key.obj, out var os) && os.Contains(key.member))
+            {
+                errors.Add($"tlv: the merged object '{key.obj}' declares '{dotted}' as an object "
+                    + "in one case and as a value in another (PS-526)");
+                continue;
+            }
+            // CR-2026-128: merged cases share a leaf only where it declares `last`, at any
+            // depth (CR-2026-173).
             if (decls.Count > 1 && decls.Any(d => YamlString(Get(d, "on_repeat")) != "last"))
-                errors.Add($"tlv: cases share the member '{key.member}' of the merged object "
+                errors.Add($"tlv: cases share the member '{dotted}' of the merged object "
                     + $"'{key.obj}' without `on_repeat: last` (PS-526)");
         }
         return (modes, last, errors);
+    }
+
+    /// <summary>
+    /// merged_members (CR-2026-173): each named member of a merged object with its path,
+    /// where a member of <c>type: object</c> not declaring <c>on_repeat: last</c> is
+    /// combined member by member and anything else is a leaf.
+    /// </summary>
+    static List<(List<string> path, YamlMappingNode decl, bool isObject)> MergedMembers(
+        YamlNode? fields, List<string> path)
+    {
+        var found = new List<(List<string>, YamlMappingNode, bool)>();
+        if (fields is not YamlSequenceNode seq) return found;
+        foreach (var m in seq.Children)
+        {
+            if (m is not YamlMappingNode mm || Get(mm, "name") is not YamlScalarNode mn
+                || string.IsNullOrEmpty(mn.Value)) continue;
+            var here = new List<string>(path) { mn.Value! };
+            bool isObject = YamlString(Get(mm, "type")) == "object"
+                && YamlString(Get(mm, "on_repeat")) != "last";
+            found.Add((here, mm, isObject));
+            if (isObject) found.AddRange(MergedMembers(Get(mm, "fields"), here));
+        }
+        return found;
+    }
+
+    /// <summary>A member path as one key; a name may hold a dot.</summary>
+    internal static string PathKey(IEnumerable<string> path) => string.Join("\u0000", path);
+
+    /// <summary>A path key as <c>a.b</c>, as a message writes it.</summary>
+    internal static string Dotted(string key) => key.Replace('\u0000', '.');
+
+    /// <summary>
+    /// A merged object field's leaf paths and the paths it combines as objects, read from
+    /// its typed members (CR-2026-173).
+    /// </summary>
+    internal static void TypedMembers(List<SchemaField> fields, List<string> path,
+        HashSet<string>? leaves, HashSet<string>? objects)
+    {
+        foreach (var m in fields)
+        {
+            if (string.IsNullOrEmpty(m.Name)) continue;
+            var here = new List<string>(path) { m.Name };
+            bool last = m.Node != null && YamlString(Get(m.Node, "on_repeat")) == "last";
+            if (m.Type == FieldType.Object && !last)
+            {
+                objects?.Add(PathKey(here));
+                TypedMembers(m.Fields, here, leaves, objects);
+            }
+            else
+                leaves?.Add(PathKey(here));
+        }
+    }
+
+    internal static HashSet<string> MergedLeaves(SchemaField f)
+    {
+        var leaves = new HashSet<string>();
+        TypedMembers(f.Fields, new List<string>(), leaves, null);
+        return leaves;
+    }
+
+    /// <summary>leaf_paths: a value's leaf paths, descending only into the declared objects.</summary>
+    internal static void LeafPaths(Dictionary<string, object?> value, HashSet<string> objects,
+        List<string> path, HashSet<string> output)
+    {
+        foreach (var (k, v) in value)
+        {
+            var here = new List<string>(path) { k };
+            if (v is Dictionary<string, object?> sub && objects.Contains(PathKey(here)))
+                LeafPaths(sub, objects, here, output);
+            else
+                output.Add(PathKey(here));
+        }
+    }
+
+    /// <summary>value_at: the part of a nested value holding exactly the given leaf paths.</summary>
+    internal static Dictionary<string, object?> ValueAt(Dictionary<string, object?> value, IEnumerable<string> keys)
+    {
+        var output = new Dictionary<string, object?>();
+        foreach (var key in keys)
+        {
+            var path = key.Split('\u0000');
+            var src = value;
+            var dst = output;
+            for (int i = 0; i < path.Length - 1; i++)
+            {
+                src = (Dictionary<string, object?>)src[path[i]]!;
+                if (!dst.TryGetValue(path[i], out var next) || next is not Dictionary<string, object?> nd)
+                    dst[path[i]] = nd = new Dictionary<string, object?>();
+                dst = nd;
+            }
+            dst[path[^1]] = src[path[^1]];
+        }
+        return output;
     }
 
     /// <summary>Mappings whose keys are data, and `definitions`, checked where spliced.</summary>
@@ -186,10 +297,11 @@ public static partial class SchemaParser
                             {
                                 allowed.Add(decl);
                                 if (!modes.TryGetValue(name, out var mode) || mode != "merge") continue;
-                                if (Get(decl, "fields") is YamlSequenceNode members)
-                                    foreach (var m in members.Children)
-                                        if (m is YamlMappingNode mm && YamlString(Get(mm, "on_repeat")) == "last")
-                                            allowed.Add(mm);
+                                // A merged object's leaf may declare `last` at any depth
+                                // (PS-525, CR-2026-173).
+                                foreach (var (_, mm, _) in MergedMembers(Get(decl, "fields"), new List<string>()))
+                                    if (YamlString(Get(mm, "on_repeat")) == "last")
+                                        allowed.Add(mm);
                             }
                         }
                 }

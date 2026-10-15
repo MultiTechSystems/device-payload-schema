@@ -2535,10 +2535,12 @@ final class Encoder {
      * states it): an object counts its members, so a merged {adr, dr} case outranks a
      * {dr} one, and anything else counts one.
      */
-    private static int claimWidth(List<Field> fields) {
+    private static int claimWidth(List<Field> fields, OnRepeat.Modes modes) {
         int n = 0;
         for (Field f : fields) {
-            if (f.getType() == FieldType.OBJECT) {
+            if (f.getType() == FieldType.OBJECT && "merge".equals(modes.mode(f.getName()))) {
+                n += Math.max(1, OnRepeat.leaves(f).size());   // its leaves (CR-2026-173)
+            } else if (f.getType() == FieldType.OBJECT) {
                 List<Claim> members = new ArrayList<>();
                 collectClaims(f.getFields(), false, members);
                 n += Math.max(1, members.size());
@@ -2553,7 +2555,7 @@ final class Encoder {
                             List<Field> optional, int rank) {}
 
     private record Written(String key, List<Field> fields, Map<String, Object> data,
-                           int position, int seq) {}
+                           int position, int sub, int seq) {}
 
     /**
      * Rebuild a TLV payload from decoded output.
@@ -2589,7 +2591,10 @@ final class Encoder {
         OnRepeat.Modes modes = tlv.getRepeatModes();
 
         List<TlvEntry> entries = new ArrayList<>();
+        // CR-2026-173: a merged object's leaf paths, at every depth, and the paths it
+        // combines as objects.
         Map<String, Set<String>> declaredMembers = new LinkedHashMap<>();
+        Map<String, Set<String>> mergedObjects = new LinkedHashMap<>();
         for (Map.Entry<String, List<Field>> e : cases.entrySet()) {
             if ("default".equals(e.getKey()) || e.getValue() == null) continue;
             List<Claim> claims = new ArrayList<>();
@@ -2599,23 +2604,25 @@ final class Encoder {
                 (c.optional() ? optional : required).add(c.field());
                 String name = claimName(c.field());
                 if ("merge".equals(modes.mode(name)) && c.field().getFields() != null) {
-                    for (Field m : c.field().getFields()) {
-                        if (m.getName() != null && !m.getName().isEmpty()) {
-                            declaredMembers.computeIfAbsent(name, k -> new LinkedHashSet<>()).add(m.getName());
-                        }
-                    }
+                    OnRepeat.typedMembers(c.field().getFields(), List.of(),
+                            declaredMembers.computeIfAbsent(name, k -> new LinkedHashSet<>()),
+                            mergedObjects.computeIfAbsent(name, k -> new LinkedHashSet<>()));
                 }
             }
             entries.add(new TlvEntry(e.getKey(), e.getValue(), required, optional, entries.size()));
         }
-        entries.sort((x, y) -> Integer.compare(claimWidth(y.required()), claimWidth(x.required())));
+        entries.sort((x, y) -> Integer.compare(claimWidth(y.required(), modes), claimWidth(x.required(), modes)));
 
         // A supplied member of a merged object that no case declares has nowhere to go.
+        Map<String, Set<String>> givenLeaves = new LinkedHashMap<>();
         for (Map.Entry<String, Set<String>> e : declaredMembers.entrySet()) {
             if (!(data.get(e.getKey()) instanceof Map<?, ?> object)) continue;
+            Set<String> given = new LinkedHashSet<>();
+            OnRepeat.leafPaths(object, mergedObjects.getOrDefault(e.getKey(), Set.of()), List.of(), given);
+            givenLeaves.put(e.getKey(), given);
             List<String> stray = new ArrayList<>();
-            for (Object k : object.keySet()) {
-                if (!e.getValue().contains(String.valueOf(k))) stray.add("'" + k + "'");
+            for (String k : given) {
+                if (!e.getValue().contains(k)) stray.add("'" + OnRepeat.dotted(k) + "'");
             }
             if (!stray.isEmpty()) {
                 java.util.Collections.sort(stray);
@@ -2642,12 +2649,8 @@ final class Encoder {
             }
         }
         Map<String, Set<String>> pending = new LinkedHashMap<>();
-        for (String n : declaredMembers.keySet()) {
-            if (data.get(n) instanceof Map<?, ?> object) {
-                Set<String> keys = new LinkedHashSet<>();
-                for (Object k : object.keySet()) keys.add(String.valueOf(k));
-                pending.put(n, keys);
-            }
+        for (Map.Entry<String, Set<String>> g : givenLeaves.entrySet()) {
+            pending.put(g.getKey(), new LinkedHashSet<>(g.getValue()));
         }
 
         List<Written> written = new ArrayList<>();
@@ -2669,19 +2672,17 @@ final class Encoder {
                                     complete = false;
                                     break;
                                 }
-                                Map<String, Object> sub = new LinkedHashMap<>();
+                                Set<String> leaves = OnRepeat.leaves(f);
                                 boolean fresh = false;
-                                for (Field m : f.getFields() == null ? List.<Field>of() : f.getFields()) {
-                                    if (m.getName() == null || m.getName().isEmpty()) continue;
-                                    if (!object.containsKey(m.getName())) {
+                                for (String leaf : leaves) {
+                                    if (!givenLeaves.get(n).contains(leaf)) {
                                         complete = false;
                                         break;
                                     }
-                                    sub.put(m.getName(), object.get(m.getName()));
-                                    fresh |= pending.get(n).contains(m.getName());
+                                    fresh |= pending.get(n).contains(leaf);
                                 }
                                 if (!complete) break;
-                                values.put(n, sub);
+                                values.put(n, OnRepeat.valueAt(object, leaves));
                                 if (fresh) taken++;
                                 continue;
                             }
@@ -2703,18 +2704,28 @@ final class Encoder {
                         }
                         if (taken == 0) break;
                         Map<String, Object> entryData = new LinkedHashMap<>(data);
-                        int position = Integer.MAX_VALUE;
+                        int position = Integer.MAX_VALUE, sub = 0;
                         for (Map.Entry<String, Object> v : values.entrySet()) {
                             String n = v.getKey();
                             entryData.put(n, v.getValue());
-                            position = Math.min(position, order.indexOf(n));
+                            int at = order.indexOf(n), rank = 0;
                             if ("merge".equals(modes.mode(n))) {
-                                pending.get(n).removeAll(((Map<?, ?>) v.getValue()).keySet());
+                                Set<String> done = new LinkedHashSet<>();
+                                OnRepeat.leafPaths((Map<?, ?>) v.getValue(),
+                                        mergedObjects.getOrDefault(n, Set.of()), List.of(), done);
+                                pending.get(n).removeAll(done);
+                                // Parts of one merged object go out in case declaration
+                                // order (CR-2026-173), as the reference's `position`.
+                                rank = e.rank();
                             } else {
                                 queues.get(n).pollFirst();
                             }
+                            if (at < position || (at == position && rank < sub)) {
+                                position = at;
+                                sub = rank;
+                            }
                         }
-                        written.add(new Written(e.key(), e.fields(), entryData, position, written.size()));
+                        written.add(new Written(e.key(), e.fields(), entryData, position, sub, written.size()));
                         progress = true;
                     }
                 }
@@ -2729,7 +2740,7 @@ final class Encoder {
         for (Map.Entry<String, Set<String>> p : pending.entrySet()) {
             if (!p.getValue().isEmpty()) {
                 List<String> left = new ArrayList<>();
-                for (String m : p.getValue()) left.add("'" + m + "'");
+                for (String m : p.getValue()) left.add("'" + OnRepeat.dotted(m) + "'");
                 java.util.Collections.sort(left);
                 throw new SchemaException.EncodeException("tlv: no case takes the members ["
                         + String.join(", ", left) + "] of the merged object '" + p.getKey() + "' in full (PS-527)");
@@ -2768,7 +2779,8 @@ final class Encoder {
 
         // Payload order, so a payload round-trips; entries of one name keep the order taken.
         written.sort((x, y) -> x.position() != y.position()
-                ? Integer.compare(x.position(), y.position()) : Integer.compare(x.seq(), y.seq()));
+                ? Integer.compare(x.position(), y.position())
+                : x.sub() != y.sub() ? Integer.compare(x.sub(), y.sub()) : Integer.compare(x.seq(), y.seq()));
         ByteBuf out = new ByteBuf();
         for (int entryIndex = 0; entryIndex < written.size(); entryIndex++) {
             Written w = written.get(entryIndex);

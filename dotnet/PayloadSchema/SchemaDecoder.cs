@@ -1832,17 +1832,28 @@ public static class SchemaDecoder
     /// member reported twice is an error unless it declares `on_repeat: last` (PS-525).
     /// </summary>
     static object? CombineRepeated(string name, object? earlier, object? value, string mode,
-        HashSet<string>? lastMembers)
+        HashSet<string>? lastMembers, List<string>? path = null)
     {
+        // CR-2026-173: recursing where both reports carry an object; `lastMembers` holds
+        // leaf paths.
         if (mode == "last" || earlier is not Dictionary<string, object?> before
             || value is not Dictionary<string, object?> after)
             return value;
+        path ??= new List<string>();
         var combined = new Dictionary<string, object?>(before);
         foreach (var kv in after)
         {
-            if (combined.ContainsKey(kv.Key) && (lastMembers == null || !lastMembers.Contains(kv.Key)))
+            var here = new List<string>(path) { kv.Key };
+            bool twice = combined.TryGetValue(kv.Key, out var prior)
+                && (lastMembers == null || !lastMembers.Contains(SchemaParser.PathKey(here)));
+            if (twice && prior is Dictionary<string, object?> && kv.Value is Dictionary<string, object?>)
+            {
+                combined[kv.Key] = CombineRepeated(name, prior, kv.Value, mode, lastMembers, here);
+                continue;
+            }
+            if (twice)
                 throw new InvalidOperationException(
-                    $"tlv: the merged object '{name}' reports its member '{kv.Key}' twice (PS-525)");
+                    $"tlv: the merged object '{name}' reports its member '{string.Join(".", here)}' twice (PS-525)");
             combined[kv.Key] = kv.Value;
         }
         return combined;
