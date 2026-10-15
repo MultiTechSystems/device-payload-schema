@@ -3561,15 +3561,20 @@ improved. The Go, Java and C# corpus runners write per-vector reports only when
     the default delimiter), read by `test_cr_2026_183_cases.py` (reference and generated codec),
     Go `cr183_test.go`, Java `CR2026183Test`, C# `CR2026_183Tests`. Fixture
     `_language-conformance/bitfield-string-width-split.yaml`: three decodes that round-trip and
-    two encode rejections (PS-605, PS-606, run by Python and the codec). **Floors:** decode 2842
-    -> 2845 in Go, Java and C#; re-encode +3 everywhere (Python and Java 2239 -> 2242, C# 2240
-    -> 2243, Go 2257 -> 2260, plain 2229 -> 2232), `plain fixed` 225 -> 228.
+    two encode rejections (PS-605, PS-606, run by Python and the codec). **Floors:** decode 2852
+    -> 2855 in Go, Java and C#; re-encode +3 everywhere (Python and Java 2247 -> 2250, C# 2248
+    -> 2251, Go 2265 -> 2268, plain 2237 -> 2240), `plain fixed` +3 (Python 231 -> 234, Go,
+    Java and C# 225 -> 228).
   - **Corpus and registry (Python, read only, every vector decoded and re-encoded before and
-    after):** no corpus schema but the fixture has an empty delimiter or changes. The registry
-    has 404 empty-delimiter fields in 66 schemas, 400 splittable: +89 round trips (milesight
-    wt303/wt304 76, browan l0010 13), none lost. 4 fields in 2 schemas are unsplittable (gwf
-    rcm-lrw10, emu profii-lp-codec_generic: 14 vectors) and are now refused with PS-606, where
-    they failed with `empty separator`. No vector relied on a filled part or a missing prefix.
+    after, 22,267 vectors in schemas with a bitfield_string, at registry a1f7a0a):** no corpus,
+    library or example schema but the fixture has an empty delimiter or changes. The registry has
+    403 empty-delimiter fields in 65 schemas; since the CR's count (all unpadded) its `:N`
+    widths batch landed, so 399 are splittable now. Round trips 2144 -> 2231: +87 (milesight
+    wt303/wt304 76, browan l0010 11), none lost. 4 fields in 2 schemas stay unsplittable
+    (comtac lpn-km, emu profii-lp-codec_generic; 6 emu vectors) and are refused with PS-606
+    where they failed with `empty separator`; the other vectors that failed so now fail on their
+    next defect, mostly PS-434 internal fields (watteco, twtg). No vector relied on a filled part or a missing
+    prefix (no PS-605 rejection anywhere).
 
 - **CR-2026-169 (PS-581; la-payload-schema main, for 0.5.7): which port entry an encoder
   uses.** An encoder of a schema with `ports` encodes one entry and reports the FPort it used:
