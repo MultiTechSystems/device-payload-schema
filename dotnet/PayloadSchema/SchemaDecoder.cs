@@ -1002,6 +1002,14 @@ public static class SchemaDecoder
         if (field.Type == FieldType.Enum && ctx.EnumCodes.Remove(field, out var code))
             ctx.LookupBinding[field] = DecodeContext.IsNumericLabel(value) ? value : code;
 
+        // PS-616 (CR-2026-187): the labels of the set bits; a reference binds the number
+        // (PS-523), as for a lookup.
+        if (!asDeclared && BitLabels.Declared(field) && BitLabels.Number(value) is System.Numerics.BigInteger bits)
+        {
+            ctx.LookupBinding[field] = value;
+            value = BitLabels.Decode(field, bits, ctx);
+        }
+
         // Store variable: PS-523's binding, keeping the label for templates (PS-532).
         if (field.Var != null)
             ctx.Bind(field, field.Var, value);
@@ -2090,6 +2098,43 @@ public static class SchemaDecoder
                 result.Add(field.ElementName == null ? element : ElementValue(element));
         }
 
+        // PS-621, PS-622 (CR-2026-189): a packed repeat's elements, each the next
+        // `packed_bits` bits, most significant first from the bit offset, sign-extended where
+        // the element's type is signed (PS-353), laid out as its type's bytes, big-endian, and
+        // decoded from those, so its sentinel, modifiers and lookup apply as to any element.
+        // The read position then moves to the next byte, or to the end of byte_length where
+        // that is further.
+        void Packed(int count, int byteLength)
+        {
+            int bits = field.PackedBits, offset = field.BitOffset;
+            int span = Math.Max((offset + count * bits + 7) / 8, byteLength);
+            int at = ctx.Offset;
+            var data = ctx.Data;
+            if (at + span > data.Length)
+                throw BufferUnderflowException.Need(span, at, data.Length).Name(field.Name, "repeat");
+            int width = field.PackedWidth / 8;
+            try
+            {
+                for (int i = 0; i < count; i++)
+                {
+                    long raw = 0;
+                    for (int b = offset + i * bits; b < offset + (i + 1) * bits; b++)
+                        raw = (raw << 1) | (long)((data[at + (b >> 3)] >> (7 - (b & 7))) & 1);
+                    if (field.PackedSigned && raw >= (1L << (bits - 1))) raw -= 1L << bits;
+                    var element = new byte[width];
+                    for (int k = width - 1; k >= 0; k--) { element[k] = (byte)raw; raw >>= 8; }
+                    ctx.Data = element;
+                    ctx.Offset = 0;
+                    Element();
+                }
+            }
+            finally
+            {
+                ctx.Data = data;
+                ctx.Offset = at + span;
+            }
+        }
+
         if (field.Count != null)
         {
             int count;
@@ -2111,8 +2156,11 @@ public static class SchemaDecoder
             // clamp had discarded.
             if (count > maxIterations)
                 throw RepeatLimitError(field, maxIterations, $"count {count}", ctx.Offset, ctx.Data.Length);
-            for (int i = 0; i < count; i++)
-                Element();
+            if (field.PackedBits > 0)
+                Packed(count, 0);                    // PS-621, PS-622 (CR-2026-189)
+            else
+                for (int i = 0; i < count; i++)
+                    Element();
         }
         else if (field.ByteLength != null)
         {
@@ -2131,6 +2179,15 @@ public static class SchemaDecoder
             else byteLength = 0;
 
             int endOffset = ctx.Offset + byteLength;
+            if (field.PackedBits > 0)
+            {
+                // PS-621: as many elements as fit whole after the bit offset (CR-2026-189).
+                int count = Math.Max(byteLength * 8 - field.BitOffset, 0) / field.PackedBits;
+                if (count > maxIterations)
+                    throw RepeatLimitError(field, maxIterations, $"count {count}", ctx.Offset, ctx.Data.Length);
+                Packed(count, byteLength);
+                endOffset = ctx.Offset;
+            }
             while (ctx.Offset < endOffset && iterations < maxIterations)
                 Element();
 

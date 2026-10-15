@@ -145,6 +145,6 @@ def test_normalize_generated_codec(case, slim):
     if case.get("fport") is not None:
         given["fPort"] = case["fport"]
     script = code + "\nconsole.log(JSON.stringify(normalizeUplink(%s)));" % json.dumps(given)
-    got = json.loads(subprocess.run([NODE, "-e", script], capture_output=True, text=True,
+    got = json.loads(subprocess.run([NODE], input=script, capture_output=True, text=True,
                                     check=True).stdout)
     assert got == {"data": case["normalized"], "warnings": case["warnings"]}

@@ -100,7 +100,7 @@ public class DecodeContext
     /// </summary>
     internal void Bind(SchemaField field, string name, object? reported)
     {
-        if ((field.Lookup != null || field.Type == FieldType.Enum)
+        if ((field.Lookup != null || field.Type == FieldType.Enum || BitLabels.Declared(field))
             && LookupBinding.TryGetValue(field, out var binding))
         {
             Variables[name] = binding;

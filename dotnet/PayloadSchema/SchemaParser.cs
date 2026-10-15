@@ -465,6 +465,8 @@ public static partial class SchemaParser
         var name = fm.TryGetValue("name", out var n) ? Scalar(n) : "?";
         var type = fm.TryGetValue("type", out var t) ? Scalar(t) : "";
         Numeral.Check(fm);                                              // PS-560
+        BitLabels.Check(fm);                                            // PS-616, PS-617
+        Cr189.Check(fm);                                                // PS-621
         AsciiText.Check(fm);                                            // PS-534, PS-593, PS-072
         if (fm.Children.ContainsKey(new YamlScalarNode("match_value")))
             throw new InvalidOperationException($"Field '{name}': match_value is withdrawn; write a signed "
@@ -987,6 +989,18 @@ public static partial class SchemaParser
                     + "that declares `type`, not a construct (PS-545)");
             f.Fields = ParseFields(elementSeq);
             f.ElementName = elementName;
+            if (fm.TryGetValue("packed_bits", out var packedNode) && YamlInt(packedNode) is { } pb
+                && Get(fm, "element") is YamlMappingNode packedElement
+                && Cr189.Width(packedElement) is var (pw, ps))
+            {
+                // PS-621 (CR-2026-189): the element reads its integer from bytes of its own
+                // width, big-endian, laid out from the bit stream (DecodeRepeat's Packed).
+                f.PackedBits = (int)pb;
+                f.BitOffset = fm.TryGetValue("bit_offset", out var bo) && YamlInt(bo) is { } bov ? (int)bov : 0;
+                f.PackedWidth = pw;
+                f.PackedSigned = ps;
+                f.Fields[0].Endian = "big";
+            }
         }
         if (fm.TryGetValue("identity", out var identityNode)) f.Identity = Scalar(identityNode);
         if (f.Type == FieldType.Repeat)

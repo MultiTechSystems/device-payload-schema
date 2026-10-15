@@ -339,6 +339,23 @@ public class Field {
     public String getElementName() { return elementName; }
     public void setElementName(String elementName) { this.elementName = elementName; }
 
+    /**
+     * A packed repeat's element width in bits, 0 where it is not packed, and its element
+     * type's width and signedness (PS-621, CR-2026-189); its bit offset is getBitOffset().
+     */
+    private int packedBits;
+    private int packedWidth;
+    private boolean packedSigned;
+
+    public int getPackedBits() { return packedBits; }
+    public int getPackedWidth() { return packedWidth; }
+    public boolean isPackedSigned() { return packedSigned; }
+    public void setPacked(int bits, int width, boolean signed) {
+        this.packedBits = bits;
+        this.packedWidth = width;
+        this.packedSigned = signed;
+    }
+
     public long getIndexBase() { return indexBase; }
     public void setIndexBase(long indexBase) { this.indexBase = indexBase; }
 

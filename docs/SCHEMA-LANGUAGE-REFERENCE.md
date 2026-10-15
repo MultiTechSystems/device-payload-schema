@@ -534,6 +534,42 @@ Values may be numbers as well as strings (PS-106).
 list, so there is no original to recover; encoders report the field rather than writing a
 plausible byte. The same applies to an `enum` `default` (PS-068).
 
+### Set-Bit Labels (`bit_labels`)
+
+A status, alarm or capability word is often reported as the names of its set bits. A
+`lookup` names one value; `bit_labels` names each bit (0 the least significant), and the field
+reports the labels of the bits that are set (PS-616):
+
+```yaml
+- name: sensor_type                  # 0x0F -> "T/H,CO2,PMx,Gas1"
+  type: u8
+  bit_labels: {0: T/H, 1: CO2, 2: PMx, 3: Gas1, 4: Gas2, 5: Light, 6: Noise, 7: Pressure}
+  join: ","
+
+- name: options                      # 0x00 -> ["None"]; 0x05 -> ["sensor", "led"]
+  type: u8
+  bit_labels: {0: sensor, 2: led, 3: buzzer}
+  none: None
+```
+
+- It is declared on an unsigned integer (`u8` to `u64`) or an unsigned bit range, and not
+  beside `lookup`, arithmetic, `transform`, `polynomial`, `time`, `compute`, `encoding` or
+  `value`. `join`, `none` and `order` belong to it.
+- The labels are a list, or one string separated by `join` where it is declared. `order` is
+  `ascending` (the default) or `descending`, by bit number. Where no listed bit is set the
+  field reports its `none` label (`["None"]`, or the text), else `[]` or `""`.
+- A `$` reference to the field binds its number, as for a lookup (PS-523).
+- A set bit with no label is not reported, and the decoder warns, naming the field and the
+  bit (PS-617). A bit outside the width, two bits with one label, a `none` that is a bit's
+  label, or a label containing a non-empty `join` is rejected at load.
+- An empty `join` concatenates the labels; an encoder splits such text by the longest label
+  first, so where one label is a prefix of another the schema decodes but is refused for
+  encoding (PS-617).
+- An encoder takes a list, or the joined text where `join` is declared, and writes the bits of
+  those labels and no others; an unknown label is rejected, and `[]`, `""` or the `none` label
+  writes 0. Order and repetition do not matter (PS-618).
+- `_meta` reports `array`, or `string` where `join` is declared (PS-570).
+
 ## Computed Fields
 
 ### Polynomial (calibration curves)
@@ -937,13 +973,42 @@ leading `_` hides nothing: the value is still reported, and `$_x` still reads it
 The element is one data field: it declares `type` and is not a `match`, `byte_group`,
 `flagged`, `tlv` or `records` entry, which is rejected at load; a `type: object` element
 reports one object per position. An encoder takes the array of values back (PS-529) and
-writes the element's first `sentinel` for a `null` position; with no sentinel it reports
-an error naming the repeat and the position (PS-544).
+writes the element's first `sentinel` for a `null` position, as the raw integer the field
+reads, without inverting any modifier (a `div: 10` element with `sentinel: [0xFFFF]`
+writes `FFFF`); with no sentinel it reports an error naming the repeat and the position
+(PS-544).
 
 ```yaml
 - {name: probes, type: repeat, count: 3, element: {type: u16, sentinel: [0xFFFF]}}
 # 0001 FFFF 0003  ->  {"probes": [1, null, 3]}  ->  encodes back to 0001 FFFF 0003
 ```
+
+### Values packed in bits (`packed_bits`, `bit_offset`)
+
+```yaml
+- {name: _count, type: "u8[2:7]"}
+- {name: _repetition, type: "u24[4:9]", consume: 2}
+- name: co2_history
+  type: repeat
+  count: $_count
+  packed_bits: 10                   # each element is the next 10 bits (PS-621)
+  bit_offset: 4                     # the first starts 4 bits into the byte
+  element: {type: u16, sentinel: [0x3FF], mult: 5}
+# 0000 0C 00 5143FF0040  ->  {"co2_history": [400, null, 5]}
+```
+
+A repeat with `element` may pack its elements end to end: one bit stream, most significant
+bit first, the first element starting `bit_offset` bits (0 to 7, default 0) into the byte at
+the read position. Each element is the next `packed_bits` bits (1 to 32), read unsigned or,
+for a signed element type, sign-extended, and then decoded as the element type's integer, so
+its `sentinel`, modifiers and `lookup` apply. The element is an integer type at least
+`packed_bits` wide, and the repeat declares `count` or `byte_length`; with `byte_length` the
+elements are as many as fit whole in `byte_length x 8 - bit_offset` bits. Afterwards the read
+position moves to the next byte, or to the end of `byte_length` where that is further
+(PS-622). The bits before `bit_offset` belong to the fields before the repeat, read as bit
+ranges that consume nothing. Either key anywhere else is rejected at load. An encoder writes
+each element through its modifiers inverted, rejects one that does not fit in `packed_bits`,
+ORs the first byte into the bits the fields before it left, and pads with 0 bits (PS-623).
 
 ### Several records from one element (`records`)
 

@@ -78,6 +78,16 @@ func parseIteratorKeys(f *Field, fm map[string]any) {
 	}
 	// PS-528: a repeat of single values decodes its element as a one-field record.
 	if members, name := rawRepeatMembers(fm); name != "" {
+		if bits, ok := intValue(fm["packed_bits"]); ok && fm["type"] == "repeat" {
+			// PS-621 (CR-2026-189): the element reads its integer from bytes of its own
+			// width, big-endian, laid out from the bit stream (decodePacked).
+			f.PackedBits = bits
+			f.BitOffset, _ = intValue(fm["bit_offset"])
+			if element := asStringMap(members[0]); element != nil {
+				f.packedWidth, f.packedSigned, _ = packedElementWidth(element)
+				element["endian"] = "big"
+			}
+		}
 		f.Fields = parseFieldsRaw(members)
 		f.ElementName = name
 	}

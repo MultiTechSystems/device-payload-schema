@@ -105,6 +105,9 @@ The `inherent` reasons, each of which is a decision recorded elsewhere:
                     the decode warned and reported the rest (PS-586, CR-2026-174). An
                     encoder computes the check value over the bytes it writes (PS-587), so
                     the wrong value the frame carried is not in the output.
+  unlabelled-bit    A `bit_labels` field had a set bit its mapping does not list: the bit is
+                    not reported, and the decode warned (PS-617, CR-2026-187). An encoder
+                    writes only the bits of the labels it is given (PS-618).
 
 One reason is *not* inherent and is reported separately, because it is a gap rather than a
 loss:
@@ -153,6 +156,7 @@ INHERENT = (
     "nul-mode",
     "end-terminated",
     "checksum-mismatch",
+    "unlabelled-bit",
 )
 
 #: The floating-point types PS-566 covers.
@@ -324,6 +328,8 @@ def classify(decoded, traits, schema=None, port=None):
                 return "undecoded-bytes"
             if "(PS-586)" in warning:
                 return "checksum-mismatch"                               # CR-2026-174
+            if "(PS-617)" in warning:
+                return "unlabelled-bit"                                  # CR-2026-187
     if has_null_element(decoded.data):
         return "null-element"
     for trait in INHERENT + FIXABLE:

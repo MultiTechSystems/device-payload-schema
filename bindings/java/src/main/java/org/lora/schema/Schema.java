@@ -725,6 +725,8 @@ public class Schema {
     private static void checkWave4(Map<String, Object> fm) {
         String at = "Field '" + fm.get("name") + "': ";
         Numeral.check(fm);                                    // PS-560
+        BitLabels.check(fm);                                  // PS-616, PS-617
+        Packed.check(fm);                                     // PS-621
         AsciiText.check(fm);                                  // PS-534, PS-593, PS-072
         if (fm.containsKey("match_value")) {
             throw new SchemaException(at + "match_value is withdrawn; write a signed type (sN), a "
@@ -1173,6 +1175,13 @@ public class Schema {
             // keeping `$_x` bound, so its value is reported.
             Map<String, Object> member = Wave6a.elementMember(element);
             String elementName = (String) member.get("name");
+            if (fm.get("packed_bits") instanceof Number bits) {
+                // PS-621 (CR-2026-189): the element reads its integer from bytes of its own
+                // width, big-endian, laid out from the bit stream (Packed.decode).
+                int[] width = Packed.width(element);
+                if (width != null) f.setPacked(bits.intValue(), width[0], width[1] == 1);
+                member.put("endian", "big");
+            }
             List<Map<String, Object>> one = new ArrayList<>();
             one.add(member);
             f.setFields(parseFields(one));
@@ -2407,6 +2416,17 @@ public class Schema {
             }
         }
         
+        // PS-616 (CR-2026-187): the labels of the set bits; a reference binds the number
+        // (PS-523), as for a lookup.
+        if (!asDeclared && BitLabels.declared(field)) {
+            java.math.BigInteger bits = BitLabels.number(value);
+            if (bits != null) {
+                Object number = value;
+                value = BitLabels.decode(field, bits, ctx);
+                ctx.recordLookup(field, number, value);
+            }
+        }
+
         // PS-428: outside the range is no reading, not a flagged one, so the field is
         // absent - neither reported nor bound.
         if (fieldRules && !asDeclared && !lookedUp && Wave6b.rangeOmits(field, value)) {
@@ -3075,6 +3095,11 @@ public class Schema {
                 throw repeatLimitError(field, maxIterations, "count " + count,
                         ctx.getOffset(), ctx.getLimit());
             }
+            if (field.getPackedBits() > 0) {
+                // PS-621, PS-622 (CR-2026-189): the elements are read from one bit stream.
+                decodePacked(field, ctx, count, 0, iterations, carryState, result);
+                count = 0;
+            }
             
             for (int i = 0; i < count; i++) {
                 decodeElement(field, ctx, iterations, carryState, result);
@@ -3095,6 +3120,16 @@ public class Schema {
             }
             
             int endOffset = ctx.getOffset() + byteLen;
+            if (field.getPackedBits() > 0) {
+                // PS-621: as many elements as fit whole after the bit offset (CR-2026-189).
+                int count = Math.max(byteLen * 8 - field.getBitOffset(), 0) / field.getPackedBits();
+                if (count > maxIterations) {
+                    throw repeatLimitError(field, maxIterations, "count " + count,
+                            ctx.getOffset(), ctx.getLimit());
+                }
+                decodePacked(field, ctx, count, byteLen, iterations, carryState, result);
+                endOffset = ctx.getOffset();
+            }
 
             while (ctx.getOffset() < endOffset && iterations[0] < maxIterations) {
                 decodeElement(field, ctx, iterations, carryState, result);
@@ -3188,6 +3223,48 @@ public class Schema {
         }
 
         return result;
+    }
+
+    /**
+     * A packed repeat's elements (PS-621, PS-622, CR-2026-189): each element's bits, most
+     * significant first from the bit offset, sign-extended where its type is signed
+     * (PS-353), laid out as its type's bytes, big-endian, and decoded from those, so its
+     * sentinel, modifiers and lookup apply as to any element. The read position then moves
+     * to the next byte, or to the end of {@code byteLength} where that is further.
+     */
+    private void decodePacked(Field field, DecodeContext ctx, int count, int byteLength,
+                              int[] iterations, Map<String, Object> carryState, List<Object> result) {
+        int bits = field.getPackedBits(), offset = field.getBitOffset();
+        int span = Math.max((offset + count * bits + 7) / 8, byteLength);
+        int at = ctx.getOffset();
+        if (at + span > ctx.getLimit()) {
+            throw new SchemaException.BufferUnderflow(String.format(
+                    "Buffer underflow: need %d bytes at offset %d, but only %d remaining",
+                    span, at, Math.max(0, ctx.getLimit() - at))).named(field.getName(), "repeat");
+        }
+        byte[] data = ctx.getData();
+        int limit = ctx.getLimit();
+        int width = field.getPackedWidth() / 8;
+        try {
+            for (int i = 0; i < count; i++) {
+                long raw = 0;
+                for (int b = offset + i * bits; b < offset + (i + 1) * bits; b++) {
+                    raw = (raw << 1) | ((data[at + (b >> 3)] >> (7 - (b & 7))) & 1);
+                }
+                if (field.isPackedSigned() && raw >= (1L << (bits - 1))) raw -= 1L << bits;
+                byte[] element = new byte[width];
+                for (int k = width - 1; k >= 0; k--) {
+                    element[k] = (byte) raw;
+                    raw >>= 8;
+                }
+                ctx.setData(element, width);
+                ctx.setOffset(0);
+                decodeElement(field, ctx, iterations, carryState, result);
+            }
+        } finally {
+            ctx.setData(data, limit);
+            ctx.setOffset(at + span);
+        }
     }
 
     /**
