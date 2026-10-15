@@ -2431,13 +2431,39 @@ _NAMED_CHECKSUM = re.compile(r"^Field '.*\(PS-58[56]\)$", re.S)
 ASCII_HIGH_BYTE_WARNING = "Field '{}': a byte above 0x7F in an ascii value (PS-073, PS-538)"
 
 
-def decode_ascii(name: Any, raw: bytes, warnings: List[str]) -> str:
+#: PS-534 (CR-2026-177): what an ascii field does with its 0x00 bytes.
+NUL_MODES = ('trailing', 'stop', 'drop')
+
+
+def apply_nul_mode(text: str, mode: str) -> str:
+    """PS-534: `trailing` drops trailing NULs and keeps the rest; `stop` ends the text at the
+    first NUL; `drop` removes every NUL. Whitespace is never trimmed."""
+    if mode == 'stop':
+        return text.split('\x00', 1)[0]
+    if mode == 'drop':
+        return text.replace('\x00', '')
+    return text.rstrip('\x00')
+
+
+def decode_ascii(name: Any, raw: bytes, warnings: List[str], nul: str = 'trailing') -> str:
     """PS-534, PS-538: each byte is the ISO 8859-1 character of the same number, so the
-    value is lossless and re-encodes to the same bytes (PS-537); trailing 0x00 padding
-    only is dropped. A byte above 0x7F is reported with PS-073's warning."""
+    value is lossless and re-encodes to the same bytes (PS-537); the field's `nul` mode
+    (trailing 0x00 padding by default) is applied. A byte above 0x7F is reported with
+    PS-073's warning."""
     if any(byte > 0x7F for byte in raw):
         warnings.append(ASCII_HIGH_BYTE_WARNING.format(name))
-    return raw.decode('latin-1').rstrip('\x00')
+    return apply_nul_mode(raw.decode('latin-1'), nul)
+
+
+def terminated_span(field_def: Dict[str, Any], buf: bytes, pos: int) -> int:
+    """PS-593: the number of bytes of text before the field's terminator; a payload that
+    ends before one is an underflow, which the field names (PS-535)."""
+    terminator = field_def['terminator']
+    end = buf.find(bytes([terminator]), pos)
+    if end < 0:
+        raise BufferUnderflow(f"no terminator byte 0x{terminator:02X} before the end of "
+                              f"the payload (PS-593)")
+    return end - pos
 
 
 #: PS-560: the whole text of a `numeral` field, by base.
@@ -2459,6 +2485,9 @@ def encode_numeral(name: Any, value: Any, length: Optional[int], numeral: str) -
     digits = format(abs(n), 'd' if numeral == 'decimal' else 'X')
     sign = '-' if n < 0 else ''
     width = len(sign) + len(digits) if length is None else length
+    if length is None and n < 0 and numeral == 'hex':                  # PS-168, PS-595
+        raise FieldError(f"Field '{name}': {format_lookup_value(value)} is negative, which a "
+                         f"hex numeral cannot write (PS-168)")
     if (n < 0 and numeral == 'hex') or len(sign) + len(digits) > width:
         raise FieldError(f"Field '{name}': {format_lookup_value(value)} does not fit "
                          f"{length if length is not None else len(digits)} {numeral} digits (PS-168)")
@@ -2559,7 +2588,8 @@ def bitfield_part_errors(node, _top=True):
 
 
 def encode_ascii(name: Any, value: Any, length: Optional[int],
-                 warnings: List[str]) -> bytes:
+                 warnings: List[str], nul: str = 'trailing',
+                 terminator: Optional[int] = None) -> bytes:
     """PS-537: a character above U+00FF, or a value longer than a fixed `length`, is
     rejected naming the field; U+0080..U+00FF is written as the byte of the same number
     with a warning; a short value is padded with 0x00. `length` is None where the field's
@@ -2569,12 +2599,21 @@ def encode_ascii(name: Any, value: Any, length: Optional[int],
         raise FieldError(f"Field '{name}': an ascii value holds a character above "
                          f"U+00FF, which has no byte (PS-537)")
     encoded = text.encode('latin-1')
+    if terminator is not None and terminator in encoded:               # PS-595
+        raise FieldError(f"Field '{name}': the value holds its terminator byte "
+                         f"0x{terminator:02X} (PS-595)")
+    if nul == 'stop' and b'\x00' in encoded:                           # PS-595
+        raise FieldError(f"Field '{name}': a nul: stop value holds a 0x00 byte (PS-595)")
+    if terminator is not None:
+        length = None
     if length is not None and len(encoded) > length:
         raise FieldError(f"Field '{name}': an ascii value of {len(encoded)} bytes is "
                          f"longer than its length of {length} (PS-537)")
     if any(byte > 0x7F for byte in encoded):
         warnings.append(f"Field '{name}': a character above U+007F in an ascii value "
                         f"(PS-537)")
+    if terminator is not None:
+        return encoded + bytes([terminator])                           # PS-595
     if length is None:
         return encoded
     return encoded + b'\x00' * (length - len(encoded))
@@ -3447,6 +3486,44 @@ def numeral_errors(node, _top=True):
     return errors
 
 
+def ascii_text_errors(node, _top=True):
+    """PS-534, PS-593, PS-072: `nul` and `terminator` are defined on an ascii field only; `nul`
+    is trailing, stop or drop; a terminator is a byte 0 to 255 declared in place of `length`.
+    Walked over the whole schema, in the spec prototype's text."""
+    errors = []
+    if isinstance(node, list):
+        for item in node:
+            errors.extend(ascii_text_errors(item, False))
+    elif isinstance(node, dict):
+        if 'type' in node and ('nul' in node or 'terminator' in node):
+            name = node.get('name')
+            if str(node.get('type')).lower() != 'ascii':
+                errors.append(f"Field '{name}': nul and terminator are defined only on an "
+                              f"ascii field, not on {node.get('type')} (PS-534, PS-593)")
+            else:
+                if 'nul' in node and node['nul'] not in NUL_MODES:
+                    errors.append(f"Field '{name}': nul must be trailing, stop or drop, not "
+                                  f"{node['nul']!r} (PS-534)")
+                if 'terminator' in node:
+                    term = node['terminator']
+                    if (isinstance(term, bool) or not isinstance(term, int)
+                            or not 0 <= term <= 255):
+                        errors.append(f"Field '{name}': terminator must be a byte value 0 to "
+                                      f"255, not {term!r} (PS-593)")
+                    if 'length' in node:
+                        errors.append(f"Field '{name}': an ascii field declares length or "
+                                      f"terminator, not both (PS-593)")
+        if (str(node.get('type')).lower() == 'ascii' and 'length' not in node
+                and 'terminator' not in node):
+            errors.append(f"Field '{node.get('name')}': ascii type requires 'length' field, "
+                          f"or 'terminator' (PS-072)")
+        for key, value in node.items():
+            if _top and key == 'test_vectors':
+                continue
+            errors.extend(ascii_text_errors(value, False))
+    return errors
+
+
 #: PS-585 (CR-2026-174): each checksum algorithm and the bits its result needs.
 CHECKSUM_ALGOS = {'sum8': 8, 'xor8': 8, 'crc8/smbus': 8, 'crc16/kermit': 16}
 CHECKSUM_KEYS = ('algo', 'seed', 'from', 'on_mismatch')
@@ -3570,6 +3647,7 @@ def schema_iterator_errors(schema):
     errors = field_name_errors(schema)
     errors.extend(withdrawn_errors(schema))                          # CR-2026-159
     errors.extend(numeral_errors(schema))                            # PS-560
+    errors.extend(ascii_text_errors(schema))                         # PS-534, PS-593
     errors.extend(checksum_errors(schema))                           # PS-585
     errors.extend(bitfield_part_errors(schema))                      # PS-430
     errors.extend(lookup_type_errors(schema))                        # PS-571
@@ -5601,14 +5679,20 @@ class SchemaInterpreter:
             return field_def['value'], pos
 
         if field_type == 'ascii':
-            length = resolve_length(field_def, buf, pos, variables=self._variables)
+            terminated = field_def.get('terminator') is not None
+            if terminated:
+                length = terminated_span(field_def, buf, pos)            # PS-593
+            else:
+                length = resolve_length(field_def, buf, pos, variables=self._variables)
             if pos + length > len(buf):
                 raise BufferUnderflow.need(length, pos, len(buf))
             value = decode_ascii(field_def.get('name'), buf[pos:pos + length],
-                                 self._nested_warnings)
-            if field_def.get('numeral'):
+                                 self._nested_warnings, field_def.get('nul', 'trailing'))
+            if field_def.get('numeral'):                                 # PS-594
                 value = decode_numeral(field_def.get('name'), value, field_def['numeral'])
-            return value, pos if is_echo(field_def) else pos + length          # PS-588
+            if is_echo(field_def):                                       # PS-588
+                return value, pos
+            return value, pos + length + (1 if terminated else 0)
         
         # `hex:upper` is a `bytes` format (PS-079), not a type (CR-2026-037), so it
         # falls through to the unknown-type error below.
@@ -9989,7 +10073,8 @@ class SchemaInterpreter:
                 value = encode_numeral(field_def.get('name'), value, fixed,
                                        field_def['numeral'])
             return encode_ascii(field_def.get('name'), value, fixed,
-                                self._encode_warnings)
+                                self._encode_warnings, field_def.get('nul', 'trailing'),
+                                field_def.get('terminator') if field_type == 'ascii' else None)
         
         if field_type == 'hex':
             length = encode_length(field_def, len(str(value)) // 2)

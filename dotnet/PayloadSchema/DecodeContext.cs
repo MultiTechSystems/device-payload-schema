@@ -32,6 +32,10 @@ public sealed class BufferUnderflowException : InvalidOperationException
         return new BufferUnderflowException(text, text, false);
     }
 
+    /// <summary>A short read whose text is given whole (PS-593's missing terminator).</summary>
+    internal static BufferUnderflowException Text(string text) =>
+        new BufferUnderflowException(text, text, false);
+
     /// <summary>A bit range or a bool reads its byte(s) without consuming them.</summary>
     internal static BufferUnderflowException PeekAt(int pos)
     {

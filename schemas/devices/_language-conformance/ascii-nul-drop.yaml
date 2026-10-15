@@ -1,0 +1,30 @@
+# An ascii field with `nul: drop` removes every 0x00 byte from its value, wherever it
+# appears (PS-534, CR-2026-177): Adeunis's TIC fields, whose vendor decoder skips every NUL
+# in a span. The positions of dropped bytes are not recoverable, so a vector holding an
+# interior or trailing NUL does not re-encode to its payload (PS-595). Whitespace is kept.
+name: probe_ascii_nul_drop
+endian: big
+fields:
+- name: adco
+  type: ascii
+  length: 6
+  nul: drop
+- name: flag
+  type: u8
+test_vectors:
+- name: no_nul_is_unchanged
+  source: generated
+  payload: "30313233343501"
+  expected: {adco: "012345", flag: 1}
+- name: interior_nuls_are_removed
+  source: generated
+  payload: "30320031320002"
+  expected: {adco: "0212", flag: 2}
+- name: leading_nul_is_removed
+  source: generated
+  payload: "00303132333403"
+  expected: {adco: "01234", flag: 3}
+- name: whitespace_is_kept
+  source: generated
+  payload: "41002042434404"
+  expected: {adco: "A BCD", flag: 4}

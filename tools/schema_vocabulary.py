@@ -165,6 +165,8 @@ VOCABULARY: Dict[str, Dict[str, Tuple[Tuple[str, ...], str]]] = {
         "prefix": (_DECODERS, "bitfield_string prefix"),
         "encoding": (_DECODERS, "sign_magnitude | bcd | gray on a uN (PS-422)"),
         "numeral": (_DECODERS, "decimal | hex: an ascii field reported as the integer its digits give (PS-560)"),
+        "nul": (_DECODERS, "trailing | stop | drop: how an ascii field treats its 0x00 bytes (PS-534)"),
+        "terminator": (_DECODERS, "a byte 0 to 255 that ends a variable-length ascii field, in place of length (PS-593)"),
         "checksum": (_DECODERS, "a check value over earlier bytes, verified on decode and computed on encode (PS-585)"),
         "valid_range": (("py", "go", "cs", "outschema"), "quality flag (_quality)"),
         "resolution": (("py", "go", "cs"), "measurement resolution annotation"),
