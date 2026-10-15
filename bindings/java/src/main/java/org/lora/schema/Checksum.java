@@ -125,6 +125,54 @@ final class Checksum {
         return null;
     }
 
+    // --- PS-608: placement (CR-2026-185) ---------------------------------------------------
+
+    /** The constructs a checksum field may not sit within (CHECKSUM_EXCLUDED). */
+    private static final Map<String, String> EXCLUDED = Map.of(
+            "byte_group", "a byte_group", "tlv", "a tlv entry", "records", "a records entry");
+
+    /**
+     * PS-608: `from` counts from the frame's first byte (PS-585), so a checksum field is
+     * rejected at load as a byte_group member, or within a tlv entry, a records entry or a
+     * repeat's {@code fields} or {@code element}. A repeat's trailer is allowed. The spec
+     * prototype's check_checksum_placement over the header, fields and ports of the
+     * {@code $ref}-spliced document, the first violation only.
+     */
+    static void checkPlacement(Map<String, Object> raw) {
+        for (String key : List.of("header", "fields", "ports")) {
+            String error = placement(raw.get(key), null);
+            if (error != null) throw new SchemaException(error);
+        }
+    }
+
+    private static String placement(Object node, String inside) {
+        if (node instanceof List<?> list) {
+            for (Object item : list) {
+                String e = placement(item, inside);
+                if (e != null) return e;
+            }
+        } else if (node instanceof Map<?, ?> map) {
+            if (map.containsKey("checksum") && map.containsKey("type") && inside != null) {
+                Object name = map.get("name");
+                return "Field '" + (name == null ? "None" : String.valueOf(name))
+                        + "': a checksum field cannot sit within " + inside
+                        + "; its `from` counts from the frame (PS-608)";
+            }
+            boolean repeat = "repeat".equals(map.get("type"));
+            for (Map.Entry<?, ?> entry : map.entrySet()) {
+                String key = String.valueOf(entry.getKey());
+                if (key.equals("checksum")) continue;
+                String within = EXCLUDED.getOrDefault(key, inside);
+                if (repeat && (key.equals("fields") || key.equals("element"))) {
+                    within = "a repeat element";
+                }
+                String e = placement(entry.getValue(), within);
+                if (e != null) return e;
+            }
+        }
+        return null;
+    }
+
     private static boolean isInteger(Object v) {
         return v instanceof Integer || v instanceof Long || v instanceof Short
                 || v instanceof Byte || v instanceof BigInteger;
@@ -182,15 +230,16 @@ final class Checksum {
 
     /**
      * The declared checksum over {@code data[from:start]} against the value read: the
-     * mismatch message, or null where they agree. A range starting after the field is an
-     * error (PS-585).
+     * mismatch message, or null where they agree. A range starting at or after the field
+     * covers nothing and is an error (PS-608, CR-2026-185).
      */
     static String mismatch(String name, Map<String, Object> spec, byte[] data, int start,
                            long carried) {
         int from = from(spec);
-        if (from > start) {
+        if (from >= start) {
             throw new SchemaException.DecodeException("Field '" + name + "': the checksum range "
-                    + "starts at byte " + from + ", after the field at byte " + start + " (PS-585)");
+                    + "starts at byte " + from + ", at or after the field at byte " + start
+                    + ", so it covers nothing (PS-608)");
         }
         int computed = compute(algo(spec), data, from, start, seed(spec));
         if (computed == carried) return null;
@@ -215,6 +264,12 @@ final class Checksum {
         Map<String, Object> spec = field.getChecksum();
         int from = from(spec);
         if (from > pos) throw new SchemaException.FieldEncodeException(unwritten(field.getName()));
+        if (from == pos) {
+            // PS-608 (CR-2026-185): a range starting where the field is covers nothing.
+            throw new SchemaException.FieldEncodeException("Field '" + field.getName()
+                    + "': the checksum range starts at byte " + from + ", where the field is, "
+                    + "so it covers nothing (PS-608)");
+        }
         long value = compute(algo(spec), frame, from, pos, seed(spec));
         int size = size(field.getChecksumType());
         for (int i = 0; i < size; i++) {

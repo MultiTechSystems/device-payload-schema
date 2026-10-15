@@ -312,7 +312,9 @@ public static class SchemaDecoder
                     var outputName = ResolveFieldName(field, ctx);
                     if (outputName != field.Name)
                         ctx.Produced(field, outputName);                      // PS-492
-                    result[outputName] = value;
+                    // PS-610 (CR-2026-186): reported as an instant in its format; a
+                    // reference still binds the number.
+                    result[outputName] = field.Time != null ? TimeFields.Format(field, value) : value;
                 }
                 // Keyed by the schema-level name in Variables so $references keep
                 // working when name_from is in play (PS-267). A looked-up field binds
@@ -749,7 +751,8 @@ public static class SchemaDecoder
 
             case FieldType.Number:
             {
-                value = DecodeNumber(field, ctx);
+                // PS-614 (CR-2026-186): the instant its parts name.
+                value = field.Time?.Parts != null ? TimeFields.FromParts(field, ctx) : DecodeNumber(field, ctx);
                 if (field.IntegerResult && value is double d && !double.IsNaN(d) && !double.IsInfinity(d))
                 {
                     // PS-388: a fractional part is an error, never truncated or rounded.

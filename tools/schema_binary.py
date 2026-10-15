@@ -207,6 +207,7 @@ C_UNSUPPORTED_KEYS = {
     # field record has no slot for its algorithm, seed, `from` or `on_mismatch`.
     "checksum": "this format has no checksum record (PS-585)",
     "template": "the C interpreter has no template string; a string joined from values is not built (PS-590)",
+    "time": "the C interpreter has no time field; an instant reported as text, an object or a converted count is not built (PS-610, PS-446)",
     "sentinel": "the C interpreter has no sentinel (PS-427)",
     "out_of_range": "the C interpreter has no out_of_range: omit (PS-428)",
     "default": ("the C interpreter has no enum default, and no field default to write "

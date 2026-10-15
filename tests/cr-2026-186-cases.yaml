@@ -1,0 +1,292 @@
+# CR-2026-186 (PS-610 to PS-615): a numeric field may declare `time`, and is then reported as
+# an instant in UTC in place of its number. The value after the field's modifiers is a count of
+# seconds since `epoch` (1970-01-01T00:00:00Z where absent). `format` is `unix` (seconds, or
+# milliseconds with `milliseconds: true`, since 1970 or since `since`), `iso8601` (exactly
+# `fraction` digits where declared, else digits only where the value has them), `calendar` (the
+# PS-410 object, with `month_labels` and `keys`) or `pattern` (%Y %m %d %H %M %S %L %b %a %%).
+# A `type: number` field may derive the instant from `parts` decoded earlier (PS-614). A
+# millisecond count, `fraction` and %L truncate. An encoder parses the value back in its
+# format; a pattern lacking a date or time directive, and parts that read no bytes, decode
+# but are refused for encoding (PS-615).
+#
+# Read by the reference, the validator and the generated codec
+# (tests/test_cr_2026_186_cases.py), Go (go/schema/cr186_test.go), Java (CR2026186Test.java)
+# and C# (CR2026_186Tests.cs). C has no time field (tools/schema_binary.py refuses it, PS-446).
+#
+#   decode: `schema` (YAML text), `payload` (hex) and either `expected` (the whole decoded
+#           data, compared exactly) or `error` (text one of the errors contains).
+#   cases:  `schema`, `input` (JSON text) and either `payload` (hex) or `error` (where the
+#           message prints a calendar mapping, only the text after it).
+#   load:   `schema` and `error`, text one of the load errors contains.
+#   meta:   `schema`, `payload` (hex) and `reports`, what `_meta.fields.f.reports` is (PS-570).
+#
+# The texts are the spec prototype's (TestCR2026186TimeFields). Where its message prints the
+# parts mapping, the parts are listed in the order year, month, day, hour, minute, second.
+
+decode:
+
+- name: a_calendar_object_in_each_repeat_element
+  schema: "name: t\nendian: big\nfields:\n  - {name: count, type: u8}\n  - name: readings\n    type: repeat\n    count: $count\n    fields:\n      - name: timestamp\n        type: u32\n        time:\n          format: calendar\n          epoch: '2015-01-01T00:00:00Z'\n          month_labels: [January, February, March, April, May, June, July, August, September, October, November, December]\n          keys: {hour: hours, minute: minutes, second: seconds}\n      - {name: temperature, type: s16, div: 100}\n"
+  payload: "010000003d2a18"
+  expected: {count: 1, readings: [{timestamp: {year: 2015, month: January, day: 1, hours: 0, minutes: 1, seconds: 1}, temperature: 107.76}]}
+
+- name: a_calendar_without_labels_or_keys
+  schema: "name: t\nendian: big\nfields:\n  - {name: t, type: u32, time: {format: calendar}}\n"
+  payload: "687e393c"
+  expected: {t: {year: 2025, month: 7, day: 21, hour: 12, minute: 57, second: 32}}
+
+- name: iso8601_with_milliseconds_after_the_modifiers
+  schema: "name: t\nendian: big\nfields:\n  - {name: timestamp, type: u32, add: -17, time: {format: iso8601, epoch: '1980-01-06T00:00:00Z', fraction: 3}}\n"
+  payload: "54a48e12"
+  expected: {timestamp: "2025-01-05T00:00:01.000Z"}
+
+- name: iso8601_writes_a_fraction_where_the_value_has_one
+  schema: "name: t\nendian: big\nfields:\n  - {name: t, type: u16, div: 2, time: {format: iso8601}}\n"
+  payload: "0003"
+  expected: {t: "1970-01-01T00:00:01.5Z"}
+
+- name: iso8601_writes_no_fraction_where_the_value_has_none
+  schema: "name: t\nendian: big\nfields:\n  - {name: t, type: u16, div: 2, time: {format: iso8601}}\n"
+  payload: "0004"
+  expected: {t: "1970-01-01T00:00:02Z"}
+
+- name: iso8601_fraction_truncates
+  schema: "name: t\nendian: big\nfields:\n  - {name: t, type: u16, div: 3, time: {format: iso8601, fraction: 3}}\n"
+  payload: "0002"
+  expected: {t: "1970-01-01T00:00:00.666Z"}
+
+- name: an_instant_before_1970
+  schema: "name: t\nendian: big\nfields:\n  - {name: t, type: s32, div: 2, time: {format: iso8601, fraction: 1}}\n"
+  payload: "ffffffff"
+  expected: {t: "1969-12-31T23:59:59.5Z"}
+
+- name: a_pattern_as_to_utc_string
+  schema: "name: t\nendian: big\nfields:\n  - {name: Timestamp, type: u32, time: {format: pattern, pattern: '%a, %d %b %Y %H:%M:%S GMT'}}\n"
+  payload: "687e393c"
+  expected: {Timestamp: "Mon, 21 Jul 2025 12:57:32 GMT"}
+
+- name: a_pattern_with_milliseconds_and_a_percent_sign
+  schema: "name: t\nendian: big\nfields:\n  - {name: t, type: u32, div: 1000, time: {format: pattern, epoch: '2013-01-01T00:00:00Z', pattern: '%Y-%m-%dT%H:%M:%S.%L 100%%'}}\n"
+  payload: "000003e9"
+  expected: {t: "2013-01-01T00:00:01.001 100%"}
+
+- name: unix_since_another_instant
+  schema: "name: t\nendian: big\nfields:\n  - {name: t, type: u32, time: {format: unix, epoch: '2015-01-01T00:00:00Z', since: '2000-01-01T00:00:00Z'}}\n"
+  payload: "00000000"
+  expected: {t: 473385600}
+
+- name: unix_from_another_epoch
+  schema: "name: t\nendian: big\nfields:\n  - {name: t, type: u32, time: {format: unix, epoch: '2015-01-01T00:00:00Z'}}\n"
+  payload: "00000000"
+  expected: {t: 1420070400}
+
+- name: unix_in_milliseconds
+  schema: "name: t\nendian: big\nfields:\n  - {name: t, type: u32, time: {format: unix, milliseconds: true}}\n"
+  payload: "00000002"
+  expected: {t: 2000}
+
+- name: unix_milliseconds_truncate
+  schema: "name: t\nendian: big\nfields:\n  - {name: t, type: u16, div: 3, time: {format: unix, milliseconds: true}}\n"
+  payload: "0002"
+  expected: {t: 666}
+
+- name: a_bit_range
+  schema: "name: t\nendian: big\nfields:\n  - {name: t, type: 'u16[0:11]', consume: 2, time: {format: iso8601}}\n"
+  payload: "f00a"
+  expected: {t: "1970-01-01T00:00:10Z"}
+
+- name: a_computed_value
+  schema: "name: t\nendian: big\nfields:\n  - {name: _minutes, type: u16}\n  - {name: t, type: integer, ref: $_minutes, mult: 60, time: {format: iso8601}}\n"
+  payload: "0002"
+  expected: {t: "1970-01-01T00:02:00Z"}
+
+- name: parts_name_the_instant
+  schema: "name: t\nendian: big\nfields:\n  - {name: _y, type: u8, add: 2000}\n  - {name: _mo, type: u8}\n  - {name: _d, type: u8}\n  - {name: _h, type: u8}\n  - name: ts\n    type: number\n    time:\n      format: unix\n      milliseconds: true\n      parts: {year: $_y, month: $_mo, day: $_d, hour: $_h}\n"
+  payload: "18030b15"
+  expected: {ts: 1710190800000}
+
+- name: parts_that_name_no_date_are_an_error
+  schema: "name: t\nendian: big\nfields:\n  - {name: _y, type: u8, add: 2000}\n  - {name: _mo, type: u8}\n  - {name: _d, type: u8}\n  - {name: _h, type: u8}\n  - name: ts\n    type: number\n    time:\n      format: unix\n      milliseconds: true\n      parts: {year: $_y, month: $_mo, day: $_d, hour: $_h}\n"
+  payload: "18021e00"
+  error: "Field 'ts': its parts {'year': 2024, 'month': 2, 'day': 30, 'hour': 0} do not name a valid UTC date and time (PS-614)"
+
+- name: a_part_that_is_not_whole_is_an_error
+  schema: "name: t\nendian: big\nfields:\n  - {name: _y, type: u16, div: 2}\n  - {name: _mo, type: u8}\n  - {name: _d, type: u8}\n  - name: ts\n    type: number\n    time: {format: iso8601, parts: {year: $_y, month: $_mo, day: $_d}}\n"
+  payload: "0fd10101"
+  error: "Field 'ts': its year is 2024.5, not a whole number (PS-614)"
+
+- name: computed_parts_decode
+  schema: "name: t\nendian: big\nfields:\n  - {name: _yyyymm, type: u32}\n  - {name: _y, type: number, compute: {op: idiv, a: $_yyyymm, b: 100}}\n  - {name: _mo, type: number, compute: {op: mod, a: $_yyyymm, b: 100}}\n  - {name: _d, type: u8}\n  - name: ts\n    type: number\n    time: {format: iso8601, parts: {year: $_y, month: $_mo, day: $_d}}\n"
+  payload: "000316a30b"
+  expected: {ts: "2024-03-11T00:00:00Z"}
+
+- name: a_pattern_that_cannot_be_read_back_decodes
+  schema: "name: t\nendian: big\nfields:\n  - {name: day, type: u32, time: {format: pattern, pattern: '%Y-%m-%d'}}\n"
+  payload: "00015180"
+  expected: {day: "1970-01-02"}
+
+cases:
+
+- name: a_calendar_object_in_each_repeat_element
+  schema: "name: t\nendian: big\nfields:\n  - {name: count, type: u8}\n  - name: readings\n    type: repeat\n    count: $count\n    fields:\n      - name: timestamp\n        type: u32\n        time:\n          format: calendar\n          epoch: '2015-01-01T00:00:00Z'\n          month_labels: [January, February, March, April, May, June, July, August, September, October, November, December]\n          keys: {hour: hours, minute: minutes, second: seconds}\n      - {name: temperature, type: s16, div: 100}\n"
+  input: '{"count": 1, "readings": [{"timestamp": {"year": 2015, "month": "January", "day": 1, "hours": 0, "minutes": 1, "seconds": 1}, "temperature": 107.76}]}'
+  payload: "010000003d2a18"
+
+- name: a_calendar_month_that_is_no_label
+  schema: "name: t\nendian: big\nfields:\n  - name: t\n    type: u32\n    time: {format: calendar, month_labels: [January, February, March, April, May, June, July, August, September, October, November, December]}\n"
+  input: '{"t": {"year": 2015, "month": "Janvier", "day": 1, "hour": 0, "minute": 1, "second": 1}}'
+  error: "is not a time in its calendar format; month 'Janvier' is not a label (PS-615)"
+
+- name: iso8601_without_a_fraction_is_accepted
+  schema: "name: t\nendian: big\nfields:\n  - {name: timestamp, type: u32, add: -17, time: {format: iso8601, epoch: '1980-01-06T00:00:00Z', fraction: 3}}\n"
+  input: '{"timestamp": "2025-01-05T00:00:01Z"}'
+  payload: "54a48e12"
+
+- name: iso8601_with_an_offset_of_zero
+  schema: "name: t\nendian: big\nfields:\n  - {name: timestamp, type: u32, add: -17, time: {format: iso8601, epoch: '1980-01-06T00:00:00Z', fraction: 3}}\n"
+  input: '{"timestamp": "2025-01-05T00:00:01.000+00:00"}'
+  payload: "54a48e12"
+
+- name: iso8601_that_does_not_parse
+  schema: "name: t\nendian: big\nfields:\n  - {name: t, type: u32, time: {format: iso8601}}\n"
+  input: '{"t": "yesterday"}'
+  error: "Field 't': 'yesterday' is not a time in its iso8601 format (PS-615)"
+
+- name: iso8601_a_fraction_through_the_modifiers
+  schema: "name: t\nendian: big\nfields:\n  - {name: t, type: u16, div: 2, time: {format: iso8601}}\n"
+  input: '{"t": "1970-01-01T00:00:01.5Z"}'
+  payload: "0003"
+
+- name: a_pattern_as_to_utc_string
+  schema: "name: t\nendian: big\nfields:\n  - {name: Timestamp, type: u32, time: {format: pattern, pattern: '%a, %d %b %Y %H:%M:%S GMT'}}\n"
+  input: '{"Timestamp": "Mon, 21 Jul 2025 12:57:32 GMT"}'
+  payload: "687e393c"
+
+- name: a_weekday_that_is_not_the_dates
+  schema: "name: t\nendian: big\nfields:\n  - {name: Timestamp, type: u32, time: {format: pattern, pattern: '%a, %d %b %Y %H:%M:%S GMT'}}\n"
+  input: '{"Timestamp": "Tue, 21 Jul 2025 12:57:32 GMT"}'
+  error: "Field 'Timestamp': 'Tue, 21 Jul 2025 12:57:32 GMT' is not a time in its pattern format; Tue is not that date's weekday (PS-615)"
+
+- name: a_pattern_with_milliseconds_and_a_percent_sign
+  schema: "name: t\nendian: big\nfields:\n  - {name: t, type: u32, div: 1000, time: {format: pattern, epoch: '2013-01-01T00:00:00Z', pattern: '%Y-%m-%dT%H:%M:%S.%L 100%%'}}\n"
+  input: '{"t": "2013-01-01T00:00:01.001 100%"}'
+  payload: "000003e9"
+
+- name: text_that_does_not_fit_the_pattern
+  schema: "name: t\nendian: big\nfields:\n  - {name: t, type: u32, time: {format: pattern, pattern: '%Y-%m-%d %H:%M:%S'}}\n"
+  input: '{"t": "2024-03-11T21:05:47"}'
+  error: "Field 't': '2024-03-11T21:05:47' is not a time in its pattern format (PS-615)"
+
+- name: unix_since_another_instant
+  schema: "name: t\nendian: big\nfields:\n  - {name: t, type: u32, time: {format: unix, epoch: '2015-01-01T00:00:00Z', since: '2000-01-01T00:00:00Z'}}\n"
+  input: '{"t": 473385600}'
+  payload: "00000000"
+
+- name: unix_in_milliseconds
+  schema: "name: t\nendian: big\nfields:\n  - {name: t, type: u32, time: {format: unix, milliseconds: true}}\n"
+  input: '{"t": 2000}'
+  payload: "00000002"
+
+- name: unix_that_is_not_a_number
+  schema: "name: t\nendian: big\nfields:\n  - {name: t, type: u32, time: {format: unix}}\n"
+  input: '{"t": "2000"}'
+  error: "Field 't': '2000' is not a time in its unix format (PS-615)"
+
+- name: parts_are_written_from_the_instant
+  schema: "name: t\nendian: big\nfields:\n  - {name: _y, type: u8, add: 2000}\n  - {name: _mo, type: u8}\n  - {name: _d, type: u8}\n  - {name: _h, type: u8}\n  - name: ts\n    type: number\n    time:\n      format: unix\n      milliseconds: true\n      parts: {year: $_y, month: $_mo, day: $_d, hour: $_h}\n"
+  input: '{"ts": 1710190800000}'
+  payload: "18030b15"
+
+- name: a_part_that_reads_no_bytes_is_not_encoded
+  schema: "name: t\nendian: big\nfields:\n  - {name: _yyyymm, type: u32}\n  - {name: _y, type: number, compute: {op: idiv, a: $_yyyymm, b: 100}}\n  - {name: _mo, type: number, compute: {op: mod, a: $_yyyymm, b: 100}}\n  - {name: _d, type: u8}\n  - name: ts\n    type: number\n    time: {format: iso8601, parts: {year: $_y, month: $_mo, day: $_d}}\n"
+  input: '{"ts": "2024-03-11T00:00:00Z"}'
+  error: "Field 'ts': its year part '_y' reads no bytes, so the schema decodes but is not encoded (PS-615)"
+
+- name: a_pattern_that_cannot_be_read_back_is_not_encoded
+  schema: "name: t\nendian: big\nfields:\n  - {name: day, type: u32, time: {format: pattern, pattern: '%Y-%m-%d'}}\n"
+  input: '{"day": "1970-01-02"}'
+  error: "Field 'day': its pattern '%Y-%m-%d' cannot be read back to an instant; the schema decodes but is not encoded (PS-615)"
+
+load:
+
+- name: time_on_text
+  schema: "name: t\nfields:\n  - {name: x, type: ascii, length: 2, time: {format: unix}}\n"
+  error: "Field 'x': `time` is declared on a numeric field, not 'ascii' (PS-610)"
+
+- name: time_with_a_lookup
+  schema: "name: t\nfields:\n  - {name: x, type: u8, lookup: [a, b], time: {format: unix}}\n"
+  error: "Field 'x': `time` is declared on a numeric field, not 'u8' (PS-610)"
+
+- name: an_unknown_format
+  schema: "name: t\nfields:\n  - {name: x, type: u8, time: {format: julian}}\n"
+  error: "Field 'x': `time` declares a format of unix, iso8601, calendar or pattern (PS-610)"
+
+- name: a_key_of_another_format
+  schema: "name: t\nfields:\n  - {name: x, type: u8, time: {format: unix, fraction: 3}}\n"
+  error: "Field 'x': fraction does not belong to the unix format (PS-610)"
+
+- name: a_fraction_past_nine
+  schema: "name: t\nfields:\n  - {name: x, type: u8, time: {format: iso8601, fraction: 10}}\n"
+  error: "Field 'x': `fraction` is an integer from 1 to 9 (PS-611)"
+
+- name: milliseconds_not_a_boolean
+  schema: "name: t\nfields:\n  - {name: x, type: u8, time: {format: unix, milliseconds: 1}}\n"
+  error: "Field 'x': `milliseconds` is true or false (PS-611)"
+
+- name: an_epoch_without_a_time
+  schema: "name: t\nfields:\n  - {name: x, type: u8, time: {format: unix, epoch: '2015-01-01'}}\n"
+  error: "Field 'x': `epoch` '2015-01-01' is not an RFC 3339 date-time in UTC with a Z designator (PS-355, PS-610)"
+
+- name: an_unknown_directive
+  schema: "name: t\nfields:\n  - {name: x, type: u8, time: {format: pattern, pattern: '%q'}}\n"
+  error: "Field 'x': %q is not a pattern directive (PS-613)"
+
+- name: a_lone_percent_sign
+  schema: "name: t\nfields:\n  - {name: x, type: u8, time: {format: pattern, pattern: '%Y %'}}\n"
+  error: "Field 'x': a pattern ends with a lone % (PS-613)"
+
+- name: twelve_month_labels
+  schema: "name: t\nfields:\n  - {name: x, type: u8, time: {format: calendar, month_labels: [a]}}\n"
+  error: "Field 'x': month_labels are exactly twelve strings (PS-411, PS-612)"
+
+- name: keys_that_clash
+  schema: "name: t\nfields:\n  - {name: x, type: u8, time: {format: calendar, keys: {hour: h, minute: h}}}\n"
+  error: "Field 'x': keys map two parts to one name (PS-412)"
+
+- name: parts_on_a_read_value
+  schema: "name: t\nfields:\n  - {name: x, type: u8, time: {format: unix, parts: {year: $a}}}\n"
+  error: "Field 'x': `parts` belongs to a `type: number` field that computes nothing else (PS-614)"
+
+- name: parts_without_a_day
+  schema: "name: t\nfields:\n  - {name: _y, type: u8}\n  - {name: _m, type: u8}\n  - {name: x, type: number, time: {format: unix, parts: {year: $_y, month: $_m}}}\n"
+  error: "Field 'x': `parts` maps year, month and day, and optionally hour, minute and second, to $references (PS-614)"
+
+- name: an_epoch_with_parts
+  schema: "name: t\nfields:\n  - {name: _y, type: u8}\n  - {name: _m, type: u8}\n  - {name: _d, type: u8}\n  - {name: x, type: number, time: {format: unix, epoch: '2000-01-01T00:00:00Z', parts: {year: $_y, month: $_m, day: $_d}}}\n"
+  error: "Field 'x': `epoch` does not apply to `parts` (PS-614)"
+
+- name: a_number_with_neither_parts_nor_a_computation
+  schema: "name: t\nfields:\n  - {name: x, type: number, time: {format: unix}}\n"
+  error: "Field 'x': a computed `time` field declares `parts` or a computation (PS-614)"
+
+meta:
+
+- name: unix_reports_a_number
+  schema: "name: t\nendian: big\nfields:\n  - {name: f, type: u32, time: {format: unix}}\n"
+  payload: "00000000"
+  reports: number
+
+- name: iso8601_reports_a_string
+  schema: "name: t\nendian: big\nfields:\n  - {name: f, type: u32, time: {format: iso8601}}\n"
+  payload: "00000000"
+  reports: string
+
+- name: pattern_reports_a_string
+  schema: "name: t\nendian: big\nfields:\n  - {name: f, type: u32, time: {format: pattern, pattern: '%Y'}}\n"
+  payload: "00000000"
+  reports: string
+
+- name: calendar_reports_an_object
+  schema: "name: t\nendian: big\nfields:\n  - {name: f, type: u32, time: {format: calendar}}\n"
+  payload: "00000000"
+  reports: object

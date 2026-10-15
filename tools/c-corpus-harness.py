@@ -120,6 +120,7 @@ UNREACHABLE_KEYS = {
     "end_terminates": "the interpreter has no terminator-delimited ascii (PS-619)",
     "numeral": "the interpreter holds ascii text, not the integer it spells (PS-560)",
     "template": "the interpreter has no template string (PS-590)",
+    "time": "the interpreter has no time field (PS-610)",
     "var": "variables are only read by match, which this harness skips",
     # AGENTS.md records this one: a `default` on a lookup or enum is Python, Go, Java and
     # C# only, because the struct has no slot for it. Building such a field without its

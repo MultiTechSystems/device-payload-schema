@@ -997,9 +997,21 @@ static inline uint32_t schema_checksum_compute(uint8_t algo, const uint8_t* data
     }
 }
 
+/* PS-608 (CR-2026-185): `from` counts from the frame's first byte (PS-585), so a checksum
+ * field is refused as a byte_group member or within a tlv entry - the reference rejects
+ * both at load, and this interpreter, which has no load step for the struct API, where it
+ * reaches one. The reference's text. */
+static inline void schema_checksum_placement(const field_def_t* field, const char* inside,
+                                             char* err, size_t err_len) {
+    snprintf(err, err_len, "Field '%.*s': a checksum field cannot sit within %s; its "
+             "`from` counts from the frame (PS-608)", SCHEMA_MAX_NAME_LEN - 1, field->name,
+             inside);
+}
+
 /* PS-586: whether `field`'s checksum agrees with the frame, where it is read at `at`.
  * SCHEMA_OK where it does, or where the field's bytes are not all there (the read reports
- * that, PS-535). SCHEMA_ERR_CHECKSUM where the range starts after the field (PS-585) or
+ * that, PS-535). SCHEMA_ERR_CHECKSUM where the range starts at or after the field, so it
+ * covers nothing (PS-608, CR-2026-185), or
  * the value disagrees under `on_mismatch: error`; under `warn` the disagreement sets
  * `*mismatch` and the field decodes. SCHEMA_ERR_TYPE for a checksum on a type that cannot
  * hold one, which field_set_checksum() never builds. */
@@ -1009,7 +1021,7 @@ static inline int schema_checksum_check(const field_def_t* field, const uint8_t*
     const int width = schema_checksum_type_bytes(field->type);
     if (width == 0) return SCHEMA_ERR_TYPE;
     if (at + (size_t)width > len) return SCHEMA_OK;
-    if (field->checksum_from > at) return SCHEMA_ERR_CHECKSUM;
+    if (field->checksum_from >= at) return SCHEMA_ERR_CHECKSUM;   /* PS-608: covers nothing */
     const uint64_t carried = bits_read_base(buf + at, width, endian);
     const uint32_t computed = schema_checksum_compute(
         field->checksum_algo, buf + field->checksum_from, at - field->checksum_from,
@@ -1023,17 +1035,18 @@ static inline int schema_checksum_check(const field_def_t* field, const uint8_t*
 }
 
 /* The text of a checksum read at `at` that schema_checksum_check() did not accept: the
- * range starting after the field (PS-585), else PS-586's mismatch - the error text, and
+ * range starting at or after the field (PS-608), else PS-586's mismatch - the error text, and
  * under `on_mismatch: warn` the warning's. The other five implementations give the same
  * strings. The worst case, a 31-character name, crc16/kermit, two five-digit offsets and
  * a sixteen-digit carried value, is 140 characters and its NUL. */
 static inline void schema_checksum_message(char* msg, size_t msg_len,
                                            const field_def_t* field, const uint8_t* buf,
                                            size_t at, endian_t endian) {
-    if (field->checksum_from > at) {
-        snprintf(msg, msg_len, "Field '%.*s': the checksum range starts at byte %u, after "
-                 "the field at byte %u (PS-585)", SCHEMA_MAX_NAME_LEN - 1, field->name,
-                 (unsigned)field->checksum_from, (unsigned)at);
+    if (field->checksum_from >= at) {
+        snprintf(msg, msg_len, "Field '%.*s': the checksum range starts at byte %u, at or "
+                 "after the field at byte %u, so it covers nothing (PS-608)",
+                 SCHEMA_MAX_NAME_LEN - 1, field->name, (unsigned)field->checksum_from,
+                 (unsigned)at);
         return;
     }
     const int width = schema_checksum_type_bytes(field->type);
@@ -1658,11 +1671,8 @@ static inline int byte_group_width(const schema_t* schema, const field_def_t* gr
             return -1;
         }
         if (m->checksum_algo != SCHEMA_CHECKSUM_NONE) {
-            /* CR-2026-174: a member names bits of the group's value, and a checksum is
-             * over whole bytes before the field; refused rather than dropped (PS-446). */
-            snprintf(err, err_len, "byte_group member '%.*s' declares a checksum, which "
-                     "this interpreter cannot apply to a member (PS-446)",
-                     SCHEMA_MAX_NAME_LEN - 1, m->name);
+            /* PS-608 (CR-2026-185): a checksum field is not a byte_group member. */
+            schema_checksum_placement(m, "a byte_group", err, err_len);
             return -1;
         }
         if (base > widest) widest = base;
@@ -2029,6 +2039,13 @@ static inline int schema_decode_direction(
                      * construct owns and the loop decoded nothing at all. */
                     if (field_idx < 0 || field_idx >= SCHEMA_MAX_FIELDS) break;
                     if (result->field_count >= SCHEMA_MAX_FIELDS) break;
+                    if (schema->fields[field_idx].checksum_algo != SCHEMA_CHECKSUM_NONE) {
+                        result->error_code = SCHEMA_ERR_CHECKSUM;     /* PS-608 */
+                        schema_checksum_placement(&schema->fields[field_idx], "a tlv entry",
+                                                  result->error_msg,
+                                                  sizeof(result->error_msg));
+                        return SCHEMA_ERR_CHECKSUM;
+                    }
                     if (schema->fields[field_idx].type == FIELD_TYPE_BYTE_GROUP) {
                         int grc = schema_decode_byte_group(schema, &schema->fields[field_idx],
                                                            buf, len, &pos, result, &vars);
@@ -2808,7 +2825,7 @@ static inline int schema_place_checksum(const field_def_t* field, endian_t schem
 
 /* PS-587: each checksum over the finished frame, from its `from` to the byte before it,
  * earliest first, so an outer checksum covers an inner one's value. A range starting
- * after the field is rejected. */
+ * after the field is rejected, and one starting where it is covers nothing (PS-608). */
 static inline int schema_fill_checksums(uint8_t* data, schema_checksum_slot_t* slots,
                                         int slot_count, char* err, size_t err_len) {
     for (int a = 1; a < slot_count; a++) {             /* by position, stable */
@@ -2820,6 +2837,12 @@ static inline int schema_fill_checksums(uint8_t* data, schema_checksum_slot_t* s
     for (int k = 0; k < slot_count; k++) {
         const field_def_t* f = slots[k].field;
         if (f->checksum_from > slots[k].pos) return schema_checksum_unwritten(f, err, err_len);
+        if (f->checksum_from == slots[k].pos) {        /* PS-608 (CR-2026-185) */
+            snprintf(err, err_len, "Field '%.*s': the checksum range starts at byte %u, where "
+                     "the field is, so it covers nothing (PS-608)", SCHEMA_MAX_NAME_LEN - 1,
+                     f->name, (unsigned)f->checksum_from);
+            return SCHEMA_ERR_CHECKSUM;
+        }
         uint32_t value = schema_checksum_compute(f->checksum_algo, data + f->checksum_from,
                                                  slots[k].pos - f->checksum_from,
                                                  f->checksum_seed);

@@ -1190,8 +1190,16 @@ final class Encoder {
         // PS-385: the elements, then the trailer, whose values sit beside the repeat.
         if (field.getTrailer() != null && !field.getTrailer().isEmpty()) {
             byte[] trailer = encodeFieldList(field.getTrailer(), data);
+            FrameMeta meta = frameMeta.get(trailer);
             checkPeeks(trailer);                                         // PS-551
+            int elements = out.toArray().length;
             out.write(trailer);
+            if (meta != null && !meta.checksums().isEmpty()) {
+                // CR-2026-185 (PS-608): a checksum in the trailer is filled with the frame,
+                // at its offset after the elements.
+                frameMeta.put(trailer, new FrameMeta(null, List.of(), meta.checksums(), List.of()));
+                return prefixed(elements, trailer, out.toArray());
+            }
         }
         return out.toArray();
     }
@@ -1556,6 +1564,7 @@ final class Encoder {
      * itself is not modified.
      */
     private Map<String, Object> deriveInputs(List<Field> list, Map<String, Object> data) {
+        data = TimeField.expandParts(list, data);                 // PS-615 (CR-2026-186)
         Map<String, Object> derived = new LinkedHashMap<>(data);
         if (rec != null) recordedInputs(list, data, derived);                   // PS-573
         for (Field f : list) {
@@ -3051,6 +3060,11 @@ final class Encoder {
      * reaches integer parsing as "Class A".
      */
     private Object reverseModifiers(Object value, Field field) {
+        if (TimeField.isTimeField(field)) {
+            // PS-615 (CR-2026-186): the value in its format, as the count of seconds since the
+            // epoch that PS-610 reads; the modifiers below then invert.
+            value = TimeField.inputSeconds(field, value);
+        }
         // The value as given, for a PS-168 rejection to name (PS-552).
         givenField = field;
         givenValue = value;
