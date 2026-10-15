@@ -2630,15 +2630,20 @@ def decode_ascii(name: Any, raw: bytes, warnings: List[str], nul: str = 'trailin
     return apply_nul_mode(raw.decode('latin-1'), nul)
 
 
-def terminated_span(field_def: Dict[str, Any], buf: bytes, pos: int) -> int:
-    """PS-593: the number of bytes of text before the field's terminator; a payload that
-    ends before one is an underflow, which the field names (PS-535)."""
+def terminated_span(field_def: Dict[str, Any], buf: bytes, pos: int) -> Tuple[int, int]:
+    """PS-593, PS-619: the number of bytes of text before the field's terminator, and the
+    number of terminator bytes the field consumes after it (1, or 0 with
+    `consume_terminator: false` or where the end of the data ended the text). A payload
+    that ends before one is an underflow, which the field names (PS-535), unless the field
+    declares `end_terminates: true`; `buf` ends at any reserve or tlv entry's end."""
     terminator = field_def['terminator']
     end = buf.find(bytes([terminator]), pos)
     if end < 0:
-        raise BufferUnderflow(f"no terminator byte 0x{terminator:02X} before the end of "
-                              f"the payload (PS-593)")
-    return end - pos
+        if field_def.get('end_terminates') is not True:
+            raise BufferUnderflow(f"no terminator byte 0x{terminator:02X} before the end "
+                                  f"of the payload (PS-593)")
+        return max(len(buf) - pos, 0), 0                                # PS-619
+    return end - pos, (0 if field_def.get('consume_terminator') is False else 1)
 
 
 #: PS-560: the whole text of a `numeral` field, by base.
@@ -2811,7 +2816,8 @@ def bitfield_part_errors(node, _top=True):
 
 def encode_ascii(name: Any, value: Any, length: Optional[int],
                  warnings: List[str], nul: str = 'trailing',
-                 terminator: Optional[int] = None) -> bytes:
+                 terminator: Optional[int] = None,
+                 consume_terminator: bool = True) -> bytes:
     """PS-537: a character above U+00FF, or a value longer than a fixed `length`, is
     rejected naming the field; U+0080..U+00FF is written as the byte of the same number
     with a warning; a short value is padded with 0x00. `length` is None where the field's
@@ -2834,8 +2840,10 @@ def encode_ascii(name: Any, value: Any, length: Optional[int],
     if any(byte > 0x7F for byte in encoded):
         warnings.append(f"Field '{name}': a character above U+007F in an ascii value "
                         f"(PS-537)")
+    if terminator is not None and not consume_terminator:
+        return encoded                    # PS-620: the field after it writes the terminator
     if terminator is not None:
-        return encoded + bytes([terminator])                           # PS-595
+        return encoded + bytes([terminator])                           # PS-595, PS-620
     if length is None:
         return encoded
     return encoded + b'\x00' * (length - len(encoded))
@@ -3852,6 +3860,14 @@ def ascii_text_errors(node, _top=True):
                     if 'length' in node:
                         errors.append(f"Field '{name}': an ascii field declares length or "
                                       f"terminator, not both (PS-593)")
+        if 'type' in node and ('consume_terminator' in node or 'end_terminates' in node):
+            name = node.get('name')
+            if 'terminator' not in node:                                 # PS-619
+                errors.append(f"Field '{name}': consume_terminator and end_terminates "
+                              f"belong to a field with a terminator (PS-619)")
+            for key in ('consume_terminator', 'end_terminates'):
+                if key in node and not isinstance(node[key], bool):
+                    errors.append(f"Field '{name}': {key} is true or false (PS-619)")
         if (str(node.get('type')).lower() == 'ascii' and 'length' not in node
                 and 'terminator' not in node):
             errors.append(f"Field '{node.get('name')}': ascii type requires 'length' field, "
@@ -6240,9 +6256,9 @@ class SchemaInterpreter:
             return field_def['value'], pos
 
         if field_type == 'ascii':
-            terminated = field_def.get('terminator') is not None
-            if terminated:
-                length = terminated_span(field_def, buf, pos)            # PS-593
+            terminated = 0
+            if field_def.get('terminator') is not None:
+                length, terminated = terminated_span(field_def, buf, pos)  # PS-593, PS-619
             else:
                 length = resolve_length(field_def, buf, pos, variables=self._variables)
             if pos + length > len(buf):
@@ -6253,7 +6269,7 @@ class SchemaInterpreter:
                 value = decode_numeral(field_def.get('name'), value, field_def['numeral'])
             if is_echo(field_def):                                       # PS-588
                 return value, pos
-            return value, pos + length + (1 if terminated else 0)
+            return value, pos + length + terminated
         
         # `hex:upper` is a `bytes` format (PS-079), not a type (CR-2026-037), so it
         # falls through to the unknown-type error below.
@@ -7665,7 +7681,11 @@ class SchemaInterpreter:
             pushed = (self._trace.push(tlv_def, 'tlv', entry_index)
                       if self._trace is not None else False)
             try:
-                tag_result, pos = self._decode_nested_list(matched_fields, buf, pos)
+                # PS-486, PS-619: an entry with a length is decoded within it, so the
+                # end of the entry is the end of the data for its value (a terminated
+                # `end_terminates` text stops there), as the prototype's sub-context.
+                entry_buf = buf if data_length is None else buf[:pos + data_length]
+                tag_result, pos = self._decode_nested_list(matched_fields, entry_buf, pos)
             finally:
                 if self._trace is not None:
                     self._trace.pop(pushed)
@@ -10673,7 +10693,8 @@ class SchemaInterpreter:
                                        field_def['numeral'])
             return encode_ascii(field_def.get('name'), value, fixed,
                                 self._encode_warnings, field_def.get('nul', 'trailing'),
-                                field_def.get('terminator') if field_type == 'ascii' else None)
+                                field_def.get('terminator') if field_type == 'ascii' else None,
+                                field_def.get('consume_terminator') is not False)
         
         if field_type in ('hex', 'base64'):
             # PS-601 and PS-602 apply to the hex and base64 types as to `bytes` with that

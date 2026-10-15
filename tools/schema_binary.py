@@ -200,6 +200,8 @@ C_UNSUPPORTED_KEYS = {
     "encoding": "the C interpreter has no sign_magnitude/bcd/gray encodings",
     "nul": "the C interpreter has no nul modes on ascii (PS-534)",
     "terminator": "the C interpreter has no terminator-delimited ascii (PS-593)",
+    "consume_terminator": "the C interpreter has no terminator-delimited ascii (PS-619)",
+    "end_terminates": "the C interpreter has no terminator-delimited ascii (PS-619)",
     "numeral": "the C interpreter holds ascii text, not the integer it spells (PS-560)",
     # CR-2026-174: the C interpreter checks and computes one (field_set_checksum), but a
     # field record has no slot for its algorithm, seed, `from` or `on_mismatch`.

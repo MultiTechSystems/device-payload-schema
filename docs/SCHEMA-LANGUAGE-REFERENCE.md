@@ -171,9 +171,21 @@ holding 0x00 under `stop` is rejected; `drop` does not round-trip a dropped 0x00
 value followed by its terminator, with no padding and no fill for a `numeral`; a value holding the
 terminator is rejected (PS-595).
 
+A field with `terminator` may also declare `consume_terminator: false`, which stops before the
+terminator and leaves it for the next field to read, and an encoder then does not write it; and
+`end_terminates: true`, with which the end of the data (the payload less any `reserve`, or a tlv
+entry's declared length) ends the text too, an empty text being `""` (PS-619). Without
+`end_terminates`, reaching the end is still PS-593's error. Unless `consume_terminator: false`,
+an encoder writes the terminator even under `end_terminates`, so a frame that ended without one
+re-encodes with it (PS-620). Either key without `terminator`, or with a value other than true or
+false, is rejected at load.
+
 ```yaml
 - {name: model, type: ascii, length: 8, nul: stop}   # 45 4D 33 31 30 00 58 59 -> "EM310"
 - {name: version, type: ascii, terminator: 0x00}     # 31 2E 32 00 -> "1.2"
+# Each element: a channel byte, then a name up to the next 0xFF channel byte or the end.
+# FF 45 4D 34 33 30 31 FF 58 -> [{channel: 255, model: "EM4301"}, {channel: 255, model: "X"}]
+- {name: model, type: ascii, terminator: 0xFF, consume_terminator: false, end_terminates: true}
 ```
 
 A `bytes` field reports a **lowercase** hex string by default (PS-281). Its `format:` is

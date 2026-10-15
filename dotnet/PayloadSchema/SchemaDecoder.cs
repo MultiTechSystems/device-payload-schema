@@ -652,11 +652,13 @@ public static class SchemaDecoder
 
             case FieldType.Ascii:
             {
-                if (field.Terminator != null) length = AsciiText.TerminatedSpan(field, ctx);   // PS-593
+                int consumed = 0;
+                if (field.Terminator != null)                                   // PS-593, PS-619
+                    (length, consumed) = AsciiText.TerminatedSpan(field, ctx);
                 int start = ctx.Offset;
                 var data = ctx.Read(length);
                 if (field.IsEcho) ctx.Offset = start;              // PS-588 (CR-2026-175)
-                else if (field.Terminator != null) ctx.Offset++;   // consumed, not reported
+                else ctx.Offset += consumed;                       // consumed, not reported, or left
                 value = Helpers.DecodeAscii(field.Name, data, ctx.Warnings, field.Nul);
                 if (field.Numeral != null)
                     value = Numeral.Decode(field.Name, (string)value, field.Numeral);   // PS-560
@@ -1719,7 +1721,14 @@ public static class SchemaDecoder
                 var caseFields = field.TLVCases[caseKey];
                 Dictionary<string, object?> caseResult;
                 var pushed = ctx.Trace?.Push(field.Anchor, "tlv", entryIndex) ?? false;
-                try { caseResult = DecodeFields(caseFields, ctx, null); }
+                // PS-486, PS-619: an entry with a length is decoded within it, so the end of
+                // the entry is the end of the data for its value.
+                try
+                {
+                    caseResult = dataLength >= 0
+                        ? ctx.WithRegion(ctx.Offset + dataLength, () => DecodeFields(caseFields, ctx, null))
+                        : DecodeFields(caseFields, ctx, null);
+                }
                 finally { ctx.Trace?.Pop(pushed); }
 
                 if (merge)

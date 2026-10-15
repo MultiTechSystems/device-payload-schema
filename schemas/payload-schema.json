@@ -46,6 +46,14 @@
           "maximum": 255,
           "description": "On an ascii field, in place of length: the byte that ends the text. It is consumed and not reported (PS-593, PS-595)."
         },
+        "consume_terminator": {
+          "type": "boolean",
+          "description": "With terminator: false leaves the terminator unread for the next field, and an encoder does not write it (PS-619, PS-620)."
+        },
+        "end_terminates": {
+          "type": "boolean",
+          "description": "With terminator: true lets the end of the data (less any reserve, or a tlv entry's end) end the text too, which is then not an error (PS-619)."
+        },
         "checksum": {
           "type": "object",
           "description": "On an unsigned integer field: the check value over the bytes from `from` to the byte before it, verified on decode and computed on encode (PS-585 to PS-587).",

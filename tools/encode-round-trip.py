@@ -97,6 +97,10 @@ The `inherent` reasons, each of which is a decision recorded elsewhere:
                     to write back (PS-595: "a decode followed by an encode may differ from the
                     original frame"). Judged from the schema: an ascii field with either mode
                     in a vector that does not re-encode.
+  end-terminated    An `ascii` field declared `end_terminates: true` with a consumed terminator
+                    (PS-619, PS-620, CR-2026-188). A frame whose text the end ended carries
+                    no terminator, and an encoder writes one, so the re-encoded frame is a
+                    byte longer. Judged from the schema, as nul-mode is.
   checksum-mismatch A checksum declaring `on_mismatch: warn` did not match its frame, and
                     the decode warned and reported the rest (PS-586, CR-2026-174). An
                     encoder computes the check value over the bytes it writes (PS-587), so
@@ -147,6 +151,7 @@ INHERENT = (
     "shared-label",
     "negative-zero",
     "nul-mode",
+    "end-terminated",
     "checksum-mismatch",
 )
 
@@ -275,6 +280,19 @@ def zero_floats(schema, data, port=None):
             and not isinstance(data.get(f["name"]), bool) and data[f["name"]] == 0]
 
 
+def end_terminated_fields(schema, port=None):
+    """Top-level ascii fields that the end of the data may end and that write their
+    terminator on encode (PS-619, PS-620)."""
+    fields = schema.get("fields") or []
+    ports = schema.get("ports") or {}
+    if ports:
+        entry = ports.get(port, ports.get(str(port), ports.get("default")))
+        fields = (entry or {}).get("fields") or [] if isinstance(entry, dict) else []
+    return [f["name"] for f in fields
+            if isinstance(f, dict) and f.get("type") == "ascii" and f.get("name")
+            and f.get("end_terminates") is True and f.get("consume_terminator") is not False]
+
+
 def nul_mode_fields(schema, port=None):
     """Top-level ascii fields declared `nul: stop` or `nul: drop` (PS-534, PS-595)."""
     fields = schema.get("fields") or []
@@ -319,6 +337,8 @@ def classify(decoded, traits, schema=None, port=None):
         return "negative-zero"                                           # PS-566
     if schema is not None and nul_mode_fields(schema, port):
         return "nul-mode"                                                # PS-534, PS-595
+    if schema is not None and end_terminated_fields(schema, port):
+        return "end-terminated"                                          # PS-619, PS-620
     return None
 
 
