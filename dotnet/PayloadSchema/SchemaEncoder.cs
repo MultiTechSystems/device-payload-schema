@@ -1586,8 +1586,20 @@ public static class SchemaEncoder
             if (field.Trailer is { Count: > 0 })
             {
                 var trailer = EncodeFieldList(field.Trailer, data);
-                FrameMeta.Check(trailer, MetaOf(trailer));                      // PS-551
+                var trailerMeta = MetaOf(trailer);
+                FrameMeta.Check(trailer, trailerMeta);                          // PS-551
+                int elements = output.Count;
                 output.AddRange(trailer);
+                if (trailerMeta is { Checksums.Count: > 0 })
+                {
+                    // CR-2026-185 (PS-608): a checksum in the trailer is filled with the frame,
+                    // at its offset after the elements.
+                    var withTrailer = output.ToArray();
+                    _frameBytes = withTrailer;
+                    _framePending = 0;
+                    _frameMeta = FrameMeta.Prefixed(elements, trailerMeta, trailer.Length);
+                    return withTrailer;
+                }
             }
             return output.ToArray();
         }

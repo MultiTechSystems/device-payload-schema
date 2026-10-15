@@ -2068,8 +2068,8 @@ static void test_a_checksum_range_starts_before_its_field(void) {
     decode_result_t r;
     const uint8_t frame[] = {0x01, 0x09};
     TCHECK(schema_decode(&s, frame, sizeof(frame), &r) == SCHEMA_ERR_CHECKSUM);
-    TCHECK(strcmp(r.error_msg, "Field 'c': the checksum range starts at byte 5, after the "
-                  "field at byte 1 (PS-585)") == 0);
+    TCHECK(strcmp(r.error_msg, "Field 'c': the checksum range starts at byte 5, at or after "
+                  "the field at byte 1, so it covers nothing (PS-608)") == 0);
     encode_inputs_t in;
     encode_result_t out;
     encode_inputs_init(&in);
@@ -2120,24 +2120,8 @@ static void test_a_checksum_in_a_case_body(void) {
     TCHECK(schema_encode(&s, &in, &out) == SCHEMA_OK);
     TCHECK(out.len == 3 && out.data[0] == 1 && out.data[1] == 5 && out.data[2] == 4);
 
-    /* Decode: a tlv case, whose range counts the tag before it. */
-    memset(&s, 0, sizeof(s));
-    s.endian = ENDIAN_BIG;
-    field_def_t t = field_tlv(1, 0);
-    field_add_tlv_case(&t, 7, 1, 2);
-    schema_add_field(&s, &t);
-    v = field_u8("v");
-    c = checked_u8("c", "sum8", false, 0, 0, NULL);
-    schema_place_field(&s, 1, &v);
-    schema_place_field(&s, 2, &c);
-    decode_result_t r;
-    const uint8_t good[] = {0x07, 0x05, 0x0c};
-    TCHECK(schema_decode(&s, good, sizeof(good), &r) == SCHEMA_OK);
-    TCHECK(r.field_count == 2 && r.fields[1].value.i64 == 12);
-    const uint8_t bad[] = {0x07, 0x05, 0x0d};
-    TCHECK(schema_decode(&s, bad, sizeof(bad), &r) == SCHEMA_ERR_CHECKSUM);
-    TCHECK(strcmp(r.error_msg, "Field 'c': sum8 over bytes 0 to 1 is 0xC, but the frame "
-                  "carries 0xD (PS-586)") == 0);
+    /* A tlv case: refused since CR-2026-185 (PS-608), see
+     * test_a_checksum_range_that_covers_nothing. */
 }
 
 static void test_a_checksum_declaration_is_checked(void) {
@@ -2187,7 +2171,7 @@ static void test_a_checksum_declaration_is_checked(void) {
     TCHECK(f.checksum_algo == SCHEMA_CHECKSUM_CRC16_KERMIT && f.checksum_from == 3
            && f.checksum_warn);
 
-    /* A byte_group member cannot carry one: refused, not dropped (PS-446). */
+    /* A byte_group member cannot carry one (PS-608, CR-2026-185). */
     schema_t s;
     memset(&s, 0, sizeof(s));
     s.endian = ENDIAN_BIG;
@@ -2198,7 +2182,47 @@ static void test_a_checksum_declaration_is_checked(void) {
     decode_result_t r;
     const uint8_t frame[] = {0x00};
     TCHECK(schema_decode(&s, frame, sizeof(frame), &r) == SCHEMA_ERR_TYPE);
-    TCHECK(strstr(r.error_msg, "declares a checksum") != NULL);
+    TCHECK(strcmp(r.error_msg, "Field 'c': a checksum field cannot sit within a byte_group; "
+                  "its `from` counts from the frame (PS-608)") == 0);
+}
+
+/* CR-2026-185 (PS-608): an empty covered range is an error on decode and encode, and a
+ * checksum in a tlv entry is refused where the decode reaches it. */
+static void test_a_checksum_range_that_covers_nothing(void) {
+    schema_t s;
+    memset(&s, 0, sizeof(s));
+    s.endian = ENDIAN_BIG;
+    field_def_t f = field_u8("a");
+    schema_add_field(&s, &f);
+    f = checked_u8("c", "xor8", false, 0, 1, NULL);
+    schema_add_field(&s, &f);
+    decode_result_t r;
+    const uint8_t frame[] = {0x07, 0x00};
+    TCHECK(schema_decode(&s, frame, sizeof(frame), &r) == SCHEMA_ERR_CHECKSUM);
+    TCHECK(strcmp(r.error_msg, "Field 'c': the checksum range starts at byte 1, at or after "
+                  "the field at byte 1, so it covers nothing (PS-608)") == 0);
+    encode_inputs_t in;
+    encode_result_t out;
+    encode_inputs_init(&in);
+    encode_inputs_add_int(&in, "a", 7);
+    TCHECK(schema_encode(&s, &in, &out) == SCHEMA_ERR_CHECKSUM);
+    TCHECK(out.len == 0);
+    TCHECK(strcmp(out.error_msg, "Field 'c': the checksum range starts at byte 1, where the "
+                  "field is, so it covers nothing (PS-608)") == 0);
+
+    memset(&s, 0, sizeof(s));
+    s.endian = ENDIAN_BIG;
+    field_def_t t = field_tlv(1, 0);
+    field_add_tlv_case(&t, 1, 1, 2);
+    schema_add_field(&s, &t);
+    field_def_t v = field_u8("v");
+    schema_place_field(&s, 1, &v);
+    field_def_t c = checked_u8("c", "xor8", false, 0, 0, NULL);
+    schema_place_field(&s, 2, &c);
+    const uint8_t entry[] = {0x01, 0x05, 0x04};
+    TCHECK(schema_decode(&s, entry, sizeof(entry), &r) == SCHEMA_ERR_CHECKSUM);
+    TCHECK(strcmp(r.error_msg, "Field 'c': a checksum field cannot sit within a tlv entry; "
+                  "its `from` counts from the frame (PS-608)") == 0);
 }
 
 void selftest_schema(void) {
@@ -2274,6 +2298,7 @@ void selftest_schema(void) {
     test_an_outer_checksum_covers_an_inner_one();
     test_a_checksum_range_starts_before_its_field();
     test_a_checksum_in_a_case_body();
+    test_a_checksum_range_that_covers_nothing();
     test_a_checksum_declaration_is_checked();
 
     LOG(LOG_INFO, MOD, "Schema interpreter self-tests complete");
