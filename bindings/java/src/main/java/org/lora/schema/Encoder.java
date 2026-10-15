@@ -1190,8 +1190,16 @@ final class Encoder {
         // PS-385: the elements, then the trailer, whose values sit beside the repeat.
         if (field.getTrailer() != null && !field.getTrailer().isEmpty()) {
             byte[] trailer = encodeFieldList(field.getTrailer(), data);
+            FrameMeta meta = frameMeta.get(trailer);
             checkPeeks(trailer);                                         // PS-551
+            int elements = out.toArray().length;
             out.write(trailer);
+            if (meta != null && !meta.checksums().isEmpty()) {
+                // CR-2026-185 (PS-608): a checksum in the trailer is filled with the frame,
+                // at its offset after the elements.
+                frameMeta.put(trailer, new FrameMeta(null, List.of(), meta.checksums(), List.of()));
+                return prefixed(elements, trailer, out.toArray());
+            }
         }
         return out.toArray();
     }

@@ -151,6 +151,8 @@ public class Schema {
         Sampled.check(raw);
         // CR-2026-174: a checksum on an unsigned integer wide enough for its algorithm (PS-585).
         Checksum.check(raw);
+        // CR-2026-185: a checksum field sits where `from` counts from the frame (PS-608).
+        Checksum.checkPlacement(raw);
         // CR-2026-161: a lookup's labels are of one type (PS-571).
         Reports.check(raw);
         Schema schema = new Schema();

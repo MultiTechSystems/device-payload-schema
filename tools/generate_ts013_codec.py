@@ -1316,8 +1316,10 @@ function encRepeatSize(f, key, data, siblings) {      // _repeat_size
 
 function encRepeatElements(out, f, data, records, count, ctx) {   // _encode_repeat_elements
   // PS-564 is not checked inside a tlv or repeat (tail_unchecked).
+  // A checksum is not placed in an element, encoded apart from the frame (checksum_apart).
   ctx.d564 = (ctx.d564 === undefined ? 1 : ctx.d564) + 1;
-  try { return encRepeatElementsBody(out, f, data, records, count, ctx); } finally { ctx.d564--; }
+  ctx.ckApart = (ctx.ckApart || 0) + 1;
+  try { return encRepeatElementsBody(out, f, data, records, count, ctx); } finally { ctx.d564--; ctx.ckApart--; }
 }
 
 function encRepeatElementsBody(out, f, data, records, count, ctx) {
@@ -1393,6 +1395,9 @@ function encRepeatBody(out, f, data, ctx, siblings) {
     var trailer = [];
     encList(trailer, f.trailer, data, ctx);
     encCheckPeeks(trailer);                              // PS-551
+    // CR-2026-185 (PS-608): a checksum in the trailer is filled at its frame offset.
+    var tbase = out.length;
+    (trailer.ck || []).forEach(function (c) { (out.ck = out.ck || []).push({ p: c.p + tbase, f: c.f, endian: c.endian }); });
     for (var tb = 0; tb < trailer.length; tb++) out.push(trailer[tb]);
   }
 }
@@ -1648,7 +1653,8 @@ function encMatchClaims(m) {
 function encTlv(out, f, data, ctx) {                  // _encode_tlv
   // PS-564 is not checked inside a tlv or repeat (tail_unchecked).
   ctx.d564 = (ctx.d564 === undefined ? 1 : ctx.d564) + 1;
-  try { return encTlvBody(out, f, data, ctx); } finally { ctx.d564--; }
+  ctx.ckApart = (ctx.ckApart || 0) + 1;                // nor in a tlv entry (checksum_apart)
+  try { return encTlvBody(out, f, data, ctx); } finally { ctx.d564--; ctx.ckApart--; }
 }
 
 function encTlvBody(out, f, data, ctx) {
@@ -1945,8 +1951,9 @@ function encChecksumUnwritten(name) {                  // checksum_unwritten_mes
 }
 
 function encChecksumPlaceholder(out, f, fr, ctx) {    // _checksum_placeholder
-  // A tlv entry or a repeat element or trailer is encoded apart from the frame.
-  if (fr.pend.length || ctx.d564) encFail(encChecksumUnwritten(f.name));
+  // A tlv entry or a repeat element is encoded apart from the frame (PS-608 rejects both
+  // at load); a repeat's trailer is placed at its frame offset (CR-2026-185).
+  if (fr.pend.length || ctx.ckApart) encFail(encChecksumUnwritten(f.name));
   var endian = (f.endian === "little" || f.endian === "big") ? f.endian : ctx.endian;
   out.ck = out.ck || [];
   out.ck.push({ p: out.length, f: f, endian: endian });
@@ -1958,6 +1965,8 @@ function encFillChecksums(out, ctx) {                 // fill_checksums
   (out.ck || []).slice().sort(function (a, b) { return a.p - b.p; }).forEach(function (c) {
     var spec = c.f.checksum, from = spec["from"] || 0, size = ENC_CK_SIZE[c.f.type];
     if (from > c.p) encFail(encChecksumUnwritten(c.f.name));
+    // PS-608 (CR-2026-185): a range starting where the field is covers nothing.
+    if (from === c.p) encFail("Field '" + c.f.name + "': the checksum range starts at byte " + from + ", where the field is, so it covers nothing (PS-608)");
     var v = checksumOf(spec["algo"], out, from, c.p, spec["seed"] || 0);
     for (var i = 0; i < size; i++) {
       var shift = c.endian === "little" ? i : size - 1 - i;
@@ -2541,7 +2550,7 @@ function encListIn(out, fields, data, ctx, top, entry) {
 
 function encodeRoot(fields, data, endian) {
   // wa: PS-537's warnings, reported after the others as the reference reports them.
-  var ctx = { endian: endian, w: [], wa: [], t564: [], d564: 0, ckOpen: [] }, out = [];
+  var ctx = { endian: endian, w: [], wa: [], t564: [], d564: 0, ckApart: 0, ckOpen: [] }, out = [];
   ENC_SCOPE = fields;
   if (data && typeof data === "object" && ("_decode" in data || "_meta" in data)) {
     // PS-573: a decode record given in the input as `_decode`; `_meta` is not input.
@@ -3290,31 +3299,19 @@ function normMeasurement(plan, data, warnings) {
   return out;
 }
 function normEmpty(o) { for (var k in o) { return false; } return true; }
-function normalizeUplink(input) {
-  var d = (input && input.data) || {}, warnings = [], msgs = NORMALIZE_PLAN.messages, chosen = null;
-  var fPort = input ? input.fPort : undefined;
-  if (!NORMALIZE_PLAN.ports) {
-    chosen = msgs.length ? msgs[0] : null;
-  } else if (fPort !== undefined && fPort !== null) {
-    for (var i = 0; i < msgs.length && !chosen; i++) if (msgs[i].port === String(fPort)) chosen = msgs[i];
-    for (var j = 0; j < msgs.length && !chosen; j++) if (msgs[j].port === 'default') chosen = msgs[j];
-  } else {
-    var declared = {};
-    msgs.forEach(function (m) { m.names.forEach(function (n) { declared[n] = true; }); });
-    var fits = msgs.filter(function (m) {
-      if (m.open) return true;
-      for (var k in d) {
-        if (Object.prototype.hasOwnProperty.call(declared, k) && m.names.indexOf(k) < 0) return false;
-      }
-      return true;
-    });
-    var shapes = {};
-    fits.forEach(function (m) { shapes[m.shape] = true; });
-    if (Object.keys(shapes).length === 1) chosen = fits[0];
-    else if (fits.length) warnings.push('normalizeUplink cannot tell which port entry decoded this data; nothing is placed (PS-598)');
+function normSame(a, b) {                       // placements compared as values (PS-609)
+  if (a === b) return true;
+  if (typeof a !== 'object' || typeof b !== 'object' || a === null || b === null) return false;
+  if (Array.isArray(a) !== Array.isArray(b)) return false;
+  var ka = Object.keys(a), kb = Object.keys(b);
+  if (ka.length !== kb.length) return false;
+  for (var i = 0; i < ka.length; i++) {
+    if (!Object.prototype.hasOwnProperty.call(b, ka[i]) || !normSame(a[ka[i]], b[ka[i]])) return false;
   }
-  if (!chosen) return { data: {}, warnings: warnings };
-  var base = normMeasurement(chosen.plan, d, warnings), measurements = [];
+  return true;
+}
+function normMessage(chosen, d) {               // the reference's _run_message()
+  var warnings = [], base = normMeasurement(chosen.plan, d, warnings), measurements = [];
   chosen.repeats.forEach(function (r) {
     var list = normAt(d, r.at);
     if (!Array.isArray(list)) return;
@@ -3325,6 +3322,34 @@ function normalizeUplink(input) {
   });
   if (measurements.length) return { data: (normEmpty(base) ? [] : [base]).concat(measurements), warnings: warnings };
   return { data: base, warnings: warnings };
+}
+function normalizeUplink(input) {
+  var d = (input && input.data) || {}, msgs = NORMALIZE_PLAN.messages, chosen = null;
+  var fPort = input ? input.fPort : undefined;
+  if (!NORMALIZE_PLAN.ports) {
+    return msgs.length ? normMessage(msgs[0], d) : { data: {}, warnings: [] };
+  }
+  if (fPort !== undefined && fPort !== null) {
+    for (var i = 0; i < msgs.length && !chosen; i++) if (msgs[i].port === String(fPort)) chosen = msgs[i];
+    for (var j = 0; j < msgs.length && !chosen; j++) if (msgs[j].port === 'default') chosen = msgs[j];
+    return chosen ? normMessage(chosen, d) : { data: {}, warnings: [] };
+  }
+  // PS-609 (CR-2026-185): no FPort. The candidates are the uplink messages reporting every
+  // key of the data; where they all place the same values, that placement is used.
+  // A `_` key (`_quality`) is interpreter metadata, not a reported field (PS-433).
+  var ports = [], results = [], keys = (typeof d === 'object' && !Array.isArray(d))
+    ? Object.keys(d).filter(function (k) { return k.charAt(0) !== '_'; }) : [];
+  msgs.forEach(function (m) {
+    for (var k = 0; k < keys.length; k++) if (m.names.indexOf(keys[k]) < 0) return;
+    ports.push(m.port);
+    results.push(normMessage(m, d));
+  });
+  var agree = results.length > 0;
+  for (var r = 1; r < results.length && agree; r++) agree = normSame(results[0].data, results[r].data);
+  if (agree) return results[0];
+  var why = results.length ? 'FPorts ' + ports.join(', ') + ' would place the values differently'
+    : 'no uplink port entry reports every key of the data';
+  return { data: {}, warnings: ['no FPort given and ' + why + '; nothing is placed (PS-609)'] };
 }
 '''
 
@@ -3823,7 +3848,8 @@ function checksumOf(algo, buf, from, to, seed) {
  * on_mismatch: warn a warning. */
 function checkChecksum(buf, at, carried, spec, name, wn) {
   var from = spec["from"] || 0;
-  if (from > at) throw new Error("Field '" + name + "': the checksum range starts at byte " + from + ", after the field at byte " + at + " (PS-585)");
+  // PS-608 (CR-2026-185): a range starting at or after the field covers nothing.
+  if (from >= at) throw new Error("Field '" + name + "': the checksum range starts at byte " + from + ", at or after the field at byte " + at + ", so it covers nothing (PS-608)");
   var v = checksumOf(spec["algo"], buf, from, at, spec["seed"] || 0), got = Number(carried);
   if (v === got) return;
   var msg = "Field '" + name + "': " + spec["algo"] + " over bytes " + from + " to " + (at - 1) + " is 0x" +

@@ -54,15 +54,18 @@ PS-587). It declares `checksum`, a mapping:
 |-----|---------|
 | `algo` | `sum8` (sum of the bytes, modulo 256), `xor8` (the bytes XORed), `crc8/smbus` (poly 0x07, init 0, not reflected) or `crc16/kermit` (poly 0x1021 reflected, init 0) |
 | `seed` | starting value of `sum8` or `xor8`, 0 to 255 (default 0); not allowed with a CRC |
-| `from` | byte offset in the frame where the covered range starts (default 0) |
+| `from` | byte offset where the covered range starts, counted from the frame's first byte wherever the field sits (default 0) |
 | `on_mismatch` | `error` (default): the decode fails; `warn`: a warning, and the rest is reported |
 
 The covered range runs from `from` to the byte before the field. A decoder compares the
 value read (in the field's type and byte order) with the checksum of that range; an encoder
-computes it over the bytes it wrote and ignores any input value. A checksum inside a tlv
-entry or a repeat element cannot be encoded (its range is not written when it is reached).
-A type other than `uN`, an unknown `algo`, a `seed` with a CRC, or a type too narrow for
-the result (`u8` for `crc16/kermit`) is rejected at load.
+computes it over the bytes it wrote and ignores any input value. A checksum field may sit at
+the top level, in a port entry, in a match case, in a flagged group, and after a construct
+that declares `reserve` - a repeat's `trailer` included; one that is a byte_group member, or
+sits within a tlv entry, a `records` entry or a repeat element, is rejected at load
+(PS-608). A range that covers nothing (`from` at or past the field) is a decode error and an
+encode rejection (PS-608). A type other than `uN`, an unknown `algo`, a `seed` with a CRC,
+or a type too narrow for the result (`u8` for `crc16/kermit`) is rejected at load.
 
 ```yaml
 - {name: _counter, type: u8}
@@ -1608,6 +1611,11 @@ TTN's unit (PS-598, PS-599): it converts °F, mV, Pa/kPa/bar/inHg, km/h/mph/knot
 fraction (`/`), and otherwise leaves the value out with a warning - a field with no `unit`
 on a path that has one included, and every value on a path two fields declare. So declare
 `unit` beside `semantic`, and do not put a battery in % on `battery`, which is in V.
+TTN calls `normalizeUplink()` with no FPort (PS-609, CR-2026-185): for a schema with
+`ports`, an `fPort` in its input selects the entry; otherwise the candidates are the uplink
+entries reporting every key of the data, and their placement is used where they all place
+the same values, else nothing is placed, with a warning naming the FPorts or saying none
+fits.
 
 All three are needed for the semantic points in `tools/score_schema.py`; see
 `schemas/devices/decentlab/dl-5tm.yaml` for the canonical form. A bare `ipso: 3303` is
