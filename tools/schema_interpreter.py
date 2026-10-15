@@ -284,9 +284,13 @@ class Frame(bytes):
     pending, so the field after the construct shares them, as a decoder reads it: vobo's
     digital inputs peek a word inside a flagged block that the field after it reads."""
 
-    def __new__(cls, data=b'', pending=0, covered=None, peeks=None, echoes=None):
+    def __new__(cls, data=b'', pending=0, covered=None, peeks=None, checksums=None,
+                echoes=None):
         frame = super().__new__(cls, data)
         frame.pending = pending
+        # PS-587 (CR-2026-174): each checksum written as a placeholder, (position, field,
+        # byteorder), computed where the whole frame is known (`fill_checksums`).
+        frame.checksums = checksums or []
         # CR-2026-141 (PS-551): per byte, the bits some field wrote (None: all of them),
         # and each bit range or bool placed, for the check where the frame closes.
         frame.covered = covered
@@ -321,7 +325,35 @@ def prefixed_frame(prefix: bytes, body) -> 'Frame':
     return Frame(bytes(prefix) + bytes(body), getattr(body, 'pending', 0),
                  b'\xff' * shift + frame_covered(body),
                  [(p[0] + shift,) + tuple(p[1:]) for p in frame_peeks(body)],
-                 [(e[0] + shift,) + tuple(e[1:]) for e in frame_echoes(body)])
+                 [(c[0] + shift,) + tuple(c[1:]) for c in frame_checksums(body)],
+                 echoes=[(e[0] + shift,) + tuple(e[1:]) for e in frame_echoes(body)])
+
+
+def frame_checksums(data) -> list:
+    """The checksum placeholders in `data`, (position, field, byteorder) (CR-2026-174)."""
+    return list(getattr(data, 'checksums', None) or [])
+
+
+def fill_checksums(frame: bytes, placed: list, written: Optional[list] = None) -> bytes:
+    """PS-587 (CR-2026-174): compute each checksum over the bytes of the finished frame
+    from its `from` to the byte before it, earliest first, so an outer checksum covers an
+    inner one's value. A range starting past the field is rejected."""
+    out = bytearray(frame)
+    for position, field_def, order in sorted(placed, key=lambda c: c[0]):
+        spec = field_def['checksum']
+        start = int(spec.get('from', 0))
+        if start > position:
+            raise FieldError(checksum_unwritten_message(field_def.get('name')))
+        value = compute_checksum(spec['algo'], bytes(out[start:position]),
+                                 int(spec.get('seed', 0)))
+        size = CHECKSUM_WIDTHS[field_def['type']] // 8
+        out[position:position + size] = value.to_bytes(size, order)
+        if written is not None:
+            for i, f in enumerate(written):
+                if f is field_def:
+                    del written[i]
+                    break
+    return bytes(out)
 
 
 #: The byte strings a `consume: 0` re-reads (PS-588, CR-2026-175).
@@ -465,6 +497,7 @@ class FrameBuffer:
         # range or bool placed (see Frame).
         self.covered = bytearray()
         self.peeks = []
+        self.checksums = []         # PS-587 (CR-2026-174), as Frame
         self.echoes = []        # CR-2026-175 (PS-589): see Frame.echoes
 
     def echo(self, field_def, data) -> None:
@@ -487,6 +520,7 @@ class FrameBuffer:
         offset = len(self.buf)
         covered = frame_covered(data)
         peeks = frame_peeks(data)
+        checksums = frame_checksums(data)
         self.echoes.extend((e[0] + offset,) + tuple(e[1:]) for e in frame_echoes(data))
         data = bytes(data)
         if self.pending and data and any(
@@ -496,6 +530,7 @@ class FrameBuffer:
             raise ValueError(peek_disagreement(self.peeks, bytes(self.buf) + data))
         self.cover(offset, covered)
         self.peeks.extend((p[0] + offset,) + tuple(p[1:]) for p in peeks)
+        self.checksums.extend((c[0] + offset,) + tuple(c[1:]) for c in checksums)
         if self.pending and data:
             shared = min(len(self.pending), len(data))
             data = bytes(b | self.pending[i] if i < shared else b
@@ -542,7 +577,7 @@ class FrameBuffer:
         size = len(self.buf) + len(self.pending)
         covered = bytes(self.covered[:size]).ljust(size, b'\0')
         return Frame(bytes(self.buf + self.pending), len(self.pending), covered,
-                     list(self.peeks), list(self.echoes))
+                     list(self.peeks), list(self.checksums), list(self.echoes))
 
 
 def is_peek_field(field_def) -> bool:
@@ -1950,6 +1985,11 @@ def annotation_errors(field_def):
                       f"{{object: 3303}}; a bare object number is not a shorthand (PS-510)")
     if 'senml' in field_def and not isinstance(field_def['senml'], dict):
         errors.append(f"The senml of '{name}' is a mapping, such as {{unit: Cel}} (PS-510)")
+    if 'semantic' in field_def and not isinstance(field_def['semantic'], str):
+        # PS-470 (CR-2026-179): a TTN normalized path, so a string; the legacy
+        # `semantic: {ipso: N}` is withdrawn with it, `ipso:` being the IPSO annotation.
+        errors.append(f"The semantic of '{name}' is a string naming a normalized "
+                      f"measurement type, such as air.temperature (PS-470)")
     return errors
 
 
@@ -1957,8 +1997,8 @@ def annotation_schema_errors(node, _top=True):
     """annotation_errors() for every field mapping, wherever it sits: a port list, a case
     body, an object's or repeat's members, a byte_group or flagged group. Walked like
     arithmetic_schema_errors(), over the schema after its `$ref`s are spliced, and over
-    `definitions` too, referenced or not, as Go and C# parse them. The legacy
-    `semantic: {ipso: N}` is a different key, outside PS-510, and is not descended into."""
+    `definitions` too, referenced or not, as Go and C# parse them. An annotation's own
+    contents are not fields and are not descended into."""
     errors = []
     if isinstance(node, dict):
         if not _top:
@@ -2305,7 +2345,12 @@ def reraise_text(text: str) -> ValueError:
         exc = BufferUnderflow(text)
         exc.named = True
         return exc
+    if _NAMED_CHECKSUM.match(text):
+        return FieldError(text)             # PS-585, PS-586: verbatim (CR-2026-174)
     return ValueError(text)
+
+
+_NAMED_CHECKSUM = re.compile(r"^Field '.*\(PS-58[56]\)$", re.S)
 
 
 ASCII_HIGH_BYTE_WARNING = "Field '{}': a byte above 0x7F in an ascii value (PS-073, PS-538)"
@@ -3374,6 +3419,120 @@ def numeral_errors(node, _top=True):
     return errors
 
 
+#: PS-585 (CR-2026-174): each checksum algorithm and the bits its result needs.
+CHECKSUM_ALGOS = {'sum8': 8, 'xor8': 8, 'crc8/smbus': 8, 'crc16/kermit': 16}
+CHECKSUM_KEYS = ('algo', 'seed', 'from', 'on_mismatch')
+#: The unsigned integer types a checksum may be declared on, by width in bits.
+CHECKSUM_WIDTHS = {'u8': 8, 'u16': 16, 'u24': 24, 'u32': 32, 'u64': 64,
+                   'uint8': 8, 'uint16': 16, 'uint24': 24, 'uint32': 32, 'uint64': 64}
+
+
+def compute_checksum(algo: str, data: bytes, seed: int = 0) -> int:
+    """PS-585 (CR-2026-174): the four checksum algorithms. The CRCs are the catalogue
+    entries: over b'123456789', crc8/smbus is 0xF4 and crc16/kermit 0x2189."""
+    if algo == 'sum8':
+        return (seed + sum(data)) & 0xFF
+    if algo == 'xor8':
+        value = seed
+        for b in data:
+            value ^= b
+        return value
+    if algo == 'crc8/smbus':            # poly 0x07, init 0, not reflected, no final XOR
+        crc = 0
+        for b in data:
+            crc ^= b
+            for _ in range(8):
+                crc = ((crc << 1) ^ 0x07) & 0xFF if crc & 0x80 else (crc << 1) & 0xFF
+        return crc
+    if algo == 'crc16/kermit':          # poly 0x1021 reflected (0x8408), init 0, no final XOR
+        crc = 0
+        for b in data:
+            crc ^= b
+            for _ in range(8):
+                crc = (crc >> 1) ^ 0x8408 if crc & 1 else crc >> 1
+        return crc
+    raise ValueError(f"Unknown checksum algorithm {algo!r} (PS-585)")
+
+
+def checksum_field_errors(field: Dict[str, Any]) -> List[str]:
+    """PS-585 (CR-2026-174) for one field declaring `checksum`, in the spec prototype's
+    order and text (key_vocabulary.check_checksum): a mapping of known keys, on an unsigned
+    integer wide enough for its algorithm; `seed` a byte, on sum8 and xor8 only; `from` a
+    byte offset; `on_mismatch` error or warn. The first failure only, as the prototype."""
+    name = field.get('name', '<unnamed>')
+    spec = field['checksum']
+    if not isinstance(spec, dict):
+        return [f"The checksum of '{name}' is a mapping, such as {{algo: xor8}} (PS-585)"]
+    for key in spec:
+        if key not in CHECKSUM_KEYS and key != 'description' \
+                and not str(key).startswith('x-'):
+            return [f"`{key}` is not a key of the checksum of '{name}' (PS-448)"]
+    width = CHECKSUM_WIDTHS.get(field.get('type'))
+    if width is None:
+        return [f"Field '{name}': a checksum is declared on an unsigned integer type "
+                f"(u8 to u64), not {field.get('type')!r} (PS-585)"]
+    algo = spec.get('algo')
+    if algo not in CHECKSUM_ALGOS:
+        return [f"The checksum of '{name}': `algo` is one of "
+                f"{', '.join(sorted(CHECKSUM_ALGOS))}, not {algo!r} (PS-585)"]
+    if width < CHECKSUM_ALGOS[algo]:
+        return [f"Field '{name}': {field['type']} cannot hold a {algo} result (PS-585)"]
+    if 'seed' in spec and algo not in ('sum8', 'xor8'):
+        return [f"The checksum of '{name}': `seed` applies to sum8 and xor8, not {algo} "
+                f"(PS-585)"]
+    seed = spec.get('seed', 0)
+    if not isinstance(seed, int) or isinstance(seed, bool) or not 0 <= seed <= 255:
+        return [f"The checksum of '{name}': `seed` is a byte, 0 to 255 (PS-585)"]
+    start = spec.get('from', 0)
+    if not isinstance(start, int) or isinstance(start, bool) or start < 0:
+        return [f"The checksum of '{name}': `from` is a byte offset, 0 or more (PS-585)"]
+    if spec.get('on_mismatch', 'error') not in ('error', 'warn'):
+        return [f"The checksum of '{name}': `on_mismatch` is `error` or `warn` (PS-586)"]
+    return []
+
+
+def checksum_errors(node, _top=True):
+    """PS-585 (CR-2026-174) over the whole schema, test vectors skipped."""
+    errors = []
+    if isinstance(node, list):
+        for item in node:
+            errors.extend(checksum_errors(item, False))
+    elif isinstance(node, dict):
+        if 'checksum' in node and ('type' in node or 'name' in node):
+            errors.extend(checksum_field_errors(node))
+        for key, value in node.items():
+            if _top and key == 'test_vectors':
+                continue
+            if isinstance(value, (list, dict)):
+                errors.extend(checksum_errors(value, False))
+    return errors
+
+
+def checksum_mismatch(field_def: Dict[str, Any], buf: bytes, start_pos: int,
+                      carried: int) -> Optional[str]:
+    """PS-586: the declared checksum over `buf[from:start_pos]` against the value read.
+    Returns the mismatch message, or None where they agree. A range starting after the
+    field is an error (PS-585)."""
+    spec = field_def['checksum']
+    name = field_def.get('name')
+    start = int(spec.get('from', 0))
+    if start > start_pos:
+        raise FieldError(f"Field '{name}': the checksum range starts at byte {start}, after "
+                         f"the field at byte {start_pos} (PS-585)")
+    computed = compute_checksum(spec['algo'], bytes(buf[start:start_pos]),
+                                int(spec.get('seed', 0)))
+    if computed == carried:
+        return None
+    return (f"Field '{name}': {spec['algo']} over bytes {start} to {start_pos - 1} is "
+            f"0x{computed:X}, but the frame carries 0x{carried:X} (PS-586)")
+
+
+def checksum_unwritten_message(name) -> str:
+    """PS-587: a checksum whose covered range is not fully written when it is reached."""
+    return (f"Field '{name}': the bytes its checksum covers are not all written when it "
+            f"is reached (PS-587)")
+
+
 def schema_iterator_errors(schema):
     """iterator_errors over the top-level and port field lists, and every tlv's reserve.
 
@@ -3383,6 +3542,7 @@ def schema_iterator_errors(schema):
     errors = field_name_errors(schema)
     errors.extend(withdrawn_errors(schema))                          # CR-2026-159
     errors.extend(numeral_errors(schema))                            # PS-560
+    errors.extend(checksum_errors(schema))                           # PS-585
     errors.extend(bitfield_part_errors(schema))                      # PS-430
     errors.extend(lookup_type_errors(schema))                        # PS-571
     errors.extend(iterator_errors(schema.get('fields')))
@@ -4150,6 +4310,8 @@ def field_meta(field_def, repeat=None, siblings=None):
         entry['senml'] = {'name': senml['name']}               # PS-480; a template, PS-373
     if field_def.get('description'):
         entry['description'] = field_def['description']
+    if isinstance(field_def.get('semantic'), str):
+        entry['semantic'] = field_def['semantic']                  # PS-600
     if declared_type == 'repeat' and repeat_members(field_def)[1] is not None:
         # PS-531: the element's own entry, nested, without its name; the repeat keeps
         # `type: repeat` and its identity.
@@ -4304,6 +4466,369 @@ def meta_declaration_errors(schema):
         if isinstance(group, list):
             check(group, 'port %s' % port)
     return errors
+
+
+# =============================================================================
+# TTN normalized payload (CR-2026-179: PS-470, PS-597 to PS-600)
+# =============================================================================
+
+#: The TTN normalized measurement paths and their units, as the spec prototype copies them
+#: (by hand, not fetched) from the `measurement` definition of lib/payload.json in TTN
+#: lorawan-devices at commit 7a0cb2e; keep it in step when TTN extends its schema. None: the
+#: path takes no unit (a boolean, a text, pH).
+TTN_PATHS: Dict[str, Optional[str]] = {
+    'time': None, 'battery': 'V',
+    'soil.depth': 'cm', 'soil.moisture': '%', 'soil.temperature': '°C', 'soil.ec': 'dS/m',
+    'soil.pH': None, 'soil.n': 'ppm', 'soil.p': 'ppm', 'soil.k': 'ppm',
+    'air.location': None, 'air.temperature': '°C', 'air.relativeHumidity': '%',
+    'air.pressure': 'hPa', 'air.co2': 'ppm', 'air.lightIntensity': 'lux',
+    'wind.speed': 'm/s', 'wind.direction': '°',
+    'rain.intensity': 'mm/hour', 'rain.cumulative': 'mm',
+    'water.leak': None, 'water.temperature.min': '°C', 'water.temperature.max': '°C',
+    'water.temperature.avg': '°C', 'water.temperature.current': '°C',
+    'metering.water.total': 'L',
+    'action.motion.detected': None, 'action.motion.count': 'count', 'action.contactState': None,
+    'position.latitude': '°', 'position.longitude': '°',
+}
+
+#: The spellings that already are a path's unit: TTN's own, and its SenML name (Clause 9).
+TTN_UNIT_NAMES: Dict[str, frozenset] = {
+    '°C': frozenset({'°C', 'Cel'}), '%': frozenset({'%', '%RH', '/100'}),
+    'hPa': frozenset({'hPa'}), 'ppm': frozenset({'ppm'}), 'lux': frozenset({'lux', 'lx'}),
+    'm/s': frozenset({'m/s'}), '°': frozenset({'°', 'deg', 'lat', 'lon'}),
+    'mm/hour': frozenset({'mm/hour', 'mm/h'}), 'mm': frozenset({'mm'}),
+    'L': frozenset({'L', 'l'}), 'cm': frozenset({'cm'}), 'V': frozenset({'V'}),
+    'dS/m': frozenset({'dS/m'}), 'count': frozenset({'count'}),
+}
+
+#: PS-599's closed list, by the path's unit and the field's: each a conversion name the
+#: generated codec's normalizeUplink implements identically (TTN_CONVERSION_JS).
+TTN_CONVERSIONS: Dict[str, Dict[str, str]] = {
+    '°C': {'°F': 'degF', 'degF': 'degF'},
+    'V': {'mV': 'mV'},
+    'hPa': {'Pa': 'Pa', 'kPa': 'kPa', 'bar': 'bar', 'inHg': 'inHg'},
+    'm/s': {'km/h': 'km/h', 'mph': 'mph', 'knots': 'knots', 'kn': 'knots', 'kt': 'knots'},
+    '%': {'/': 'fraction'},
+}
+
+#: Each conversion, in the order of operations the generated codec writes it, so both give
+#: the same binary64 result.
+TTN_CONVERSION_FUNCS = {
+    'degF': lambda x: (x - 32) * 5 / 9,
+    'mV': lambda x: x / 1000,
+    'Pa': lambda x: x / 100,
+    'kPa': lambda x: x * 10,
+    'bar': lambda x: x * 1000,
+    'inHg': lambda x: x * 33.86388640341,
+    'km/h': lambda x: x / 3.6,
+    'mph': lambda x: x * 0.44704,
+    'knots': lambda x: x * 1852 / 3600,
+    'fraction': lambda x: x * 100,
+}
+
+
+def ttn_unit_rule(field_def: Dict[str, Any], path: str) -> Tuple[str, Optional[str]]:
+    """How a field's value reaches `path`'s unit (PS-599): ('same', None), ('convert', name)
+    or ('none', why). A field's unit is its `unit` or its `senml.unit`."""
+    target = TTN_PATHS.get(path)
+    if target is None:
+        return ('same', None)
+    senml = field_def.get('senml') if isinstance(field_def.get('senml'), dict) else {}
+    units = [u for u in (field_def.get('unit'), senml.get('unit')) if isinstance(u, str)]
+    if not units:
+        return ('none', f"declares no unit, and {path} is in {target}")
+    if any(u in TTN_UNIT_NAMES.get(target, {target}) for u in units):
+        return ('same', None)
+    for u in units:
+        if u in TTN_CONVERSIONS.get(target, {}):
+            return ('convert', TTN_CONVERSIONS[target][u])
+    return ('none', f"unit {units[0]!r} is not {target} and no rule converts it")
+
+
+def _semantic_fields(fields, prefix=()):
+    """(output path, field) for every field that reports into this object, looking through
+    the merging constructs and into objects; a repeat is yielded as itself, and its elements
+    are walked by the caller. The spec prototype's _semantic_fields."""
+    for item in fields or []:
+        if not isinstance(item, dict):
+            continue
+        if 'type' in item:
+            name = item.get('name')
+            if not isinstance(name, str) or not name or name.startswith('_'):
+                continue
+            if item.get('type') == 'object':
+                yield from _semantic_fields(item.get('fields'), prefix + (name,))
+            else:
+                yield prefix + (name,), item
+            continue
+        spec = next((item[k] for k in ('match', 'tlv', 'flagged', 'byte_group') if k in item),
+                    None)
+        if isinstance(spec, list):
+            for part in spec:
+                yield from _semantic_fields(part if isinstance(part, list) else [part], prefix)
+        elif isinstance(spec, dict):
+            yield from _semantic_fields(spec.get('fields'), prefix)
+            for body in (spec.get('cases') or {}).values():
+                yield from _semantic_fields(body if isinstance(body, list) else None, prefix)
+            default = spec.get('default')
+            yield from _semantic_fields(default if isinstance(default, list) else
+                                        default.get('fields') if isinstance(default, dict)
+                                        else None, prefix)
+            for group in spec.get('groups') or []:
+                yield from _semantic_fields(group.get('fields') if isinstance(group, dict)
+                                            else None, prefix)
+
+
+def _semantic_groups(fields):
+    """The message-level fields by semantic path, each path to {output path: field}; and the
+    repeats, as (output path, repeat field)."""
+    by_path: Dict[str, Dict[Tuple[str, ...], Dict[str, Any]]] = {}
+    repeats = []
+    for out, item in _semantic_fields(fields):
+        if item.get('type') == 'repeat':
+            repeats.append((out, item))
+        elif isinstance(item.get('semantic'), str):
+            by_path.setdefault(item['semantic'], {}).setdefault(out, item)
+    return by_path, repeats
+
+
+def _repeat_element_fields(repeat):
+    element = repeat.get('element')
+    if isinstance(element, dict):
+        return [dict(element, name='value')], True
+    return repeat.get('fields'), False
+
+
+def _uplink_field_lists(schema) -> List[Tuple[Optional[str], list]]:
+    """(port key, field list) of every message a schema decodes: its `ports` entries, a
+    downlink-only entry left out, else its top-level `fields`."""
+    ports = schema.get('ports')
+    if isinstance(ports, dict) and ports:
+        lists = []
+        for key, entry in ports.items():
+            if isinstance(entry, dict):
+                if entry.get('direction') == 'downlink':
+                    continue
+                lists.append((str(key), entry.get('fields') or []))
+            elif isinstance(entry, list):
+                lists.append((str(key), entry))
+        return lists
+    fields = schema.get('fields')
+    return [(None, fields if isinstance(fields, list) else [])]
+
+
+def semantic_warnings(schema: Dict[str, Any]) -> List[str]:
+    """The validator warnings PS-597 asks for, in the spec prototype's words: a `semantic`
+    that is no TTN path, a unit that is neither the path's nor one PS-599 converts, and a
+    path two fields of one message declare outside a repeat. None rejects the schema."""
+    schema = expand_refs(schema)[0]
+    warnings: List[str] = []
+
+    def check(fields):
+        by_path, repeats = _semantic_groups(fields)
+        for path, found in by_path.items():
+            names = ', '.join("'" + '.'.join(out) + "'" for out in found)
+            if path not in TTN_PATHS:
+                warnings.append(f"semantic {path!r} of {names} is not a TTN normalized path "
+                                f"(PS-597)")
+                continue
+            if len(found) > 1:
+                warnings.append(f"semantic {path!r} is declared by {names}; normalizeUplink "
+                                f"omits every value on it (PS-598)")
+            for out, item in found.items():
+                rule, why = ttn_unit_rule(item, path)
+                if rule == 'none':
+                    warnings.append(f"Field '{'.'.join(out)}' ({path}) {why}; the value is "
+                                    f"left out of the normalized payload (PS-597, PS-599)")
+        for _, repeat in repeats:
+            element = repeat.get('element')
+            check([dict(element, name=element.get('name') or 'value')]
+                  if isinstance(element, dict) else repeat.get('fields'))
+
+    for _, fields in _uplink_field_lists(schema):
+        check(fields)
+    return warnings
+
+
+def has_semantic(schema: Dict[str, Any]) -> bool:
+    """Whether any message of the schema declares a `semantic` (PS-598)."""
+    def walk(fields):
+        by_path, repeats = _semantic_groups(fields)
+        return bool(by_path) or any(walk(_repeat_element_fields(r)[0]) for _, r in repeats)
+    return any(walk(fields) for _, fields in _uplink_field_lists(expand_refs(schema)[0]))
+
+
+def _measurement_plan(fields) -> List[Dict[str, Any]]:
+    """One measurement's placements, from a field list: per path, the output paths that
+    report it and how each reaches the path's unit. The JSON-able form the generated codec
+    embeds; normalize() runs the same plan."""
+    by_path, _ = _semantic_groups(fields)
+    plan = []
+    for path, found in by_path.items():
+        if path not in TTN_PATHS:
+            continue                      # PS-597 warned at load; no path to place it at
+        entries = []
+        for out, item in found.items():
+            rule, how = ttn_unit_rule(item, path)
+            entries.append({'at': list(out), 'rule': rule, 'how': how})
+        plan.append({'path': path, 'fields': entries})
+    return plan
+
+
+def _top_level_names(fields) -> Tuple[set, bool]:
+    """The keys a field list can report at the top of its output, and whether it can report
+    a key that is not declared (a `name_from` template)."""
+    names, open_ = set(), False
+
+    def walk(items):
+        nonlocal open_
+        for item in items or []:
+            if not isinstance(item, dict):
+                continue
+            if 'name_from' in item:
+                open_ = True
+            name = item.get('name')
+            if isinstance(name, str) and name and not name.startswith('_'):
+                names.add(name)
+            for key in ('match', 'tlv', 'flagged', 'byte_group'):
+                spec = item.get(key)
+                if isinstance(spec, list):
+                    walk(spec)
+                elif isinstance(spec, dict):
+                    if key == 'tlv' and spec.get('merge') is False:
+                        names.add('channels')
+                    walk(spec.get('fields'))
+                    for body in (spec.get('cases') or {}).values():
+                        walk(body if isinstance(body, list) else None)
+                    default = spec.get('default')
+                    walk(default if isinstance(default, list) else
+                         default.get('fields') if isinstance(default, dict) else None)
+                    for group in spec.get('groups') or []:
+                        walk(group.get('fields') if isinstance(group, dict) else None)
+    walk(fields)
+    return names, open_
+
+
+def normalize_plan(schema: Dict[str, Any]) -> Dict[str, Any]:
+    """The whole normalizeUplink() plan of a schema (PS-598, PS-599): per message (a port
+    key, or '' for a schema without ports) its measurement plan, its repeats' element plans,
+    and the keys it can report, by which a decoded payload with no FPort finds its message.
+    The generated codec embeds it as JSON and normalize() runs it, so both give one result."""
+    schema = expand_refs(schema)[0]
+    messages = []
+    shapes: Dict[str, int] = {}
+    for port, fields in _uplink_field_lists(schema):
+        _, repeats = _semantic_groups(fields)
+        names, open_ = _top_level_names(fields)
+        messages.append({
+            'port': port,
+            'plan': _measurement_plan(fields),
+            'repeats': [{'at': list(out), 'element': _repeat_element_fields(r)[1],
+                         'plan': _measurement_plan(_repeat_element_fields(r)[0])}
+                        for out, r in repeats],
+            'names': sorted(names),
+            'open': open_,
+        })
+        # Messages with one plan place alike, so a payload either fits needs no choosing.
+        shape = json.dumps([messages[-1]['plan'], messages[-1]['repeats']], sort_keys=True)
+        messages[-1]['shape'] = shapes.setdefault(shape, len(shapes))
+    return {'ports': isinstance(schema.get('ports'), dict) and bool(schema.get('ports')),
+            'messages': messages}
+
+
+def _run_measurement(plan, data, warnings) -> Dict[str, Any]:
+    """One normalized measurement from one decoded object (PS-598, PS-599)."""
+    out: Dict[str, Any] = {}
+    for step in plan:
+        path = step['path']
+        present = []
+        for entry in step['fields']:
+            node = data
+            for key in entry['at']:
+                node = node.get(key) if isinstance(node, dict) else None
+            if node is not None:
+                present.append((entry, node))
+        if not present:
+            continue
+        if len(step['fields']) > 1:       # PS-598, as IL-180: place none of them
+            names = ', '.join("'" + '.'.join(e['at']) + "'" for e in step['fields'])
+            warnings.append(f"{path}: declared by {names}; every value on it is left out "
+                            f"(PS-598)")
+            continue
+        entry, value = present[0]
+        where = '.'.join(entry['at'])
+        if entry['rule'] == 'none':
+            warnings.append(f"{path}: field '{where}' {entry['how']}; left out (PS-599)")
+            continue
+        if entry['rule'] == 'convert':
+            if not isinstance(value, (int, float)) or isinstance(value, bool):
+                warnings.append(f"{path}: field '{where}' is not a number; left out (PS-599)")
+                continue
+            value = TTN_CONVERSION_FUNCS[entry['how']](value)
+            if isinstance(value, float) and value.is_integer():
+                value = int(value)        # as JavaScript would write it
+        node = out
+        parts = path.split('.')
+        for part in parts[:-1]:
+            node = node.setdefault(part, {})
+        node[parts[-1]] = value
+    return out
+
+
+def run_normalize_plan(plan: Dict[str, Any], decoded: Dict[str, Any],
+                       fport: Optional[int] = None) -> Dict[str, Any]:
+    """Run a normalize_plan() over decoded data: {data, warnings}. `data` is one measurement,
+    or a list of them where a repeat gives one per element.
+
+    TTN calls normalizeUplink() with the decoded data and no FPort, so for a schema with
+    `ports` the message is the one given by `fport` where known, else the one whose reported
+    keys hold every key of the data that some message declares; where that is not one
+    message (or several with one plan), nothing is placed and a warning says so."""
+    warnings: List[str] = []
+    messages = plan['messages']
+    chosen = None
+    if not plan['ports']:
+        chosen = messages[0] if messages else None
+    elif fport is not None:
+        chosen = next((m for m in messages if m['port'] == str(fport)), None)
+        if chosen is None:
+            chosen = next((m for m in messages if m['port'] == 'default'), None)
+    else:
+        declared = set().union(*(m['names'] for m in messages)) if messages else set()
+        keys = {k for k in decoded if k in declared}
+        fits = [m for m in messages if m['open'] or keys <= set(m['names'])]
+        if len({m['shape'] for m in fits}) == 1:
+            chosen = fits[0]
+        elif fits:
+            warnings.append("normalizeUplink cannot tell which port entry decoded this "
+                            "data; nothing is placed (PS-598)")
+    if chosen is None:
+        return {'data': {}, 'warnings': warnings}
+    base = _run_measurement(chosen['plan'], decoded, warnings)
+    measurements = []
+    for repeat in chosen['repeats']:
+        node = decoded
+        for key in repeat['at']:
+            node = node.get(key) if isinstance(node, dict) else None
+        if not isinstance(node, list):
+            continue
+        for item in node:
+            m = _run_measurement(repeat['plan'], {'value': item} if repeat['element'] else item,
+                                 warnings)
+            if m:
+                measurements.append(m)
+    if measurements:
+        return {'data': ([base] if base else []) + measurements, 'warnings': warnings}
+    return {'data': base, 'warnings': warnings}
+
+
+def normalize(decoded: Dict[str, Any], schema: Dict[str, Any],
+              fport: Optional[int] = None) -> Dict[str, Any]:
+    """TTN normalizeUplink() output for a decoded uplink, from the schema's `semantic`
+    (PS-598, PS-599): {data, warnings}. The spec prototype's normalize(), with the message
+    found from the data where no FPort is given (run_normalize_plan)."""
+    return run_normalize_plan(normalize_plan(schema), decoded, fport)
+
 
 
 class SchemaInterpreter:
@@ -4943,6 +5468,14 @@ class SchemaInterpreter:
         if field_type in type_info:
             size, signed = type_info[field_type]
             value, new_pos = self._read_int(buf, pos, size, signed)
+            if 'checksum' in field_def:
+                # PS-586 (CR-2026-174): the check value against the bytes it covers.
+                mismatch = checksum_mismatch(field_def, buf, pos, value)
+                if mismatch:
+                    if field_def['checksum'].get('on_mismatch', 'error') == 'warn':
+                        self._nested_warnings.append(mismatch)
+                    else:
+                        raise FieldError(mismatch)
             # Apply encoding if specified (sign_magnitude, bcd, gray)
             encoding = field_def.get('encoding')
             if encoding:
@@ -7240,6 +7773,7 @@ class SchemaInterpreter:
             return result
 
         output = FrameBuffer()          # CR-2026-136: laid out as the decoder reads it
+        self._checksum_open = []        # PS-587: checksums placed and not yet computed
 
         fields = self._resolve_fields(fPort)
         # The fields this message is encoded from: a reference is looked for among them
@@ -7394,6 +7928,14 @@ class SchemaInterpreter:
             # required of the input. This warned "Missing field" for it.
             if is_literal(field_def):
                 continue
+            # PS-587 (CR-2026-174): a checksum is computed over the bytes written, never
+            # taken from the input; its value is filled in when the frame is finished.
+            if 'checksum' in field_def:
+                try:
+                    output.extend(self._checksum_placeholder(field_def, output))
+                except Exception as e:
+                    result.errors.append(error_text(f"Error encoding {name}: ", e))
+                continue
             # PS-360: `value` on a field that reads bytes is the constant to write,
             # whatever the input supplies. The input's value was written instead.
             if 'value' in field_def:
@@ -7494,6 +8036,17 @@ class SchemaInterpreter:
                     result.errors.append(remaining_mismatch_message(
                         check['match'], check['tail'], selected, check['chosen']))
                     break
+        if not result.errors:
+            # PS-587 (CR-2026-174): each checksum over the finished frame. One a construct
+            # encoded apart from the frame - a tlv entry, a repeat element - did not reach
+            # it, since the bytes before it were not written when it was.
+            try:
+                frame = fill_checksums(frame, frame_checksums(frame), self._checksum_open)
+                if self._checksum_open:
+                    raise FieldError(checksum_unwritten_message(
+                        self._checksum_open[0].get('name')))
+            except ValueError as e:
+                result.errors.append(str(e))
         if not result.errors and not frame:
             # PS-442: the last line against a construct that wrote nothing and said so
             # to no one - a match with no case chosen, a tlv entry no case claimed.
@@ -8604,6 +9157,9 @@ class SchemaInterpreter:
                 continue
             if is_literal(f):
                 continue            # PS-359: a literal writes no bytes
+            if 'checksum' in f:
+                out.extend(self._checksum_placeholder(f, out))       # PS-587
+                continue
             if 'value' in f:
                 # PS-360: the constant is written whatever the input says.
                 out.extend(self._encode_field(f, f['value']))
@@ -8639,6 +9195,23 @@ class SchemaInterpreter:
             out.extend(self._encode_field(f, value))
         tails.close()
         return out.frame()
+
+    def _checksum_placeholder(self, field_def: Dict[str, Any], out: 'FrameBuffer') -> 'Frame':
+        """PS-587 (CR-2026-174): the checksum's bytes, zero until the frame is finished
+        (`fill_checksums`). Bits a peek left pending would be ORed into it, so its range
+        is not fully written: rejected, as the spec prototype rejects a pending overlay."""
+        # Inside a tlv entry or a repeat element or trailer, the bytes are encoded apart
+        # from the frame, so the bytes before them are not written when it is reached.
+        if out.pending or getattr(self, '_ps564_depth', 1):
+            raise FieldError(checksum_unwritten_message(field_def.get('name')))
+        size = CHECKSUM_WIDTHS[field_def['type']] // 8
+        endian = field_def.get('endian')
+        little = (endian == 'little') if endian else self.endian == Endian.LITTLE
+        if not hasattr(self, '_checksum_open'):
+            self._checksum_open = []
+        self._checksum_open.append(field_def)
+        return Frame(bytes(size), 0, None, [],
+                     [(0, field_def, 'little' if little else 'big')])
 
     @tail_unchecked
     def _encode_repeat_elements(self, field_def: Dict[str, Any], data: Dict[str, Any],
@@ -8835,6 +9408,10 @@ class SchemaInterpreter:
                 continue
             name = f.get('name')
             if not name or str(name).startswith('_'):
+                continue
+            if 'checksum' in f:
+                # PS-587: computed, never taken from the input, so never required.
+                out.append((f, True))
                 continue
             if is_literal(f) or f.get('type') in COMPUTED_TYPES or is_echo(f):
                 # A literal or computed field writes no bytes, but only this case reports
@@ -9586,10 +10163,6 @@ class SchemaInterpreter:
                        'description', 'semantic', 'ipso', 'senml', 'senml_unit'):
                 if key in field_def:
                     meta[key] = field_def[key]
-            # Flatten semantic sub-dict
-            if 'semantic' in meta:
-                for k, v in meta.pop('semantic').items():
-                    meta[k] = v
             return meta
         
         def collect_fields(fields: List[Dict[str, Any]], result: Dict[str, Dict]):
@@ -9656,8 +10229,7 @@ class SchemaInterpreter:
             if name not in decoded:
                 continue
             
-            semantic = field_def.get('semantic', {})
-            ipso = semantic.get('ipso')
+            ipso = (field_def.get('ipso') or {}).get('object')
             
             if ipso:
                 obj_id = str(ipso)
@@ -9895,11 +10467,11 @@ if __name__ == '__main__':
         'endian': 'big',
         'fields': [
             {'name': 'temperature', 'type': 's16', 'mult': 0.01, 'unit': '°C',
-             'semantic': {'ipso': 3303}},
+             'ipso': {'object': 3303}},
             {'name': 'humidity', 'type': 'u8', 'mult': 0.5, 'unit': '%RH',
-             'semantic': {'ipso': 3304}},
+             'ipso': {'object': 3304}},
             {'name': 'battery_mv', 'type': 'u16', 'unit': 'mV',
-             'semantic': {'ipso': 3316}},
+             'ipso': {'object': 3316}},
             {'name': 'status', 'type': 'u8'},
         ]
     }

@@ -1,0 +1,113 @@
+# PS-585 to PS-587 (CR-2026-174): a field declaring `checksum` holds a check value over the
+# bytes before it. A decoder computes it and compares; an encoder computes it and writes it.
+#
+# One port per algorithm, each with a frame a vendor's own decoder accepts (TTN
+# lorawan-devices 7a0cb2e; registry analysis/cr-evidence-checksum-span-joins-2026-10-14):
+#
+# - port 1, sum8 from byte 6: an acrios acr-cv-101l M-Bus long frame, whose check byte sums
+#   the C field to the last data byte, behind a two-byte header and the `68 L L 68` start;
+# - port 2, crc8/smbus over every byte before it, warning on a mismatch: an emu profii-lp
+#   frame, then the same frame with its check byte one off, which still reports its data;
+# - port 3, xor8 seeded 0x55: two jooby analog frames, and one with its check byte one off,
+#   which fails the decode (the default when a check fails);
+# - port 4, crc16/kermit little-endian, reported: a seeed/sensecap e5 frame;
+# - port 5, two xor8 checks, the first from byte 1 and the second over every byte, itself
+#   covering the first.
+#
+# Every frame with a correct check value re-encodes to itself, since the encoder computes
+# the value; the frame with a wrong one that only warns re-encodes with the right one.
+name: probe_checksum_fields
+endian: big
+ports:
+  1:
+    fields:
+      - {name: header, type: hex, length: 6}
+      - {name: body, type: hex, length: 19}
+      - {name: _cs, type: u8, checksum: {algo: sum8, from: 6}}
+      - {name: stop, type: u8}
+  2:
+    fields:
+      - {name: body, type: hex, length: 14}
+      - {name: _crc, type: u8, checksum: {algo: crc8/smbus, on_mismatch: warn}}
+  3:
+    fields:
+      - {name: command, type: u8}
+      - {name: size, type: u8}
+      - {name: value, type: u8}
+      - {name: _lrc, type: u8, checksum: {algo: xor8, seed: 0x55}}
+  4:
+    fields:
+      - {name: body, type: hex, length: 14}
+      - {name: crc, type: u16, endian: little, checksum: {algo: crc16/kermit}}
+  5:
+    fields:
+      - {name: segment, type: u8}
+      - {name: a, type: u8}
+      - {name: _inner, type: u8, checksum: {algo: xor8, seed: 0x55, from: 1}}
+      - {name: _outer, type: u8, checksum: {algo: xor8, seed: 0x55}}
+test_vectors:
+  - name: sum8_from_an_offset
+    source: generated
+    fPort: 1
+    payload: "010168131368080573785634120a00e97e01000000350100003c16"
+    expected:
+      header: "010168131368"
+      body: "080573785634120a00e97e0100000035010000"
+      stop: 22
+    expected_warnings: []
+  - name: crc8_smbus_frame
+    source: generated
+    fPort: 2
+    payload: "b4d77b6101b4d77b61031207000039"
+    expected:
+      body: "b4d77b6101b4d77b610312070000"
+    expected_warnings: []
+  - name: crc8_smbus_mismatch_warns
+    source: generated
+    fPort: 2
+    payload: "b4d77b6101b4d77b61031207000038"
+    expected:
+      body: "b4d77b6101b4d77b610312070000"
+    expected_warnings:
+      - ["_crc", "0x39", "0x38", "PS-586"]
+  - name: xor8_seeded_one_value
+    source: generated
+    fPort: 3
+    payload: "0c01ffa7"
+    expected:
+      command: 12
+      size: 1
+      value: 255
+    expected_warnings: []
+  - name: xor8_seeded_another_value
+    source: generated
+    fPort: 3
+    payload: "0c01055d"
+    expected:
+      command: 12
+      size: 1
+      value: 5
+    expected_warnings: []
+  - name: xor8_mismatch_fails_the_decode
+    source: generated
+    fPort: 3
+    payload: "0c01ffa6"
+    expected_error:
+      requirement: PS-586
+      at: _lrc
+  - name: crc16_kermit_little_endian
+    source: generated
+    fPort: 4
+    payload: "01011098530000010210a87a0000af51"
+    expected:
+      body: "01011098530000010210a87a0000"
+      crc: 20911
+    expected_warnings: []
+  - name: an_outer_check_over_an_inner_one
+    source: generated
+    fPort: 5
+    payload: "1e07521e"
+    expected:
+      segment: 30
+      a: 7
+    expected_warnings: []

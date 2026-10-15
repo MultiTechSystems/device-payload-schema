@@ -152,6 +152,9 @@ struct field_def {
     /* A bit range on an `sN` base: sign-extended from the range's width (PS-352,
      * PS-353). Sits in what was padding before `endian`, so field_def_t keeps its size. */
     bool bit_signed;
+    /* CR-2026-174 (PS-586): `on_mismatch: warn` on a checksum, else a mismatch is an
+     * error. In what was padding after bit_signed, so field_def_t keeps its size. */
+    bool checksum_warn;
     endian_t endian;
     
     /* Modifiers */
@@ -198,7 +201,23 @@ struct field_def {
     uint8_t tlv_tag_parts;     /* 0 = use tlv_tag_size, else the component count */
     uint8_t tlv_length_size;   /* bytes of length after the tag, 0 for none */
     uint8_t tlv_unknown;       /* SCHEMA_TLV_UNKNOWN_* */
+
+    /* CR-2026-174 (PS-585): a checksum over the frame's bytes from `checksum_from` up to
+     * the byte before this field. SCHEMA_CHECKSUM_NONE (0) for an ordinary field, so
+     * every existing initializer leaves it off. Set with field_set_checksum(), which
+     * applies PS-585's rules. In what was the struct's tail padding: field_def_t keeps
+     * its size (1640 bytes on LP64). */
+    uint8_t checksum_algo;     /* SCHEMA_CHECKSUM_* */
+    uint8_t checksum_seed;     /* sum8 and xor8 only */
+    uint16_t checksum_from;    /* an absolute offset into the payload */
 };
+
+/* The checksum algorithms of PS-585 (CR-2026-174). */
+#define SCHEMA_CHECKSUM_NONE          0
+#define SCHEMA_CHECKSUM_SUM8          1
+#define SCHEMA_CHECKSUM_XOR8          2
+#define SCHEMA_CHECKSUM_CRC8_SMBUS    3
+#define SCHEMA_CHECKSUM_CRC16_KERMIT  4
 
 /* What to do with a tag no case describes (PS-155, PS-301..PS-304). `raw` is absent
  * deliberately: capturing the bytes needs somewhere to put them, and decode_result_t has
@@ -227,6 +246,11 @@ typedef struct {
      * other five give, "Field '{name}': a byte above 0x7F in an ascii value (PS-073,
      * PS-538)". */
     bool non_ascii;
+    /* PS-586's warning, as a flag (CR-2026-174): this field's checksum, declared
+     * `on_mismatch: warn`, did not match. An internal (`_`) checksum is not reported, so
+     * the decode result carries the same fact - see decode_result_t.checksum_warnings.
+     * In what was padding: decoded_field_t keeps its size. */
+    bool checksum_mismatch;
 } decoded_field_t;
 
 /* Which way a message travels, for a schema or a decode call.
@@ -285,6 +309,16 @@ typedef struct {
      * by result_get_index() and none by name, and a writer of the decoded object - such
      * as bindings/c's schema_ffi_result_to_json() - must refuse (PS-555). */
     bool nameless;
+    /* PS-586's warning (CR-2026-174), as numbers, as `bytes_unread` is PS-472's: how many
+     * checksums declared `on_mismatch: warn` did not match, and for the first of them
+     * the index in schema->fields of the field and the offset it was read at.
+     * schema_checksum_warning() renders the text the other five implementations give,
+     * "Field '{name}': {algo} over bytes {from} to {at-1} is 0x{computed}, but the frame
+     * carries 0x{carried} (PS-586)", from these and the payload. In what was the
+     * struct's tail padding: decode_result_t keeps its size. */
+    uint8_t checksum_warnings;
+    int16_t checksum_warning_field;
+    uint16_t checksum_warning_at;
 } decode_result_t;
 
 /* Variable storage for match conditions.
@@ -320,6 +354,8 @@ typedef struct {
 #define SCHEMA_ERR_MISSING    -7
 #define SCHEMA_ERR_LOOKUP     -8   /* Out-of-bounds sequence lookup index (PS-105) */
 #define SCHEMA_ERR_DIRECTION  -9   /* Message travels a direction the schema disclaims (PS-288) */
+#define SCHEMA_ERR_CHECKSUM  -10   /* A checksum disagrees with its frame (PS-586), or its
+                                    * range is not before it (PS-585, PS-587) */
 
 /* ============================================
  * Byte Reading Utilities
@@ -878,6 +914,152 @@ static inline bool finish_numeric(
     return true;
 }
 
+/* ============================================
+ * Checksum fields (CR-2026-174, PS-585 to PS-587)
+ * ============================================
+ *
+ * A field of an unsigned integer type may declare a checksum over the frame's bytes from
+ * `from` (an absolute offset, 0 by default) up to the byte before the field. A decoder
+ * computes it and compares it with the value read, before any modifier (PS-586); an
+ * encoder computes it over the finished frame and writes it, never taking it from the
+ * input (PS-587). The four algorithms, with the catalogue's check values over the ASCII
+ * bytes "123456789":
+ *
+ *   sum8          (seed + every byte) & 0xFF
+ *   xor8          seed XOR every byte
+ *   crc8/smbus    poly 0x07, init 0, not reflected, no final XOR          check 0xF4
+ *   crc16/kermit  poly 0x1021 reflected (0x8408), init 0, no final XOR   check 0x2189
+ */
+
+static inline const char* schema_checksum_name(uint8_t algo) {
+    switch (algo) {
+        case SCHEMA_CHECKSUM_SUM8: return "sum8";
+        case SCHEMA_CHECKSUM_XOR8: return "xor8";
+        case SCHEMA_CHECKSUM_CRC8_SMBUS: return "crc8/smbus";
+        case SCHEMA_CHECKSUM_CRC16_KERMIT: return "crc16/kermit";
+        default: return "none";
+    }
+}
+
+/* The bits an algorithm's result needs, 0 for none. */
+static inline int schema_checksum_bits(uint8_t algo) {
+    switch (algo) {
+        case SCHEMA_CHECKSUM_SUM8: case SCHEMA_CHECKSUM_XOR8:
+        case SCHEMA_CHECKSUM_CRC8_SMBUS: return 8;
+        case SCHEMA_CHECKSUM_CRC16_KERMIT: return 16;
+        default: return 0;
+    }
+}
+
+/* The bytes of an unsigned integer type a checksum may be declared on, 0 for any other
+ * type: a bit range, a signed or word-ordered integer, a float (PS-585). */
+static inline int schema_checksum_type_bytes(field_type_t type) {
+    switch (type) {
+        case FIELD_TYPE_U8: return 1;
+        case FIELD_TYPE_U16: return 2;
+        case FIELD_TYPE_U24: return 3;
+        case FIELD_TYPE_U32: return 4;
+        case FIELD_TYPE_U64: return 8;
+        default: return 0;
+    }
+}
+
+static inline uint32_t schema_checksum_compute(uint8_t algo, const uint8_t* data,
+                                               size_t n, uint8_t seed) {
+    uint32_t v = 0;
+    switch (algo) {
+        case SCHEMA_CHECKSUM_SUM8:
+            v = seed;
+            for (size_t i = 0; i < n; i++) v += data[i];
+            return v & 0xFF;
+        case SCHEMA_CHECKSUM_XOR8:
+            v = seed;
+            for (size_t i = 0; i < n; i++) v ^= data[i];
+            return v;
+        case SCHEMA_CHECKSUM_CRC8_SMBUS:
+            for (size_t i = 0; i < n; i++) {
+                v ^= data[i];
+                for (int b = 0; b < 8; b++) {
+                    v = (v & 0x80) ? ((v << 1) ^ 0x07) & 0xFF : (v << 1) & 0xFF;
+                }
+            }
+            return v;
+        case SCHEMA_CHECKSUM_CRC16_KERMIT:
+            for (size_t i = 0; i < n; i++) {
+                v ^= data[i];
+                for (int b = 0; b < 8; b++) {
+                    v = (v & 1) ? (v >> 1) ^ 0x8408 : v >> 1;
+                }
+            }
+            return v;
+        default:
+            return 0;
+    }
+}
+
+/* PS-586: whether `field`'s checksum agrees with the frame, where it is read at `at`.
+ * SCHEMA_OK where it does, or where the field's bytes are not all there (the read reports
+ * that, PS-535). SCHEMA_ERR_CHECKSUM where the range starts after the field (PS-585) or
+ * the value disagrees under `on_mismatch: error`; under `warn` the disagreement sets
+ * `*mismatch` and the field decodes. SCHEMA_ERR_TYPE for a checksum on a type that cannot
+ * hold one, which field_set_checksum() never builds. */
+static inline int schema_checksum_check(const field_def_t* field, const uint8_t* buf,
+                                        size_t len, size_t at, endian_t endian,
+                                        bool* mismatch) {
+    const int width = schema_checksum_type_bytes(field->type);
+    if (width == 0) return SCHEMA_ERR_TYPE;
+    if (at + (size_t)width > len) return SCHEMA_OK;
+    if (field->checksum_from > at) return SCHEMA_ERR_CHECKSUM;
+    const uint64_t carried = bits_read_base(buf + at, width, endian);
+    const uint32_t computed = schema_checksum_compute(
+        field->checksum_algo, buf + field->checksum_from, at - field->checksum_from,
+        field->checksum_seed);
+    if ((uint64_t)computed == carried) return SCHEMA_OK;
+    if (field->checksum_warn) {
+        *mismatch = true;
+        return SCHEMA_OK;
+    }
+    return SCHEMA_ERR_CHECKSUM;
+}
+
+/* The text of a checksum read at `at` that schema_checksum_check() did not accept: the
+ * range starting after the field (PS-585), else PS-586's mismatch - the error text, and
+ * under `on_mismatch: warn` the warning's. The other five implementations give the same
+ * strings. The worst case, a 31-character name, crc16/kermit, two five-digit offsets and
+ * a sixteen-digit carried value, is 140 characters and its NUL. */
+static inline void schema_checksum_message(char* msg, size_t msg_len,
+                                           const field_def_t* field, const uint8_t* buf,
+                                           size_t at, endian_t endian) {
+    if (field->checksum_from > at) {
+        snprintf(msg, msg_len, "Field '%.*s': the checksum range starts at byte %u, after "
+                 "the field at byte %u (PS-585)", SCHEMA_MAX_NAME_LEN - 1, field->name,
+                 (unsigned)field->checksum_from, (unsigned)at);
+        return;
+    }
+    const int width = schema_checksum_type_bytes(field->type);
+    const uint64_t carried = width ? bits_read_base(buf + at, width, endian) : 0;
+    const uint32_t computed = schema_checksum_compute(
+        field->checksum_algo, buf + field->checksum_from, at - field->checksum_from,
+        field->checksum_seed);
+    snprintf(msg, msg_len, "Field '%.*s': %s over bytes %u to %d is 0x%X, but the frame "
+             "carries 0x%llX (PS-586)", SCHEMA_MAX_NAME_LEN - 1, field->name,
+             schema_checksum_name(field->checksum_algo), (unsigned)field->checksum_from,
+             (int)at - 1, (unsigned)computed, (unsigned long long)carried);
+}
+
+/* Records a field's PS-586 warning in the decode result, from the flag decode_field set
+ * on its value; `end` is the position after it. */
+static inline void schema_note_checksum(decode_result_t* result, const decoded_field_t* out,
+                                        const field_def_t* field, int index, size_t end) {
+    if (!out->checksum_mismatch) return;
+    if (result->checksum_warnings == 0) {
+        result->checksum_warning_field = (int16_t)index;
+        result->checksum_warning_at =
+            (uint16_t)(end - (size_t)schema_checksum_type_bytes(field->type));
+    }
+    if (result->checksum_warnings < 255) result->checksum_warnings++;
+}
+
 static inline int decode_field(
     const field_def_t* field,
     const uint8_t* buf,
@@ -894,6 +1076,16 @@ static inline int decode_field(
     out->valid = false;
     strncpy(out->name, field->name, SCHEMA_MAX_NAME_LEN - 1);
     out->type = field->type;
+    out->checksum_mismatch = false;
+
+    /* PS-586 (CR-2026-174): the check value against the bytes it covers, before the
+     * field is read, so a mismatch under `on_mismatch: error` leaves `pos` at the field
+     * for the message. A field whose bytes are not all there is the read's error. */
+    if (field->checksum_algo != SCHEMA_CHECKSUM_NONE) {
+        int crc = schema_checksum_check(field, buf, len, *pos, endian,
+                                        &out->checksum_mismatch);
+        if (crc != SCHEMA_OK) return crc;
+    }
     
     switch (field->type) {
         case FIELD_TYPE_U8:
@@ -1347,10 +1539,25 @@ static inline int schema_field_failed(
     decode_result_t* result,
     int rc,
     const field_def_t* field,
+    const uint8_t* buf,
     size_t pos,
-    size_t len
+    size_t len,
+    endian_t default_endian
 ) {
     result->error_code = rc;
+    if (rc == SCHEMA_ERR_CHECKSUM && result->error_msg[0] == '\0') {
+        /* PS-585, PS-586 (CR-2026-174), verbatim: nothing prefixes it. */
+        schema_checksum_message(result->error_msg, sizeof(result->error_msg), field, buf,
+                                pos, field->endian != ENDIAN_DEFAULT ? field->endian
+                                                                     : default_endian);
+    }
+    if (rc == SCHEMA_ERR_TYPE && field->checksum_algo != SCHEMA_CHECKSUM_NONE
+        && result->error_msg[0] == '\0') {
+        snprintf(result->error_msg, sizeof(result->error_msg),
+                 "Field '%.*s': a checksum is declared on an unsigned integer type (u8 to "
+                 "u64), not '%s' (PS-585)", SCHEMA_MAX_NAME_LEN - 1, field->name,
+                 schema_type_label(field->type));
+    }
     if (rc == SCHEMA_ERR_BUFFER && result->error_msg[0] == '\0') {
         schema_underflow_message(result, field, pos, len);
     }
@@ -1447,6 +1654,14 @@ static inline int byte_group_width(const schema_t* schema, const field_def_t* gr
         }
         if (width < 1 || base > 8 || start + width > base * 8) {
             snprintf(err, err_len, "byte_group member '%.*s' names bits outside its base",
+                     SCHEMA_MAX_NAME_LEN - 1, m->name);
+            return -1;
+        }
+        if (m->checksum_algo != SCHEMA_CHECKSUM_NONE) {
+            /* CR-2026-174: a member names bits of the group's value, and a checksum is
+             * over whole bytes before the field; refused rather than dropped (PS-446). */
+            snprintf(err, err_len, "byte_group member '%.*s' declares a checksum, which "
+                     "this interpreter cannot apply to a member (PS-446)",
                      SCHEMA_MAX_NAME_LEN - 1, m->name);
             return -1;
         }
@@ -1566,7 +1781,7 @@ static inline int schema_decode_byte_group(
             as_range.endian = endian;
             size_t at = *pos;
             int rc = decode_field(&as_range, buf, len, &at, out, vars, endian);
-            if (rc != SCHEMA_OK) return schema_field_failed(result, rc, m, *pos, len);
+            if (rc != SCHEMA_OK) return schema_field_failed(result, rc, m, buf, *pos, len, endian);
         }
         out->field_index = idx;
         if (out->valid && (m->name[0] ? m->name[0] != '_' : schema->nameless)) {
@@ -1699,9 +1914,11 @@ static inline int schema_decode_direction(
                     );
                     if (rc != SCHEMA_OK) {
                         return schema_field_failed(result, rc, &schema->fields[field_idx],
-                                                   pos, len);
+                                                   buf, pos, len, schema->endian);
                     }
                     result->fields[result->field_count].field_index = field_idx;
+                    schema_note_checksum(result, &result->fields[result->field_count],
+                                         &schema->fields[field_idx], field_idx, pos);
                     if (result->fields[result->field_count].valid) {
                         result->field_count++;
                     }
@@ -1827,9 +2044,11 @@ static inline int schema_decode_direction(
                     );
                     if (rc != SCHEMA_OK) {
                         return schema_field_failed(result, rc, &schema->fields[field_idx],
-                                                   pos, len);
+                                                   buf, pos, len, schema->endian);
                     }
                     result->fields[result->field_count].field_index = field_idx;
+                    schema_note_checksum(result, &result->fields[result->field_count],
+                                         &schema->fields[field_idx], field_idx, pos);
                     if (result->fields[result->field_count].valid) {
                         result->field_count++;
                     }
@@ -1886,9 +2105,12 @@ static inline int schema_decode_direction(
                         );
                         if (rc != SCHEMA_OK) {
                             return schema_field_failed(result, rc,
-                                                       &schema->fields[field_idx], pos, len);
+                                                       &schema->fields[field_idx], buf, pos,
+                                                       len, schema->endian);
                         }
                         result->fields[result->field_count].field_index = field_idx;
+                        schema_note_checksum(result, &result->fields[result->field_count],
+                                             &schema->fields[field_idx], field_idx, pos);
                         if (result->fields[result->field_count].valid) {
                             result->field_count++;
                         }
@@ -1913,8 +2135,9 @@ static inline int schema_decode_direction(
         );
         
         if (rc != SCHEMA_OK) {
-            return schema_field_failed(result, rc, field, pos, len);
+            return schema_field_failed(result, rc, field, buf, pos, len, schema->endian);
         }
+        schema_note_checksum(result, &result->fields[result->field_count], field, i, pos);
         
         /* A named field is reported unless it is internal. A schema without names (a
          * binary schema loaded without its name table) reports each value by its
@@ -2529,6 +2752,73 @@ static inline int schema_encode(
     return schema_encode_direction(schema, inputs, SCHEMA_DIR_UNSET, result);
 }
 
+/* PS-587 (CR-2026-174): a checksum placed while encoding - zero bytes at `pos`, filled
+ * once the whole frame is written (schema_fill_checksums). */
+typedef struct {
+    size_t pos;
+    const field_def_t* field;
+    endian_t endian;
+} schema_checksum_slot_t;
+
+static inline int schema_checksum_unwritten(const field_def_t* field, char* err,
+                                            size_t err_len) {
+    snprintf(err, err_len, "Field '%.*s': the bytes its checksum covers are not all "
+             "written when it is reached (PS-587)", SCHEMA_MAX_NAME_LEN - 1, field->name);
+    return SCHEMA_ERR_CHECKSUM;
+}
+
+/* PS-587: a checksum field writes zero bytes where it is reached, never its input, and is
+ * never required (PS-551 does not apply); its value is computed over the finished frame.
+ * Bits a bit range or bool left pending past `pos` would be ORed into it, so the bytes it
+ * covers are not all written there: rejected, as the reference rejects it. */
+static inline int schema_place_checksum(const field_def_t* field, endian_t schema_endian,
+                                        size_t* pos, size_t filled,
+                                        schema_checksum_slot_t* slots, int* slot_count,
+                                        char* err, size_t err_len) {
+    const int width = schema_checksum_type_bytes(field->type);
+    if (width == 0) {
+        snprintf(err, err_len, "Field '%.*s': a checksum is declared on an unsigned integer "
+                 "type (u8 to u64), not '%s' (PS-585)", SCHEMA_MAX_NAME_LEN - 1,
+                 field->name, schema_type_label(field->type));
+        return SCHEMA_ERR_TYPE;
+    }
+    if (filled > *pos) return schema_checksum_unwritten(field, err, err_len);
+    if (*pos + (size_t)width > SCHEMA_MAX_PAYLOAD || *slot_count >= SCHEMA_MAX_FIELDS) {
+        return SCHEMA_ERR_BUFFER;
+    }
+    slots[*slot_count].pos = *pos;
+    slots[*slot_count].field = field;
+    slots[*slot_count].endian = field->endian != ENDIAN_DEFAULT ? field->endian
+                                                                : schema_endian;
+    (*slot_count)++;
+    *pos += (size_t)width;
+    return SCHEMA_OK;
+}
+
+/* PS-587: each checksum over the finished frame, from its `from` to the byte before it,
+ * earliest first, so an outer checksum covers an inner one's value. A range starting
+ * after the field is rejected. */
+static inline int schema_fill_checksums(uint8_t* data, schema_checksum_slot_t* slots,
+                                        int slot_count, char* err, size_t err_len) {
+    for (int a = 1; a < slot_count; a++) {             /* by position, stable */
+        schema_checksum_slot_t t = slots[a];
+        int b = a - 1;
+        for (; b >= 0 && slots[b].pos > t.pos; b--) slots[b + 1] = slots[b];
+        slots[b + 1] = t;
+    }
+    for (int k = 0; k < slot_count; k++) {
+        const field_def_t* f = slots[k].field;
+        if (f->checksum_from > slots[k].pos) return schema_checksum_unwritten(f, err, err_len);
+        uint32_t value = schema_checksum_compute(f->checksum_algo, data + f->checksum_from,
+                                                 slots[k].pos - f->checksum_from,
+                                                 f->checksum_seed);
+        size_t at = slots[k].pos;
+        write_int(data, &at, (int64_t)value, schema_checksum_type_bytes(f->type),
+                  slots[k].endian);
+    }
+    return SCHEMA_OK;
+}
+
 /* Encode a match (PS-442, PS-551): the case its discriminator selects. The
  * discriminator is the input to the field the match's variable names, which the loop
  * writes on its own; absent, the match cannot be written, and a value no case lists,
@@ -2543,6 +2833,9 @@ static inline int schema_encode_match_case(
     uint8_t* buf,
     size_t* pos,
     bool* passed,
+    size_t filled,
+    schema_checksum_slot_t* checksums,
+    int* checksum_count,
     char* err,
     size_t err_len
 ) {
@@ -2601,6 +2894,12 @@ static inline int schema_encode_match_case(
         if (member.type == FIELD_TYPE_SKIP) {
             if (*pos + member.size > SCHEMA_MAX_PAYLOAD) return SCHEMA_ERR_BUFFER;
             *pos += member.size;
+            continue;
+        }
+        if (member.checksum_algo != SCHEMA_CHECKSUM_NONE) {     /* PS-587 */
+            int rc = schema_place_checksum(&schema->fields[at], schema->endian, pos,
+                                           filled, checksums, checksum_count, err, err_len);
+            if (rc != SCHEMA_OK) return rc;
             continue;
         }
         if (member.type == FIELD_TYPE_BITS || member.type == FIELD_TYPE_BOOL
@@ -2680,6 +2979,8 @@ static inline int schema_encode_direction(
      * field: #3") rather than by an empty name. */
     char index_keys[SCHEMA_MAX_FIELDS][12];
     field_def_t keyed;
+    schema_checksum_slot_t checksums[SCHEMA_MAX_FIELDS];     /* PS-587 (CR-2026-174) */
+    int checksum_count = 0;
     bool case_passed[SCHEMA_MAX_FIELDS];
     memset(case_passed, 0, sizeof(case_passed));
 
@@ -2704,13 +3005,29 @@ static inline int schema_encode_direction(
              * counted one by this loop - and every other case's counted body is passed
              * over. */
             int rc = schema_encode_match_case(schema, field, i, inputs, result->data, &pos,
-                                              case_passed, result->error_msg,
+                                              case_passed, filled, checksums,
+                                              &checksum_count, result->error_msg,
                                               sizeof(result->error_msg));
             if (rc != SCHEMA_OK) {
                 result->error_code = rc;
                 memset(result->data, 0, sizeof(result->data));   /* no partial payload */
                 return rc;
             }
+            continue;
+        }
+        if (field->checksum_algo != SCHEMA_CHECKSUM_NONE) {
+            /* PS-587 (CR-2026-174): zero bytes now, never the input's value, never
+             * required; computed once the frame is finished. */
+            const size_t at = pos;
+            int rc = schema_place_checksum(&schema->fields[i], schema->endian, &pos, filled,
+                                           checksums, &checksum_count, result->error_msg,
+                                           sizeof(result->error_msg));
+            if (rc != SCHEMA_OK) {
+                result->error_code = rc;
+                memset(result->data, 0, sizeof(result->data));   /* no partial payload */
+                return rc;
+            }
+            for (size_t b = at; b < pos; b++) covered[b] = 0xFF;
             continue;
         }
         bool bitlike = field->type == FIELD_TYPE_BITS || field->type == FIELD_TYPE_BOOL;
@@ -2854,6 +3171,16 @@ static inline int schema_encode_direction(
         return SCHEMA_ERR_PARSE;
     }
 
+    {
+        int rc = schema_fill_checksums(result->data, checksums, checksum_count,
+                                       result->error_msg, sizeof(result->error_msg));
+        if (rc != SCHEMA_OK) {
+            result->error_code = rc;
+            memset(result->data, 0, sizeof(result->data));
+            return rc;
+        }
+    }
+
     result->len = (int)(pos > filled ? pos : filled);
     if (result->len == 0) {
         /* PS-442: no bytes, where the input gives a field that reads them. Unreachable
@@ -2957,6 +3284,113 @@ static inline void field_add_lookup(field_def_t* f, int key, const char* value) 
         strncpy(f->lookup[f->lookup_count].value, value, SCHEMA_MAX_NAME_LEN - 1);
         f->lookup_count++;
     }
+}
+
+/* CR-2026-174 (PS-585): declares `f` a checksum field, its `checksum:` mapping given as
+ * arguments - `algo` its name ("sum8", "xor8", "crc8/smbus", "crc16/kermit"; NULL where
+ * the schema gives none), `seed` where `has_seed`, `from` (0 where the schema gives
+ * none), and `on_mismatch` ("error" or "warn"; NULL for the default, error). Call it
+ * after the field's type is set. SCHEMA_OK, or SCHEMA_ERR_PARSE with PS-585's text in
+ * `err` and `f` unchanged - the first rule broken, in the order and words of the other
+ * five implementations:
+ *
+ *   Field '{name}': a checksum is declared on an unsigned integer type (u8 to u64), not '{type}' (PS-585)
+ *   The checksum of '{name}': `algo` is one of crc16/kermit, crc8/smbus, sum8, xor8, not '{algo}' (PS-585)
+ *   Field '{name}': {type} cannot hold a {algo} result (PS-585)
+ *   The checksum of '{name}': `seed` applies to sum8 and xor8, not {algo} (PS-585)
+ *   The checksum of '{name}': `seed` is a byte, 0 to 255 (PS-585)
+ *   The checksum of '{name}': `from` is a byte offset, 0 or more (PS-585)
+ *   The checksum of '{name}': `on_mismatch` is `error` or `warn` (PS-586)
+ *
+ * Two rules of PS-585 are about the mapping as written - that it is one, and that it has
+ * no other key - and are the caller's, which has the mapping. A `from` past 65535 is
+ * refused as this interpreter's limit (it holds the offset in 16 bits); a payload here
+ * is at most SCHEMA_MAX_PAYLOAD bytes, so such a range would start after any field. */
+static inline int field_set_checksum(field_def_t* f, const char* algo, bool has_seed,
+                                     long seed, long from, const char* on_mismatch,
+                                     char* err, size_t err_len) {
+    const char* name = f->name[0] ? f->name : "<unnamed>";
+    char type[24];
+    if (f->type == FIELD_TYPE_BITS) {
+        int base = f->size ? f->size : 1;
+        snprintf(type, sizeof(type), "%c%d[%d:%d]", f->bit_signed ? 's' : 'u', base * 8,
+                 f->bit_start, f->bit_start + f->bit_width - 1);
+    } else {
+        snprintf(type, sizeof(type), "%s", schema_type_label(f->type));
+    }
+    const int bytes = schema_checksum_type_bytes(f->type);
+    if (bytes == 0) {
+        if (err) snprintf(err, err_len, "Field '%s': a checksum is declared on an unsigned "
+                          "integer type (u8 to u64), not '%s' (PS-585)", name, type);
+        return SCHEMA_ERR_PARSE;
+    }
+    uint8_t code = SCHEMA_CHECKSUM_NONE;
+    for (uint8_t c = SCHEMA_CHECKSUM_SUM8; c <= SCHEMA_CHECKSUM_CRC16_KERMIT; c++) {
+        if (algo && strcmp(algo, schema_checksum_name(c)) == 0) code = c;
+    }
+    if (code == SCHEMA_CHECKSUM_NONE) {
+        if (err) {
+            if (algo) snprintf(err, err_len, "The checksum of '%s': `algo` is one of "
+                               "crc16/kermit, crc8/smbus, sum8, xor8, not '%s' (PS-585)",
+                               name, algo);
+            else snprintf(err, err_len, "The checksum of '%s': `algo` is one of "
+                          "crc16/kermit, crc8/smbus, sum8, xor8, not None (PS-585)", name);
+        }
+        return SCHEMA_ERR_PARSE;
+    }
+    if (bytes * 8 < schema_checksum_bits(code)) {
+        if (err) snprintf(err, err_len, "Field '%s': %s cannot hold a %s result (PS-585)",
+                          name, type, algo);
+        return SCHEMA_ERR_PARSE;
+    }
+    if (has_seed && code != SCHEMA_CHECKSUM_SUM8 && code != SCHEMA_CHECKSUM_XOR8) {
+        if (err) snprintf(err, err_len, "The checksum of '%s': `seed` applies to sum8 and "
+                          "xor8, not %s (PS-585)", name, algo);
+        return SCHEMA_ERR_PARSE;
+    }
+    if (has_seed && (seed < 0 || seed > 255)) {
+        if (err) snprintf(err, err_len, "The checksum of '%s': `seed` is a byte, 0 to 255 "
+                          "(PS-585)", name);
+        return SCHEMA_ERR_PARSE;
+    }
+    if (from < 0) {
+        if (err) snprintf(err, err_len, "The checksum of '%s': `from` is a byte offset, 0 "
+                          "or more (PS-585)", name);
+        return SCHEMA_ERR_PARSE;
+    }
+    if (on_mismatch && strcmp(on_mismatch, "error") != 0 && strcmp(on_mismatch, "warn") != 0) {
+        if (err) snprintf(err, err_len, "The checksum of '%s': `on_mismatch` is `error` or "
+                          "`warn` (PS-586)", name);
+        return SCHEMA_ERR_PARSE;
+    }
+    if (from > 0xFFFF) {
+        if (err) snprintf(err, err_len, "The checksum of '%s': a `from` of %ld is past the "
+                          "65535 this interpreter holds", name, from);
+        return SCHEMA_ERR_PARSE;
+    }
+    f->checksum_algo = code;
+    f->checksum_seed = has_seed ? (uint8_t)seed : 0;
+    f->checksum_from = (uint16_t)from;
+    f->checksum_warn = on_mismatch && strcmp(on_mismatch, "warn") == 0;
+    return SCHEMA_OK;
+}
+
+/* PS-586's warning text for the first checksum a decode found wrong under
+ * `on_mismatch: warn` (decode_result_t.checksum_warnings), rendered from the result and
+ * the payload it was decoded from. False where there is none. */
+static inline bool schema_checksum_warning(const schema_t* schema,
+                                           const decode_result_t* result,
+                                           const uint8_t* buf, size_t len,
+                                           char* out, size_t out_len) {
+    if (result->checksum_warnings == 0) return false;
+    const int index = result->checksum_warning_field;
+    if (index < 0 || index >= SCHEMA_MAX_FIELDS) return false;
+    const field_def_t* field = &schema->fields[index];
+    const size_t at = result->checksum_warning_at;
+    if (at + (size_t)schema_checksum_type_bytes(field->type) > len) return false;
+    schema_checksum_message(out, out_len, field, buf, at,
+                            field->endian != ENDIAN_DEFAULT ? field->endian : schema->endian);
+    return true;
 }
 
 static inline field_def_t field_u24(const char* name, endian_t endian) {
