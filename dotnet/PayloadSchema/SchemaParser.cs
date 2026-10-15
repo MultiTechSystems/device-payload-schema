@@ -363,8 +363,8 @@ public static partial class SchemaParser
     /// PS-510 (CR-2026-102): a field's `ipso` is a mapping carrying `object`, and its `senml`
     /// a mapping. `ipso: 3303` loaded and was dropped, so the author believed the field
     /// annotated and no consumer saw an annotation. The wording is the spec prototype's, and
-    /// Python, Go and Java give it identically. The legacy `semantic: {ipso: N}` is a
-    /// different key, outside PS-510.
+    /// Python, Go and Java give it identically. A `semantic` is a string, a TTN normalized
+    /// path (PS-470, CR-2026-179).
     /// </summary>
     static void CheckAnnotations(YamlMappingNode fm)
     {
@@ -375,7 +375,18 @@ public static partial class SchemaParser
                 + "such as {object: 3303}; a bare object number is not a shorthand (PS-510)");
         if (fm.TryGetValue("senml", out var senml) && senml is not YamlMappingNode)
             throw new InvalidOperationException($"The senml of '{name}' is a mapping, such as {{unit: Cel}} (PS-510)");
+        // PS-470 (CR-2026-179): a TTN normalized path, so a string. A plain scalar YAML 1.2
+        // reads as a number or a boolean is not one.
+        if (fm.TryGetValue("semantic", out var semantic)
+            && !(semantic is YamlScalarNode sem && (sem.Style != YamlDotNet.Core.ScalarStyle.Plain || !IsNonStringPlain(sem.Value))))
+            throw new InvalidOperationException($"The semantic of '{name}' is a string naming a normalized "
+                + "measurement type, such as air.temperature (PS-470)");
     }
+
+    static bool IsNonStringPlain(string? text) =>
+        text == null || text == "" || text == "~" || text == "null" || text == "true" || text == "false"
+        || double.TryParse(text, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out _)
+        || (text.StartsWith("0x") && long.TryParse(text[2..], System.Globalization.NumberStyles.HexNumber, null, out _));
 
     /// <summary>PS-358: a literal's value matches its type, and it carries no arithmetic.</summary>
     static void CheckLiteral(YamlMappingNode fm)

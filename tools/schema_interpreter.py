@@ -1985,6 +1985,11 @@ def annotation_errors(field_def):
                       f"{{object: 3303}}; a bare object number is not a shorthand (PS-510)")
     if 'senml' in field_def and not isinstance(field_def['senml'], dict):
         errors.append(f"The senml of '{name}' is a mapping, such as {{unit: Cel}} (PS-510)")
+    if 'semantic' in field_def and not isinstance(field_def['semantic'], str):
+        # PS-470 (CR-2026-179): a TTN normalized path, so a string; the legacy
+        # `semantic: {ipso: N}` is withdrawn with it, `ipso:` being the IPSO annotation.
+        errors.append(f"The semantic of '{name}' is a string naming a normalized "
+                      f"measurement type, such as air.temperature (PS-470)")
     return errors
 
 
@@ -1992,8 +1997,8 @@ def annotation_schema_errors(node, _top=True):
     """annotation_errors() for every field mapping, wherever it sits: a port list, a case
     body, an object's or repeat's members, a byte_group or flagged group. Walked like
     arithmetic_schema_errors(), over the schema after its `$ref`s are spliced, and over
-    `definitions` too, referenced or not, as Go and C# parse them. The legacy
-    `semantic: {ipso: N}` is a different key, outside PS-510, and is not descended into."""
+    `definitions` too, referenced or not, as Go and C# parse them. An annotation's own
+    contents are not fields and are not descended into."""
     errors = []
     if isinstance(node, dict):
         if not _top:
@@ -4258,6 +4263,8 @@ def field_meta(field_def, repeat=None, siblings=None):
         entry['senml'] = {'name': senml['name']}               # PS-480; a template, PS-373
     if field_def.get('description'):
         entry['description'] = field_def['description']
+    if isinstance(field_def.get('semantic'), str):
+        entry['semantic'] = field_def['semantic']                  # PS-600
     if declared_type == 'repeat' and repeat_members(field_def)[1] is not None:
         # PS-531: the element's own entry, nested, without its name; the repeat keeps
         # `type: repeat` and its identity.
@@ -4412,6 +4419,369 @@ def meta_declaration_errors(schema):
         if isinstance(group, list):
             check(group, 'port %s' % port)
     return errors
+
+
+# =============================================================================
+# TTN normalized payload (CR-2026-179: PS-470, PS-597 to PS-600)
+# =============================================================================
+
+#: The TTN normalized measurement paths and their units, as the spec prototype copies them
+#: (by hand, not fetched) from the `measurement` definition of lib/payload.json in TTN
+#: lorawan-devices at commit 7a0cb2e; keep it in step when TTN extends its schema. None: the
+#: path takes no unit (a boolean, a text, pH).
+TTN_PATHS: Dict[str, Optional[str]] = {
+    'time': None, 'battery': 'V',
+    'soil.depth': 'cm', 'soil.moisture': '%', 'soil.temperature': '°C', 'soil.ec': 'dS/m',
+    'soil.pH': None, 'soil.n': 'ppm', 'soil.p': 'ppm', 'soil.k': 'ppm',
+    'air.location': None, 'air.temperature': '°C', 'air.relativeHumidity': '%',
+    'air.pressure': 'hPa', 'air.co2': 'ppm', 'air.lightIntensity': 'lux',
+    'wind.speed': 'm/s', 'wind.direction': '°',
+    'rain.intensity': 'mm/hour', 'rain.cumulative': 'mm',
+    'water.leak': None, 'water.temperature.min': '°C', 'water.temperature.max': '°C',
+    'water.temperature.avg': '°C', 'water.temperature.current': '°C',
+    'metering.water.total': 'L',
+    'action.motion.detected': None, 'action.motion.count': 'count', 'action.contactState': None,
+    'position.latitude': '°', 'position.longitude': '°',
+}
+
+#: The spellings that already are a path's unit: TTN's own, and its SenML name (Clause 9).
+TTN_UNIT_NAMES: Dict[str, frozenset] = {
+    '°C': frozenset({'°C', 'Cel'}), '%': frozenset({'%', '%RH', '/100'}),
+    'hPa': frozenset({'hPa'}), 'ppm': frozenset({'ppm'}), 'lux': frozenset({'lux', 'lx'}),
+    'm/s': frozenset({'m/s'}), '°': frozenset({'°', 'deg', 'lat', 'lon'}),
+    'mm/hour': frozenset({'mm/hour', 'mm/h'}), 'mm': frozenset({'mm'}),
+    'L': frozenset({'L', 'l'}), 'cm': frozenset({'cm'}), 'V': frozenset({'V'}),
+    'dS/m': frozenset({'dS/m'}), 'count': frozenset({'count'}),
+}
+
+#: PS-599's closed list, by the path's unit and the field's: each a conversion name the
+#: generated codec's normalizeUplink implements identically (TTN_CONVERSION_JS).
+TTN_CONVERSIONS: Dict[str, Dict[str, str]] = {
+    '°C': {'°F': 'degF', 'degF': 'degF'},
+    'V': {'mV': 'mV'},
+    'hPa': {'Pa': 'Pa', 'kPa': 'kPa', 'bar': 'bar', 'inHg': 'inHg'},
+    'm/s': {'km/h': 'km/h', 'mph': 'mph', 'knots': 'knots', 'kn': 'knots', 'kt': 'knots'},
+    '%': {'/': 'fraction'},
+}
+
+#: Each conversion, in the order of operations the generated codec writes it, so both give
+#: the same binary64 result.
+TTN_CONVERSION_FUNCS = {
+    'degF': lambda x: (x - 32) * 5 / 9,
+    'mV': lambda x: x / 1000,
+    'Pa': lambda x: x / 100,
+    'kPa': lambda x: x * 10,
+    'bar': lambda x: x * 1000,
+    'inHg': lambda x: x * 33.86388640341,
+    'km/h': lambda x: x / 3.6,
+    'mph': lambda x: x * 0.44704,
+    'knots': lambda x: x * 1852 / 3600,
+    'fraction': lambda x: x * 100,
+}
+
+
+def ttn_unit_rule(field_def: Dict[str, Any], path: str) -> Tuple[str, Optional[str]]:
+    """How a field's value reaches `path`'s unit (PS-599): ('same', None), ('convert', name)
+    or ('none', why). A field's unit is its `unit` or its `senml.unit`."""
+    target = TTN_PATHS.get(path)
+    if target is None:
+        return ('same', None)
+    senml = field_def.get('senml') if isinstance(field_def.get('senml'), dict) else {}
+    units = [u for u in (field_def.get('unit'), senml.get('unit')) if isinstance(u, str)]
+    if not units:
+        return ('none', f"declares no unit, and {path} is in {target}")
+    if any(u in TTN_UNIT_NAMES.get(target, {target}) for u in units):
+        return ('same', None)
+    for u in units:
+        if u in TTN_CONVERSIONS.get(target, {}):
+            return ('convert', TTN_CONVERSIONS[target][u])
+    return ('none', f"unit {units[0]!r} is not {target} and no rule converts it")
+
+
+def _semantic_fields(fields, prefix=()):
+    """(output path, field) for every field that reports into this object, looking through
+    the merging constructs and into objects; a repeat is yielded as itself, and its elements
+    are walked by the caller. The spec prototype's _semantic_fields."""
+    for item in fields or []:
+        if not isinstance(item, dict):
+            continue
+        if 'type' in item:
+            name = item.get('name')
+            if not isinstance(name, str) or not name or name.startswith('_'):
+                continue
+            if item.get('type') == 'object':
+                yield from _semantic_fields(item.get('fields'), prefix + (name,))
+            else:
+                yield prefix + (name,), item
+            continue
+        spec = next((item[k] for k in ('match', 'tlv', 'flagged', 'byte_group') if k in item),
+                    None)
+        if isinstance(spec, list):
+            for part in spec:
+                yield from _semantic_fields(part if isinstance(part, list) else [part], prefix)
+        elif isinstance(spec, dict):
+            yield from _semantic_fields(spec.get('fields'), prefix)
+            for body in (spec.get('cases') or {}).values():
+                yield from _semantic_fields(body if isinstance(body, list) else None, prefix)
+            default = spec.get('default')
+            yield from _semantic_fields(default if isinstance(default, list) else
+                                        default.get('fields') if isinstance(default, dict)
+                                        else None, prefix)
+            for group in spec.get('groups') or []:
+                yield from _semantic_fields(group.get('fields') if isinstance(group, dict)
+                                            else None, prefix)
+
+
+def _semantic_groups(fields):
+    """The message-level fields by semantic path, each path to {output path: field}; and the
+    repeats, as (output path, repeat field)."""
+    by_path: Dict[str, Dict[Tuple[str, ...], Dict[str, Any]]] = {}
+    repeats = []
+    for out, item in _semantic_fields(fields):
+        if item.get('type') == 'repeat':
+            repeats.append((out, item))
+        elif isinstance(item.get('semantic'), str):
+            by_path.setdefault(item['semantic'], {}).setdefault(out, item)
+    return by_path, repeats
+
+
+def _repeat_element_fields(repeat):
+    element = repeat.get('element')
+    if isinstance(element, dict):
+        return [dict(element, name='value')], True
+    return repeat.get('fields'), False
+
+
+def _uplink_field_lists(schema) -> List[Tuple[Optional[str], list]]:
+    """(port key, field list) of every message a schema decodes: its `ports` entries, a
+    downlink-only entry left out, else its top-level `fields`."""
+    ports = schema.get('ports')
+    if isinstance(ports, dict) and ports:
+        lists = []
+        for key, entry in ports.items():
+            if isinstance(entry, dict):
+                if entry.get('direction') == 'downlink':
+                    continue
+                lists.append((str(key), entry.get('fields') or []))
+            elif isinstance(entry, list):
+                lists.append((str(key), entry))
+        return lists
+    fields = schema.get('fields')
+    return [(None, fields if isinstance(fields, list) else [])]
+
+
+def semantic_warnings(schema: Dict[str, Any]) -> List[str]:
+    """The validator warnings PS-597 asks for, in the spec prototype's words: a `semantic`
+    that is no TTN path, a unit that is neither the path's nor one PS-599 converts, and a
+    path two fields of one message declare outside a repeat. None rejects the schema."""
+    schema = expand_refs(schema)[0]
+    warnings: List[str] = []
+
+    def check(fields):
+        by_path, repeats = _semantic_groups(fields)
+        for path, found in by_path.items():
+            names = ', '.join("'" + '.'.join(out) + "'" for out in found)
+            if path not in TTN_PATHS:
+                warnings.append(f"semantic {path!r} of {names} is not a TTN normalized path "
+                                f"(PS-597)")
+                continue
+            if len(found) > 1:
+                warnings.append(f"semantic {path!r} is declared by {names}; normalizeUplink "
+                                f"omits every value on it (PS-598)")
+            for out, item in found.items():
+                rule, why = ttn_unit_rule(item, path)
+                if rule == 'none':
+                    warnings.append(f"Field '{'.'.join(out)}' ({path}) {why}; the value is "
+                                    f"left out of the normalized payload (PS-597, PS-599)")
+        for _, repeat in repeats:
+            element = repeat.get('element')
+            check([dict(element, name=element.get('name') or 'value')]
+                  if isinstance(element, dict) else repeat.get('fields'))
+
+    for _, fields in _uplink_field_lists(schema):
+        check(fields)
+    return warnings
+
+
+def has_semantic(schema: Dict[str, Any]) -> bool:
+    """Whether any message of the schema declares a `semantic` (PS-598)."""
+    def walk(fields):
+        by_path, repeats = _semantic_groups(fields)
+        return bool(by_path) or any(walk(_repeat_element_fields(r)[0]) for _, r in repeats)
+    return any(walk(fields) for _, fields in _uplink_field_lists(expand_refs(schema)[0]))
+
+
+def _measurement_plan(fields) -> List[Dict[str, Any]]:
+    """One measurement's placements, from a field list: per path, the output paths that
+    report it and how each reaches the path's unit. The JSON-able form the generated codec
+    embeds; normalize() runs the same plan."""
+    by_path, _ = _semantic_groups(fields)
+    plan = []
+    for path, found in by_path.items():
+        if path not in TTN_PATHS:
+            continue                      # PS-597 warned at load; no path to place it at
+        entries = []
+        for out, item in found.items():
+            rule, how = ttn_unit_rule(item, path)
+            entries.append({'at': list(out), 'rule': rule, 'how': how})
+        plan.append({'path': path, 'fields': entries})
+    return plan
+
+
+def _top_level_names(fields) -> Tuple[set, bool]:
+    """The keys a field list can report at the top of its output, and whether it can report
+    a key that is not declared (a `name_from` template)."""
+    names, open_ = set(), False
+
+    def walk(items):
+        nonlocal open_
+        for item in items or []:
+            if not isinstance(item, dict):
+                continue
+            if 'name_from' in item:
+                open_ = True
+            name = item.get('name')
+            if isinstance(name, str) and name and not name.startswith('_'):
+                names.add(name)
+            for key in ('match', 'tlv', 'flagged', 'byte_group'):
+                spec = item.get(key)
+                if isinstance(spec, list):
+                    walk(spec)
+                elif isinstance(spec, dict):
+                    if key == 'tlv' and spec.get('merge') is False:
+                        names.add('channels')
+                    walk(spec.get('fields'))
+                    for body in (spec.get('cases') or {}).values():
+                        walk(body if isinstance(body, list) else None)
+                    default = spec.get('default')
+                    walk(default if isinstance(default, list) else
+                         default.get('fields') if isinstance(default, dict) else None)
+                    for group in spec.get('groups') or []:
+                        walk(group.get('fields') if isinstance(group, dict) else None)
+    walk(fields)
+    return names, open_
+
+
+def normalize_plan(schema: Dict[str, Any]) -> Dict[str, Any]:
+    """The whole normalizeUplink() plan of a schema (PS-598, PS-599): per message (a port
+    key, or '' for a schema without ports) its measurement plan, its repeats' element plans,
+    and the keys it can report, by which a decoded payload with no FPort finds its message.
+    The generated codec embeds it as JSON and normalize() runs it, so both give one result."""
+    schema = expand_refs(schema)[0]
+    messages = []
+    shapes: Dict[str, int] = {}
+    for port, fields in _uplink_field_lists(schema):
+        _, repeats = _semantic_groups(fields)
+        names, open_ = _top_level_names(fields)
+        messages.append({
+            'port': port,
+            'plan': _measurement_plan(fields),
+            'repeats': [{'at': list(out), 'element': _repeat_element_fields(r)[1],
+                         'plan': _measurement_plan(_repeat_element_fields(r)[0])}
+                        for out, r in repeats],
+            'names': sorted(names),
+            'open': open_,
+        })
+        # Messages with one plan place alike, so a payload either fits needs no choosing.
+        shape = json.dumps([messages[-1]['plan'], messages[-1]['repeats']], sort_keys=True)
+        messages[-1]['shape'] = shapes.setdefault(shape, len(shapes))
+    return {'ports': isinstance(schema.get('ports'), dict) and bool(schema.get('ports')),
+            'messages': messages}
+
+
+def _run_measurement(plan, data, warnings) -> Dict[str, Any]:
+    """One normalized measurement from one decoded object (PS-598, PS-599)."""
+    out: Dict[str, Any] = {}
+    for step in plan:
+        path = step['path']
+        present = []
+        for entry in step['fields']:
+            node = data
+            for key in entry['at']:
+                node = node.get(key) if isinstance(node, dict) else None
+            if node is not None:
+                present.append((entry, node))
+        if not present:
+            continue
+        if len(step['fields']) > 1:       # PS-598, as IL-180: place none of them
+            names = ', '.join("'" + '.'.join(e['at']) + "'" for e in step['fields'])
+            warnings.append(f"{path}: declared by {names}; every value on it is left out "
+                            f"(PS-598)")
+            continue
+        entry, value = present[0]
+        where = '.'.join(entry['at'])
+        if entry['rule'] == 'none':
+            warnings.append(f"{path}: field '{where}' {entry['how']}; left out (PS-599)")
+            continue
+        if entry['rule'] == 'convert':
+            if not isinstance(value, (int, float)) or isinstance(value, bool):
+                warnings.append(f"{path}: field '{where}' is not a number; left out (PS-599)")
+                continue
+            value = TTN_CONVERSION_FUNCS[entry['how']](value)
+            if isinstance(value, float) and value.is_integer():
+                value = int(value)        # as JavaScript would write it
+        node = out
+        parts = path.split('.')
+        for part in parts[:-1]:
+            node = node.setdefault(part, {})
+        node[parts[-1]] = value
+    return out
+
+
+def run_normalize_plan(plan: Dict[str, Any], decoded: Dict[str, Any],
+                       fport: Optional[int] = None) -> Dict[str, Any]:
+    """Run a normalize_plan() over decoded data: {data, warnings}. `data` is one measurement,
+    or a list of them where a repeat gives one per element.
+
+    TTN calls normalizeUplink() with the decoded data and no FPort, so for a schema with
+    `ports` the message is the one given by `fport` where known, else the one whose reported
+    keys hold every key of the data that some message declares; where that is not one
+    message (or several with one plan), nothing is placed and a warning says so."""
+    warnings: List[str] = []
+    messages = plan['messages']
+    chosen = None
+    if not plan['ports']:
+        chosen = messages[0] if messages else None
+    elif fport is not None:
+        chosen = next((m for m in messages if m['port'] == str(fport)), None)
+        if chosen is None:
+            chosen = next((m for m in messages if m['port'] == 'default'), None)
+    else:
+        declared = set().union(*(m['names'] for m in messages)) if messages else set()
+        keys = {k for k in decoded if k in declared}
+        fits = [m for m in messages if m['open'] or keys <= set(m['names'])]
+        if len({m['shape'] for m in fits}) == 1:
+            chosen = fits[0]
+        elif fits:
+            warnings.append("normalizeUplink cannot tell which port entry decoded this "
+                            "data; nothing is placed (PS-598)")
+    if chosen is None:
+        return {'data': {}, 'warnings': warnings}
+    base = _run_measurement(chosen['plan'], decoded, warnings)
+    measurements = []
+    for repeat in chosen['repeats']:
+        node = decoded
+        for key in repeat['at']:
+            node = node.get(key) if isinstance(node, dict) else None
+        if not isinstance(node, list):
+            continue
+        for item in node:
+            m = _run_measurement(repeat['plan'], {'value': item} if repeat['element'] else item,
+                                 warnings)
+            if m:
+                measurements.append(m)
+    if measurements:
+        return {'data': ([base] if base else []) + measurements, 'warnings': warnings}
+    return {'data': base, 'warnings': warnings}
+
+
+def normalize(decoded: Dict[str, Any], schema: Dict[str, Any],
+              fport: Optional[int] = None) -> Dict[str, Any]:
+    """TTN normalizeUplink() output for a decoded uplink, from the schema's `semantic`
+    (PS-598, PS-599): {data, warnings}. The spec prototype's normalize(), with the message
+    found from the data where no FPort is given (run_normalize_plan)."""
+    return run_normalize_plan(normalize_plan(schema), decoded, fport)
+
 
 
 class SchemaInterpreter:
@@ -9753,10 +10123,6 @@ class SchemaInterpreter:
                        'description', 'semantic', 'ipso', 'senml', 'senml_unit'):
                 if key in field_def:
                     meta[key] = field_def[key]
-            # Flatten semantic sub-dict
-            if 'semantic' in meta:
-                for k, v in meta.pop('semantic').items():
-                    meta[k] = v
             return meta
         
         def collect_fields(fields: List[Dict[str, Any]], result: Dict[str, Dict]):
@@ -9823,8 +10189,7 @@ class SchemaInterpreter:
             if name not in decoded:
                 continue
             
-            semantic = field_def.get('semantic', {})
-            ipso = semantic.get('ipso')
+            ipso = (field_def.get('ipso') or {}).get('object')
             
             if ipso:
                 obj_id = str(ipso)
@@ -10062,11 +10427,11 @@ if __name__ == '__main__':
         'endian': 'big',
         'fields': [
             {'name': 'temperature', 'type': 's16', 'mult': 0.01, 'unit': '°C',
-             'semantic': {'ipso': 3303}},
+             'ipso': {'object': 3303}},
             {'name': 'humidity', 'type': 'u8', 'mult': 0.5, 'unit': '%RH',
-             'semantic': {'ipso': 3304}},
+             'ipso': {'object': 3304}},
             {'name': 'battery_mv', 'type': 'u16', 'unit': 'mV',
-             'semantic': {'ipso': 3316}},
+             'ipso': {'object': 3316}},
             {'name': 'status', 'type': 'u8'},
         ]
     }

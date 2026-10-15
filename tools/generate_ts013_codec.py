@@ -3030,6 +3030,102 @@ def ref_to_js(ref: str) -> str:
     return str(ref)
 
 
+NORMALIZE_RUNTIME_JS = r'''
+// normalizeUplink (CR-2026-179, PS-598, PS-599): places each field that declares a
+// `semantic` at its TTN normalized path, in TTN's unit. A port of the reference's
+// run_normalize_plan(); NORMALIZE_PLAN is its normalize_plan() of this schema.
+var NORMALIZE_CONVERSIONS = {
+  'degF': function (x) { return (x - 32) * 5 / 9; },
+  'mV': function (x) { return x / 1000; },
+  'Pa': function (x) { return x / 100; },
+  'kPa': function (x) { return x * 10; },
+  'bar': function (x) { return x * 1000; },
+  'inHg': function (x) { return x * 33.86388640341; },
+  'km/h': function (x) { return x / 3.6; },
+  'mph': function (x) { return x * 0.44704; },
+  'knots': function (x) { return x * 1852 / 3600; },
+  'fraction': function (x) { return x * 100; }
+};
+function normAt(node, at) {
+  for (var i = 0; i < at.length; i++) {
+    node = (node !== null && typeof node === 'object' && !Array.isArray(node)) ? node[at[i]] : undefined;
+  }
+  return node;
+}
+function normMeasurement(plan, data, warnings) {
+  var out = {};
+  for (var s = 0; s < plan.length; s++) {
+    var step = plan[s], path = step.path, present = [];
+    for (var f = 0; f < step.fields.length; f++) {
+      var v = normAt(data, step.fields[f].at);
+      if (v !== undefined && v !== null) present.push([step.fields[f], v]);
+    }
+    if (!present.length) continue;
+    if (step.fields.length > 1) {
+      warnings.push(path + ': declared by ' + step.fields.map(function (e) {
+        return "'" + e.at.join('.') + "'"; }).join(', ') + '; every value on it is left out (PS-598)');
+      continue;
+    }
+    var entry = present[0][0], value = present[0][1], where = entry.at.join('.');
+    if (entry.rule === 'none') {
+      warnings.push(path + ": field '" + where + "' " + entry.how + '; left out (PS-599)');
+      continue;
+    }
+    if (entry.rule === 'convert') {
+      if (typeof value !== 'number') {
+        warnings.push(path + ": field '" + where + "' is not a number; left out (PS-599)");
+        continue;
+      }
+      value = NORMALIZE_CONVERSIONS[entry.how](value);
+    }
+    var parts = path.split('.'), node = out;
+    for (var p = 0; p < parts.length - 1; p++) {
+      if (node[parts[p]] === undefined) node[parts[p]] = {};
+      node = node[parts[p]];
+    }
+    node[parts[parts.length - 1]] = value;
+  }
+  return out;
+}
+function normEmpty(o) { for (var k in o) { return false; } return true; }
+function normalizeUplink(input) {
+  var d = (input && input.data) || {}, warnings = [], msgs = NORMALIZE_PLAN.messages, chosen = null;
+  var fPort = input ? input.fPort : undefined;
+  if (!NORMALIZE_PLAN.ports) {
+    chosen = msgs.length ? msgs[0] : null;
+  } else if (fPort !== undefined && fPort !== null) {
+    for (var i = 0; i < msgs.length && !chosen; i++) if (msgs[i].port === String(fPort)) chosen = msgs[i];
+    for (var j = 0; j < msgs.length && !chosen; j++) if (msgs[j].port === 'default') chosen = msgs[j];
+  } else {
+    var declared = {};
+    msgs.forEach(function (m) { m.names.forEach(function (n) { declared[n] = true; }); });
+    var fits = msgs.filter(function (m) {
+      if (m.open) return true;
+      for (var k in d) {
+        if (Object.prototype.hasOwnProperty.call(declared, k) && m.names.indexOf(k) < 0) return false;
+      }
+      return true;
+    });
+    var shapes = {};
+    fits.forEach(function (m) { shapes[m.shape] = true; });
+    if (Object.keys(shapes).length === 1) chosen = fits[0];
+    else if (fits.length) warnings.push('normalizeUplink cannot tell which port entry decoded this data; nothing is placed (PS-598)');
+  }
+  if (!chosen) return { data: {}, warnings: warnings };
+  var base = normMeasurement(chosen.plan, d, warnings), measurements = [];
+  chosen.repeats.forEach(function (r) {
+    var list = normAt(d, r.at);
+    if (!Array.isArray(list)) return;
+    list.forEach(function (item) {
+      var m = normMeasurement(r.plan, r.element ? { value: item } : item, warnings);
+      if (!normEmpty(m)) measurements.push(m);
+    });
+  });
+  if (measurements.length) return { data: (normEmpty(base) ? [] : [base]).concat(measurements), warnings: warnings };
+  return { data: base, warnings: warnings };
+}
+'''
+
 class TS013Generator:
     def __init__(self, schema: Dict[str, Any], source: str = '', slim: bool = False):
         # `slim` builds a decode-only codec: no encoder, and no commentary. A generated
@@ -5746,6 +5842,14 @@ function writeS(buf, pos, size, value, endian) {
                 lines.append('  }')
                 lines.append('}')
 
+        from schema_interpreter import has_semantic, normalize_plan
+        if has_semantic(self.schema):
+            # PS-598: a schema declaring `semantic` gets normalizeUplink(), which runs the
+            # reference's normalize_plan() over decodeUplink's data.
+            lines.append('')
+            lines.append('var NORMALIZE_PLAN = %s;' % json.dumps(normalize_plan(self.schema),
+                                                                ensure_ascii=False))
+            lines.append(NORMALIZE_RUNTIME_JS.strip('\n'))
         return self._restore_output_keys('\n'.join(lines))
 
     def _field_names(self) -> Set[str]:

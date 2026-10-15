@@ -416,6 +416,8 @@ public static partial class Meta
         var description = Value(field, "description");
         if (Truthy(description))
             entry["description"] = description;
+        if (Value(field, "semantic") is string semantic)
+            entry["semantic"] = semantic;                                          // PS-600 (CR-2026-179)
         if (declaredType == "repeat" && SchemaParser.RepeatMembers(field).elementName != null
             && Get(field, "element") is YamlMappingNode elementNode)
         {

@@ -1490,8 +1490,20 @@ payload as though the block were absent.
   unit: "°C"
   ipso: {object: 3303, instance: 0, resource: 5700}   # IPSO object/instance/resource
   senml: {name: "temperature", unit: "Cel"}           # SenML record name and unit
-  semantic: "air.temperature"                          # Dotted semantic name
+  semantic: "air.temperature"                          # TTN normalized path (PS-470)
 ```
+
+**`semantic` is a TTN normalized measurement path** (CR-2026-179, PS-470): a string from
+the `measurement` definition of TTN's `lib/payload.json` (`air.temperature`,
+`air.relativeHumidity`, `soil.moisture`, `position.latitude`, `battery`, ...). Anything
+else that is not a string is rejected. `_meta.fields` carries it unchanged (PS-600). The
+validator warns of a path TTN does not define, of a unit that is neither the path's nor one
+normalizeUplink converts, and of two fields of one message on one path (PS-597). A
+generated TS013 codec gains `normalizeUplink()`, which places each value at its path in
+TTN's unit (PS-598, PS-599): it converts °F, mV, Pa/kPa/bar/inHg, km/h/mph/knots and a
+fraction (`/`), and otherwise leaves the value out with a warning - a field with no `unit`
+on a path that has one included, and every value on a path two fields declare. So declare
+`unit` beside `semantic`, and do not put a battery in % on `battery`, which is in V.
 
 All three are needed for the semantic points in `tools/score_schema.py`; see
 `schemas/devices/decentlab/dl-5tm.yaml` for the canonical form. A bare `ipso: 3303` is
@@ -1799,7 +1811,7 @@ fields:
     unit: "%"
     ipso: {object: 3304, instance: 0, resource: 5700}
     senml: {name: "humidity", unit: "%RH"}
-    semantic: "air.humidity"
+    semantic: "air.relativeHumidity"
     valid_range: [0, 100]
 
   - name: battery_voltage
@@ -1808,7 +1820,7 @@ fields:
     unit: "V"
     ipso: {object: 3316, instance: 0, resource: 5700}
     senml: {name: "vbat", unit: "V"}
-    semantic: "battery.voltage"
+    semantic: "battery"
 
 # Illustrative: this device is invented, so its vectors are computed by hand from
 # the layout above and declared `source: generated`. A real schema takes them from
