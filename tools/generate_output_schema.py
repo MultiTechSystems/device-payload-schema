@@ -108,6 +108,26 @@ def lookup_json_schema(lookup: Any) -> Optional[Dict[str, Any]]:
     return schema
 
 
+def time_json_schema(spec: Dict[str, Any]) -> Dict[str, Any]:
+    """What a field declaring `time` reports (PS-610 to PS-613, CR-2026-186)."""
+    fmt = spec.get('format')
+    if fmt == 'unix':
+        return {"type": "integer" if spec.get('milliseconds') is True else "number"}
+    if fmt == 'iso8601':
+        return {"type": "string", "format": "date-time"}
+    if fmt == 'calendar':
+        keys = spec.get('keys') if isinstance(spec.get('keys'), dict) else {}
+        labels = spec.get('month_labels')
+        props = {}
+        for part in ('year', 'month', 'day', 'hour', 'minute', 'second'):
+            props[keys.get(part, part)] = (
+                {"enum": list(labels)} if part == 'month' and isinstance(labels, list)
+                else {"type": "integer"})
+        return {"type": "object", "properties": props, "required": list(props),
+                "additionalProperties": False}
+    return {"type": "string"}
+
+
 def yaml_type_to_json_schema(field_type: str, field_def: Dict[str, Any]) -> Dict[str, Any]:
     """Convert YAML field type to JSON Schema type definition."""
     
@@ -266,6 +286,11 @@ def field_to_json_schema(field_def: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     # If field has modifiers, output becomes number
     if has_modifiers(field_def) and schema.get('type') == 'integer':
         schema = {"type": "number"}
+
+    # PS-610 to PS-613 (CR-2026-186): a time field is reported in its format.
+    spec = field_def.get('time')
+    if isinstance(spec, dict):
+        schema = time_json_schema(spec)
     
     # Handle lookup - the reported value is the mapped one, typed from the mapping
     if 'lookup' in field_def:

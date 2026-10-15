@@ -193,6 +193,8 @@ public class SchemaField
     public string? NameFrom { get; set; }
     /// <summary>A `type: string` field's text joined from earlier values (PS-590, CR-2026-176).</summary>
     public string? Template { get; set; }
+    /// <summary>The instant this field reports in place of its number (PS-610, CR-2026-186).</summary>
+    public TimeSpec? Time { get; set; }
 
     // Variable
     public string? Var { get; set; }

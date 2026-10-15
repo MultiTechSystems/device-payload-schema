@@ -153,6 +153,8 @@ public class Schema {
         Checksum.check(raw);
         // CR-2026-161: a lookup's labels are of one type (PS-571).
         Reports.check(raw);
+        // CR-2026-186: a `time` on a numeric field, with the keys of its format (PS-610 to PS-614).
+        TimeField.check(raw);
         Schema schema = new Schema();
         schema.pointers = DecodeRecord.pointerMap(raw);                // PS-572
         schema.repeatOnlyNames = Wave6a.repeatOnlyNames(raw);
@@ -1871,7 +1873,10 @@ public class Schema {
                 // later fields can reference, but is not reported. Without this an
                 // intermediate used to combine two words appeared in the output.
                 if (!field.getName().startsWith("_")) {
-                    Object reported = normalizeOutput(value);
+                    // PS-610 (CR-2026-186): reported as an instant in its format; a
+                    // reference still binds the number.
+                    Object reported = TimeField.isTimeField(field)
+                            ? TimeField.format(field, value) : normalizeOutput(value);
                     if (reported != null) {
                         String outputName = resolveFieldName(field, ctx);
                         if (!outputName.equals(field.getName())) {
@@ -3563,6 +3568,8 @@ public class Schema {
     }
 
     private Object decodeComputed(Field field, DecodeContext ctx) {
+        // PS-614 (CR-2026-186): the instant its parts name; null where a part has no value.
+        if (TimeField.hasParts(field)) return TimeField.fromParts(field, ctx);
         boolean computed = field.getRef() != null || field.getCompute() != null;
         if (computed && field.getGuard() != null && !guardPasses(field.getGuard(), ctx, false)) {
             // PS-444: a failing guard reports the declared fallback untouched - no

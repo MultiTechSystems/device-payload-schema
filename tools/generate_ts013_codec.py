@@ -32,6 +32,257 @@ DEFAULT_PORT_DIRECTION = 'both'
 
 #: The runtime encoder every generated codec carries. A port of the reference's encode
 #: path; see the comment at its head.
+TIME_RUNTIME_JS = r'''// --- A field reports a time (PS-610 to PS-615, CR-2026-186) ---
+// The reference's format_time, time_from_parts and parse_time. An instant is exact: whole
+// seconds since 1970, floored (`w`, a Number), and the fraction's decimal digits (`f`). A
+// double enters through String(v), its shortest decimal, so a fraction never drifts; a
+// millisecond count, `fraction` and %L truncate.
+var TIME_PARTS = ["year", "month", "day", "hour", "minute", "second"];
+var TIME_MON = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+var TIME_DAY = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+function tdText(s) {                                  // "[-]d[.d][e±n]" -> {w, f}
+  var m = /^(-?)(\d+)(?:\.(\d*))?(?:e([+-]?\d+))?$/i.exec(s);
+  var digits = m[2] + (m[3] || ""), point = m[2].length + (m[4] ? parseInt(m[4], 10) : 0);
+  while (point <= 0) { digits = "0" + digits; point++; }
+  while (digits.length < point) digits += "0";
+  var ip = digits.slice(0, point), fp = digits.slice(point).replace(/0+$/, "");
+  var w = parseInt(ip, 10) || 0;
+  if (m[1] !== "-") return { w: w, f: fp };
+  if (!fp) return { w: -w, f: "" };
+  return { w: -w - 1, f: tdComplement(fp) };
+}
+function tdComplement(f) {                            // the digits of 1 - 0.f
+  var out = "", borrow = 0;
+  for (var k = f.length - 1; k >= 0; k--) {
+    var d = (k === f.length - 1 ? 10 : 9) - parseInt(f.charAt(k), 10);
+    out = String(d) + out;
+  }
+  return out.replace(/0+$/, "");
+}
+function tdAdd(a, b) {
+  var n = Math.max(a.f.length, b.f.length), x = a.f, y = b.f, out = "", carry = 0;
+  while (x.length < n) x += "0";
+  while (y.length < n) y += "0";
+  for (var k = n - 1; k >= 0; k--) {
+    var s = parseInt(x.charAt(k), 10) + parseInt(y.charAt(k), 10) + carry;
+    out = String(s % 10) + out;
+    carry = s >= 10 ? 1 : 0;
+  }
+  return { w: a.w + b.w + carry, f: out.replace(/0+$/, "") };
+}
+function tdNeg(a) { return a.f ? { w: -a.w - 1, f: tdComplement(a.f) } : { w: -a.w, f: "" }; }
+function tdDigits(a, n) { var f = a.f; while (f.length < n) f += "0"; return f.slice(0, n); }
+function tdNumber(a) {                                // the nearest double, as float(Decimal)
+  if (!a.f) return a.w;
+  if (a.w >= 0) return Number(a.w + "." + a.f);
+  return Number("-" + (-a.w - 1) + "." + tdComplement(a.f));
+}
+function tdText10(a) {                                // the decimal, for an error message
+  if (!a.f) return String(a.w);
+  return a.w >= 0 ? a.w + "." + a.f : "-" + (-a.w - 1) + "." + tdComplement(a.f);
+}
+function timeValidCivil(y, mo, d, h, mi, s) {
+  if (!(y >= 1 && y <= 9999 && mo >= 1 && mo <= 12 && h >= 0 && h <= 23 && mi >= 0 &&
+        mi <= 59 && s >= 0 && s <= 59 && d >= 1)) return false;
+  var leap = (y % 4 === 0 && y % 100 !== 0) || y % 400 === 0;
+  return d <= [31, leap ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31][mo - 1];
+}
+function timeDaysFromCivil(y, m, d) {
+  y -= m <= 2 ? 1 : 0;
+  var era = Math.floor(y / 400), yoe = y - era * 400;
+  var doy = Math.floor((153 * (m + (m > 2 ? -3 : 9)) + 2) / 5) + d - 1;
+  var doe = yoe * 365 + Math.floor(yoe / 4) - Math.floor(yoe / 100) + doy;
+  return era * 146097 + doe - 719468;
+}
+function timeCivilFromDays(z) {
+  z += 719468;
+  var era = Math.floor(z / 146097), doe = z - era * 146097;
+  var yoe = Math.floor((doe - Math.floor(doe / 1460) + Math.floor(doe / 36524) - Math.floor(doe / 146096)) / 365);
+  var doy = doe - (365 * yoe + Math.floor(yoe / 4) - Math.floor(yoe / 100));
+  var mp = Math.floor((5 * doy + 2) / 153), d = doy - Math.floor((153 * mp + 2) / 5) + 1;
+  var m = mp + (mp < 10 ? 3 : -9);
+  return [yoe + era * 400 + (m <= 2 ? 1 : 0), m, d];
+}
+function timeCivilSeconds(y, mo, d, h, mi, s) {
+  return timeDaysFromCivil(y, mo, d) * 86400 + h * 3600 + mi * 60 + s;
+}
+function timeParse3339(text, zOnly) {                 // RFC 3339 UTC -> {w, f}, or null
+  var m = typeof text === "string" &&
+    (zOnly ? /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(\.\d+)?Z$/
+           : /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(\.\d+)?(Z|\+00:00)$/).exec(text);
+  if (!m) return null;
+  var p = m.slice(1, 7).map(function (x) { return parseInt(x, 10); });
+  if (!timeValidCivil(p[0], p[1], p[2], p[3], p[4], p[5])) return null;
+  return { w: timeCivilSeconds(p[0], p[1], p[2], p[3], p[4], p[5]),
+           f: m[7] ? m[7].slice(1).replace(/0+$/, "") : "" };
+}
+function timeEpoch(spec, key) { return key in spec ? timeParse3339(spec[key], true) : { w: 0, f: "" }; }
+function pad2(n) { return (n < 10 ? "0" : "") + n; }
+function pad4(n) { var t = String(n); while (t.length < 4) t = "0" + t; return t; }
+/* PS-610 to PS-613: the instant `v` seconds after the field's epoch, in its format. A value
+ * that is no number (absent) passes through. */
+function timeOut(spec, v, name) {
+  if (typeof v !== "number" || !isFinite(v)) return v;
+  var t = tdAdd(timeEpoch(spec, "epoch"), tdText(String(v)));
+  if (spec.format === "unix") {
+    var c = tdAdd(t, tdNeg(timeEpoch(spec, "since")));
+    if (spec["milliseconds"] === true) return c.w * 1000 + parseInt(tdDigits(c, 3), 10);
+    return tdNumber(c);
+  }
+  var days = Math.floor(t.w / 86400), rest = t.w - days * 86400;
+  var ymd = timeCivilFromDays(days), y = ymd[0], mo = ymd[1], d = ymd[2];
+  if (y < 1 || y > 9999) throw new Error("Field '" + name + "': the time " + tdText10(t) + " s is outside years 1 to 9999 (PS-610)");
+  var h = Math.floor(rest / 3600), mi = Math.floor(rest / 60) % 60, s = rest % 60;
+  if (spec.format === "iso8601") {
+    var text = pad4(y) + "-" + pad2(mo) + "-" + pad2(d) + "T" + pad2(h) + ":" + pad2(mi) + ":" + pad2(s);
+    if ("fraction" in spec) text += "." + tdDigits(t, spec.fraction);
+    else if (t.f) text += "." + t.f;
+    return text + "Z";
+  }
+  if (spec.format === "calendar") {
+    var keys = spec["keys"] || {}, labels = spec["month_labels"];
+    var vals = { year: y, month: labels ? labels[mo - 1] : mo, day: d, hour: h, minute: mi, second: s };
+    var o = {};
+    TIME_PARTS.forEach(function (p) { o[keys[p] || p] = vals[p]; });
+    return o;
+  }
+  var out = { Y: pad4(y), m: pad2(mo), d: pad2(d), H: pad2(h), M: pad2(mi), S: pad2(s),
+              L: tdDigits(t, 3), b: TIME_MON[mo - 1], a: TIME_DAY[(((days + 3) % 7) + 7) % 7], "%": "%" };
+  return spec.pattern.replace(/%([\s\S])/g, function (_, k) { return out[k]; });
+}
+/* PS-614: the seconds since 1970 of the instant the parts name, or undefined where one has
+ * no value. `refs` maps each declared part to its variable. */
+function timeParts(refs, vars, name) {
+  var got = {}, shown = [];
+  for (var k = 0; k < TIME_PARTS.length; k++) {
+    var p = TIME_PARTS[k];
+    if (!(p in refs)) continue;
+    var v = vars[refs[p]];
+    if (typeof v !== "number" || !isFinite(v)) return undefined;
+    if (Math.floor(v) !== v) throw new Error("Field '" + name + "': its " + p + " is " + String(v) + ", not a whole number (PS-614)");
+    got[p] = v;
+    shown.push("'" + p + "': " + v);
+  }
+  var a = TIME_PARTS.map(function (p) { return got[p] || 0; });
+  if (!timeValidCivil(a[0], a[1], a[2], a[3], a[4], a[5])) {
+    throw new Error("Field '" + name + "': its parts {" + shown.join(", ") + "} do not name a valid UTC date and time (PS-614)");
+  }
+  return timeCivilSeconds(a[0], a[1], a[2], a[3], a[4], a[5]);
+}
+/* PS-615: a pattern lacking a date or time directive cannot be read back; the message, or null. */
+function timeReadbackError(f) {
+  var spec = f.time;
+  if (spec.format !== "pattern") return null;
+  var tokens = {}, re = /%([\s\S])/g, m;
+  while ((m = re.exec(spec.pattern))) tokens[m[1]] = 1;
+  if (tokens.Y && tokens.d && tokens.H && tokens.M && tokens.S && (tokens.m || tokens.b)) return null;
+  return "Field '" + f.name + "': its pattern '" + spec.pattern + "' cannot be read back to an instant; the schema decodes but is not encoded (PS-615)";
+}
+/* PS-615: a time field's value in its format, as {w, f} seconds since 1970 (parse_time). */
+function timeParse(f, value) {
+  var spec = f.time, fmt = spec.format;
+  function bad(why) {
+    var shown = typeof value === "string" ? "'" + value + "'" : (typeof value === "object" && value !== null ? JSON.stringify(value) : String(value));
+    return new Error("Field '" + f.name + "': " + shown + " is not a time in its " + fmt + " format" + (why || "") + " (PS-615)");
+  }
+  function instant(y, mo, d, h, mi, s, frac) {
+    if (!timeValidCivil(y, mo, d, h, mi, s)) throw bad();
+    return { w: timeCivilSeconds(y, mo, d, h, mi, s), f: frac || "" };
+  }
+  function isInt(v) { return typeof v === "number" && isFinite(v) && Math.floor(v) === v; }
+  if (fmt === "unix") {
+    if (typeof value !== "number" || !isFinite(value)) throw bad();
+    var c = tdText(String(value));
+    if (spec["milliseconds"] === true) c = tdText(tdText10(c) + "e-3");
+    return tdAdd(c, timeEpoch(spec, "since"));
+  }
+  if (fmt === "iso8601") {
+    var parsed = timeParse3339(value, false);
+    if (!parsed) throw bad();
+    return parsed;
+  }
+  if (fmt === "calendar") {
+    if (value === null || typeof value !== "object" || Array.isArray(value)) throw bad();
+    var keys = spec["keys"] || {}, got = {};
+    TIME_PARTS.forEach(function (p) { got[p] = value[keys[p] || p]; });
+    var labels = spec["month_labels"];
+    if (labels) {
+      var at = labels.indexOf(got.month);
+      if (at < 0) throw bad("; month " + (typeof got.month === "string" ? "'" + got.month + "'" : String(got.month)) + " is not a label");
+      got.month = at + 1;
+    }
+    if (!TIME_PARTS.every(function (p) { return isInt(got[p]); })) throw bad();
+    return instant(got.year, got.month, got.day, got.hour, got.minute, got.second);
+  }
+  var err = timeReadbackError(f);
+  if (err) throw new Error(err);
+  var pattern = spec.pattern, regex = "", groups = [], pos = 0, tm, re = /%([\s\S])/g;
+  function esc(s) { return s.replace(/[.*+?^${}()|[\]\\\/-]/g, "\\$&"); }
+  while ((tm = re.exec(pattern))) {
+    regex += esc(pattern.slice(pos, tm.index));
+    var tok = tm[1];
+    if (tok === "%") regex += "%";
+    else {
+      regex += tok === "Y" ? "(\\d{4})" : tok === "L" ? "(\\d{3})" : tok === "b" ? "(" + TIME_MON.join("|") + ")"
+             : tok === "a" ? "(" + TIME_DAY.join("|") + ")" : "(\\d{2})";
+      groups.push(tok);
+    }
+    pos = re.lastIndex;
+  }
+  regex += esc(pattern.slice(pos));
+  var match = typeof value === "string" ? new RegExp("^" + regex + "$").exec(value) : null;
+  if (!match) throw bad();
+  var g = {};
+  for (var k = 0; k < groups.length; k++) {
+    if (groups[k] in g && g[groups[k]] !== match[k + 1]) throw bad();
+    g[groups[k]] = match[k + 1];
+  }
+  var month = "b" in g ? TIME_MON.indexOf(g.b) + 1 : parseInt(g.m, 10);
+  if ("m" in g && "b" in g && parseInt(g.m, 10) !== month) throw bad("; its month and month name disagree");
+  var result = instant(parseInt(g.Y, 10), month, parseInt(g.d, 10), parseInt(g.H, 10), parseInt(g.M, 10),
+                       parseInt(g.S, 10), "L" in g ? g.L.replace(/0+$/, "") : "");
+  if ("a" in g && TIME_DAY[(((Math.floor(result.w / 86400) + 3) % 7) + 7) % 7] !== g.a) {
+    throw bad("; " + g.a + " is not that date's weekday");
+  }
+  return result;
+}
+/* PS-615: the number PS-610 reads for a time field's value (time_input_seconds). */
+function timeInputSeconds(f, value) {
+  return tdNumber(tdAdd(timeParse(f, value), tdNeg(timeEpoch(f.time, "epoch"))));
+}
+/* PS-615: a `parts` time field's value gives its part fields' values (expand_time_parts). A
+ * part that reads no bytes cannot be written, so the field is refused for encoding. */
+function encTimeParts(fields, data) {
+  if (data === null || typeof data !== "object") return data;
+  var known = {}, out = null;
+  fields.forEach(function (f) { if (f && typeof f === "object" && f.name !== undefined && !(f.name in known)) known[f.name] = f; });
+  fields.forEach(function (f) {
+    if (!f || typeof f !== "object" || !f.time || typeof f.time !== "object" || !f.time.parts) return;
+    var v = data[f.name];
+    if (v === undefined || v === null) return;
+    var whole = timeParse(f, v).w, days = Math.floor(whole / 86400), rest = whole - days * 86400;
+    var ymd = timeCivilFromDays(days);
+    var moment = { year: ymd[0], month: ymd[1], day: ymd[2], hour: Math.floor(rest / 3600),
+                   minute: Math.floor(rest / 60) % 60, second: rest % 60 };
+    if (out === null) { out = {}; for (var k in data) out[k] = data[k]; }
+    TIME_PARTS.forEach(function (p) {
+      if (!(p in f.time.parts)) return;
+      var key = String(f.time.parts[p]).slice(1), src = known[key];
+      if (src && ["number", "integer", "string", "boolean"].indexOf(src.type) >= 0) {
+        throw new Error("Field '" + f.name + "': its " + p + " part '" + key + "' reads no bytes, so the schema decodes but is not encoded (PS-615)");
+      }
+      var given = moment[p];
+      if (out[key] !== undefined && out[key] !== null && out[key] !== given) {
+        throw new Error("Field '" + f.name + "': its " + p + " is " + given + ", but '" + key + "' is given " + (typeof out[key] === "string" ? "'" + out[key] + "'" : String(out[key])) + " (PS-615)");
+      }
+      out[key] = given;
+    });
+  });
+  return out === null ? data : out;
+}
+'''
+
+
 ENCODER_RUNTIME_JS = r'''// --- Encoder ---
 // The inverse of the decoder, as a port of tools/schema_interpreter.py's `encode` and
 // `_encode_field_list`. It walks the schema's field list, embedded beside it as JSON,
@@ -154,6 +405,8 @@ function encFits(raw, bits, signed, f, given, rangeType) {   // check_fits
 }
 
 function encReverseModifiers(v, f) {                  // _reverse_modifiers
+  // PS-615 (CR-2026-186): the value in its format, as the seconds since the epoch.
+  if (f.time && typeof f.time === "object") v = timeInputSeconds(f, v);
   encGivenRec = { f: f, v: v };
   v = encReverseLookup(v, f.lookup, f.name);
   if (typeof v === "boolean" && f.lookup) {
@@ -2333,6 +2586,9 @@ function encRecordedCase(m, key) {                    // _recorded_case
 }
 
 function encDerive(fields, data, ctx) {                 // _derive_inputs
+  if ((fields || []).some(function (f) { return f && f.time && typeof f.time === "object" && f.time.parts; })) {
+    data = encTimeParts(fields, data);                  // PS-615 (CR-2026-186)
+  }
   var d = {};
   for (var k in data) d[k] = data[k];
   if (ctx.rec) encRecordedInputs(fields, data, d, ctx);   // PS-573
@@ -3148,6 +3404,25 @@ def length_to_js(field: Dict[str, Any], default: Any = 1) -> str:
     return str(int(declared))
 
 
+def _declares_time(node: Any) -> bool:
+    """Whether any field declares `time` (CR-2026-186), so the codec needs its runtime."""
+    if isinstance(node, list):
+        return any(_declares_time(item) for item in node)
+    if isinstance(node, dict):
+        if isinstance(node.get('time'), dict) and 'type' in node:
+            return True
+        return any(_declares_time(v) for k, v in node.items() if k != 'test_vectors')
+    return False
+
+
+def time_report_js(field: Dict[str, Any], value: str) -> str:
+    """The JS for a field's reported value: an instant in its `time` format (PS-610), else
+    the value itself. A reference to the field still binds the number."""
+    if not isinstance(field.get('time'), dict):
+        return value
+    return f'timeOut({json.dumps(field["time"])}, {value}, {json.dumps(str(field.get("name")))})'
+
+
 def name_from_to_js(field: Dict[str, Any], js_name: str) -> Tuple[List[str], str]:
     """Build the JS for a field's output key, honouring `name_from` (PS-265..PS-267).
 
@@ -3406,6 +3681,9 @@ class TS013Generator:
         lines.append('')
         lines.append(self._gen_helpers())
         lines.append('')
+        if _declares_time(self.schema):
+            lines.append(TIME_RUNTIME_JS)                    # CR-2026-186
+            lines.append('')
         if not self.slim:
             lines.append(self._gen_encoder_runtime())
             lines.append('')
@@ -4757,6 +5035,14 @@ function writeS(buf, pos, size, value, endian) {
             # for a field read from the payload. `compute` used to drop the modifiers,
             # and both dropped the lookup. The guard wraps the whole chain, so a failed
             # one reports its `else` as declared (PS-444).
+            if isinstance(field.get('time'), dict) and 'parts' in field['time']:
+                # PS-614 (CR-2026-186): the instant its parts name, from their variables.
+                refs = {part: to_js_name(str(ref)[1:])
+                        for part, ref in field['time']['parts'].items()}
+                value_expr = (f'timeParts({json.dumps(refs)}, vars, '
+                              f'{json.dumps(str(field["name"]))})')
+                lines.extend(self._computed_tail(i, field, name, value_expr))
+                return lines
             if 'ref' in field or 'compute' in field:
                 if 'ref' in field:
                     value_expr = ref_to_js(field['ref'])
@@ -4827,7 +5113,7 @@ function writeS(buf, pos, size, value, endian) {
             if not name.startswith('_'):
                 guards, target = name_from_to_js(field, js_name)
                 body.extend(guards)
-                body.append(f'{target} = {js_name}_out;')
+                body.append(f'{target} = {time_report_js(field, js_name + "_out")};')
             lines.append(f'{i}  if ({js_name}_out !== undefined) {{ ' + ' '.join(body) + ' }')
             return lines
         if ftype == 'string' and 'value' not in field:
@@ -4920,7 +5206,7 @@ function writeS(buf, pos, size, value, endian) {
             guards, target = name_from_to_js(field, js_name)
             for guard in guards:
                 lines.append(f'{i}  {guard}')
-            lines.append(f'{i}  {target} = {js_name}_out;')
+            lines.append(f'{i}  {target} = {time_report_js(field, js_name + "_out")};')
             return lines
 
         # bool (PS-065, PS-066): one bit of the current byte as a JSON boolean, with no
@@ -4943,7 +5229,7 @@ function writeS(buf, pos, size, value, endian) {
                 guards, target = name_from_to_js(field, js_name)
                 for guard in guards:
                     lines.append(f'{i}  {guard}')
-                lines.append(f'{i}  {target} = {js_name}_out;')
+                lines.append(f'{i}  {target} = {time_report_js(field, js_name + "_out")};')
             return lines
 
         # skip
@@ -5031,7 +5317,7 @@ function writeS(buf, pos, size, value, endian) {
                         guards, target = name_from_to_js(field, js_name)
                         for guard in guards:
                             lines.append(f'{i}  {guard}')
-                        lines.append(f'{i}  {target} = {js_name}_out;')
+                        lines.append(f'{i}  {target} = {time_report_js(field, js_name + "_out")};')
                     return lines
             elif ftype == 'bytes' and field.get('format', 'hex') in ('base64', 'array'):
                 # PS-079: the declared format. Ignored before, so every bytes field was
@@ -5089,7 +5375,7 @@ function writeS(buf, pos, size, value, endian) {
                 guards, target = name_from_to_js(field, js_name)
                 for guard in guards:
                     lines.append(f'{i}  {guard}')
-                lines.append(f'{i}  {target} = {js_name}_out;')
+                lines.append(f'{i}  {target} = {time_report_js(field, js_name + "_out")};')
             return lines
 
         # The MCCI minifloats (CR-2026-063): a word in the field's effective byte order.
@@ -5106,7 +5392,7 @@ function writeS(buf, pos, size, value, endian) {
                 guards, target = name_from_to_js(field, js_name)
                 for guard in guards:
                     lines.append(f'{i}  {guard}')
-                lines.append(f'{i}  {target} = {js_name}_out;')
+                lines.append(f'{i}  {target} = {time_report_js(field, js_name + "_out")};')
             return lines
 
         # Nibble-decimal (PS-329, PS-330): upper nibble whole, lower nibble tenths, the
@@ -5126,7 +5412,7 @@ function writeS(buf, pos, size, value, endian) {
                 guards, target = name_from_to_js(field, js_name)
                 for guard in guards:
                     lines.append(f'{i}  {guard}')
-                lines.append(f'{i}  {target} = {js_name}_out;')
+                lines.append(f'{i}  {target} = {time_report_js(field, js_name + "_out")};')
             return lines
 
         # integer
@@ -5172,6 +5458,12 @@ function writeS(buf, pos, size, value, endian) {
         bounds = field.get('valid_range')
         if field.get('out_of_range') != 'omit' or not isinstance(bounds, (list, tuple)) \
                 or len(bounds) != 2:
+            if isinstance(field.get('time'), dict):
+                # PS-610 (CR-2026-186): reported as an instant; the name binds the number.
+                tmp = f'_c_{to_js_name(name)}'
+                return [f'{i}  var {tmp} = {value_expr};',
+                        f'{i}  d.{name} = {time_report_js(field, tmp)};'] + \
+                    [f'{i}  {s}' for s in self._bind_js(field, name, tmp, False)]
             return [f'{i}  d.{name} = {value_expr};'] + \
                 [f'{i}  {s}' for s in self._bind_js(field, name, f'd.{name}', False)]
         tmp = f'_c_{to_js_name(name)}'
@@ -5181,7 +5473,7 @@ function writeS(buf, pos, size, value, endian) {
         return [f'{i}  var {tmp} = {value_expr};',
                 f'{i}  if (!rvs[{key}] && typeof {v} === "number" && ({v} < {bounds[0]} || {v} > {bounds[1]})) '
                 f'{{ aqr[{json.dumps(name)}] = "out_of_range"; }}',
-                f'{i}  else {{ d.{name} = {tmp}; '
+                f'{i}  else {{ d.{name} = {time_report_js(field, tmp)}; '
                 + ' '.join(self._bind_js(field, name, tmp, False)) + ' }']
 
     @staticmethod
@@ -5217,7 +5509,7 @@ function writeS(buf, pos, size, value, endian) {
         if not name.startswith('_'):
             guards, target = name_from_to_js(field, js_name)
             body.extend(guards)
-            body.append(f'{target} = {js_name}_out;')
+            body.append(f'{target} = {time_report_js(field, js_name + "_out")};')
         conditions = []
         bucket = 'aqr' if field.get('valid_range') else 'aqp'
         key = json.dumps(name)
