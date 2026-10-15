@@ -3703,18 +3703,25 @@ improved. The Go, Java and C# corpus runners write per-vector reports only when
     2203), `plain fixed` 185 -> 199.
 
 - **CR-2026-184 (PS-607, amended 2026-10-15 to an INFO note; la-payload-schema branches
-  `cr/0.5.8-apply-184-185` and `cr/0.5.8-ps607-info`, for 0.5.8): a validator may note bits a
+  `cr/0.5.8-apply-184-185` and `cr/0.5.8-ps607-info` (e784da1), for 0.5.8): a validator may note bits a
   skip discards.** Where a `skip`, or a bit range's `consume`, advances past a byte that bit
   ranges or bools consuming nothing read only in part, the bits no field reads are lost
   (decoded nowhere, encoded as 0). As amended, a validator MAY report it as information, as
   PS-482 does, and MUST NOT report it as an error or warning or reject the schema. A byte
   nothing reads in part, and a byte_group member's unnamed bits (PS-553), draw nothing.
   - **Where:** Python `skip_bit_notes()` in `tools/schema_interpreter.py`, a port of the
-    prototype's function (`_skip_bit_check`, `_skip_bit_nested`, `_bit_list`) with its message
+    prototype's function (`_skip_bit_walk`, `_BitTrack`, `_bit_list`) with its message
     verbatim: `byte 0 is read in part (bits 0, 5-7) and the skip '_b0' advances past it; bits
     1-4 are read by no field. A decoder discards them and an encoder writes them as 0 (PS-607)`,
-    prefixed `port N: ` per port. Each field list is walked in order from its start, silent once
-    a field's size is unknown; a nested list is checked from its own start and says `a byte`.
+    prefixed `port N: ` per port. The walk follows one decode path (`_skip_bit_walk` over a
+    `_BitTrack`, the prototype's at e784da1): an object's members continue the same bytes, each
+    match case or flagged group starts from a copy of the state before it (an inline
+    discriminator read first), a repeat's or tlv's bodies are walked on their own from their
+    own start (saying `a byte`), tracking stops after a construct of unknown size, and a note
+    repeated on several paths is given once. The first version checked every nested list on
+    its own, so a bit a sibling object or the enclosing list read (dnt's `auto_time_sync_en`,
+    a case after its discriminator) was reported as unread; a runtime trace of the registry
+    vectors found that, and the prototype changed.
     It runs over the `$ref`-spliced document. `validate_schema()` reports each note through
     `ValidationResult.add_info` (level `INFO`, `schema_info`, printed `[INFO]` under `-v`),
     never `add_warning`. PS-482 itself is not produced in this repository; that INFO level is
@@ -3723,16 +3730,22 @@ improved. The Go, Java and C# corpus runners write per-vector reports only when
   - **Go, Java and C# have no validator-message surface** (no load-time warnings or notes;
     PS-524 and PS-597 are Python-only too), so nothing was added there. C reads no YAML.
     Decode and encode are unchanged everywhere.
-  - **Cases:** `tests/cr-2026-184-cases.yaml` (the prototype's nine tests), read by
+  - **Cases:** `tests/cr-2026-184-cases.yaml` (the prototype's eleven tests), read by
     `test_cr_2026_184_skip_bits.py` (`skip_bit_notes()`; `validate_schema()` with the note as
     info and no PS-607 warning; and the decode the note does not stop). A note cannot be a
     corpus vector: no fixture, no floor moves.
-  - **Measured** (Python, read only): corpus 19 of 378 device schemas, 98 places (dnt lw-wsci
-    51, vobo 11, Milesight ct10x/ct30x/em310-tilt/ws302/ws50x/wt201 29, five
-    `_language-conformance` fixtures 7); private registry 269 of 543 schemas, 1,523 places at
-    ddab991, 1,495 at bd5d398 after the Watteco `_fc` fix (each of the 28 Watteco schemas loses
-    its frame-control header byte and keeps the rest, e.g. port 125's `batch` byte, bit 6).
-    Most are reserved bits that are always 0, which is why the spec made it information.
+  - **Measured** (Python, read only). With the path walk: corpus 19 of 378 device schemas,
+    59 places (vobo 11, dnt lw-wsci 18, Milesight 23, five `_language-conformance` fixtures
+    7); private registry 280 of 543 schemas, 988 places at ddab991, and 260 of 543, 938 places
+    at bd5d398 and at 7976739 - the spec prototype's 938 in 260 exactly. The first,
+    per-list walk gave corpus 19 schemas, 98 places; registry 269 schemas, 1,523 places at
+    ddab991 and 1,495 at bd5d398 (after the Watteco `_fc` fix).
+  - **By what the vectors show, at 7976739** (each schema's decoding vectors traced over the
+    byte a note names): 189 notes the unread bits are 0 in every vector that reaches the
+    byte, 286 they are set and no field reads them, 398 they are set but a field on another
+    path reads them (tektelic `join_mode` across tlv entries 147, dnt 49, jooby 31, watteco
+    `batch` 29), 65 no vector reaches the byte. Most set-and-unread bits come from crafted
+    all-0xFF vectors (Dragino 55 schemas, Dingtek 13, Netvox 9).
 
 - **CR-2026-183 (PS-096 amended, PS-605, PS-606; la-payload-schema main, for 0.5.8): encoding
   a bitfield_string's segments.** Decode is unchanged. An encoder removes the declared `prefix`
