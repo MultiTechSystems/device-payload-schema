@@ -3467,8 +3467,8 @@ improved. The Go, Java and C# corpus runners write per-vector reports only when
     (`FormatNumber`), the codec's `partFormat` / `partText` / `bitfieldPart` and the runtime's
     `encSegmentBits` (exact at 64 bits through byte and bit arrays, no BigInt). Go, Java and C#
     parse a segment through a big integer, so a 64-bit range check is exact.
-  - **Not changed:** a string with fewer segments than parts still fills the rest with `0`, and
-    extra segments are ignored, in all five; the prototype rejects a count mismatch.
+  - **Not changed here:** a string with fewer segments than parts still filled the rest with
+    `0`, and extra segments were ignored, in all five; CR-2026-183 (next entry) rejects both.
   - **C:** has no bitfield_string; `tools/schema_binary.py` already refuses the type by name.
   - **Vocabulary:** no new key. `schemas/payload-schema.json` now describes the third element of
     a part with a pattern; `docs/SCHEMA-LANGUAGE-REFERENCE.md`'s Bitfield String section gains
@@ -3484,6 +3484,44 @@ improved. The Go, Java and C# corpus runners write per-vector reports only when
     round-tripping). **Floors:** decode 2801 -> 2815 in Go, Java and C#; re-encode +14
     everywhere (Python and Java 2199 -> 2213, C# 2200 -> 2214, Go 2217 -> 2231, plain 2189 ->
     2203), `plain fixed` 185 -> 199.
+
+- **CR-2026-183 (PS-096 amended, PS-605, PS-606; la-payload-schema main, for 0.5.8): encoding
+  a bitfield_string's segments.** Decode is unchanged. An encoder removes the declared `prefix`
+  and rejects a value without it, then splits the rest on the delimiter and rejects a segment
+  count other than the part count - never filling a missing part with 0 or ignoring an extra
+  segment (PS-605). With `delimiter: ""` it splits by each part's `:N` width (PS-606); a field
+  whose parts lack a width holding their largest value (`hex:2` for 8 bits, `decimal:3`) or
+  carry an `sdecimal` part is refused for encoding only, and still decodes.
+  - **Messages, the prototype's, unprefixed:** `Field 'v': '1.3' does not begin with its prefix
+    'V' (PS-605)`, `Field 'v': 'V1.3.5' has 3 segment(s) for 2 part(s) (PS-605)`, `Field 'v':
+    with an empty delimiter every part needs a :N width that holds its largest value, and none
+    may be sdecimal, so this field cannot be encoded (PS-606)` and `Field 'v': 'a1b' has 3
+    characters for parts of widths [2, 2] (PS-606)`; values as Python's repr.
+  - **Where:** Python `bitfield_segments` / `split_by_width` (`_encode_bitfield_string`), the
+    runtime's `encBitfieldString` / `encSplitByWidth`, Go `go/schema/cr183.go`
+    (`bitfieldSegments`, `splitByWidth`), Java `BitfieldParts.segments`, C#
+    `BitfieldParts.Segments`. A part's largest value is measured with CR-2026-170's formatter.
+  - **Measured before:** every encoder took a value lacking the prefix as prefixed (`1.3` wrote
+    `0103`), filled a missing segment with 0 and ignored an extra one. An empty delimiter: the
+    reference and the runtime failed (`empty separator`), Java split per character and wrote
+    the first characters silently (`0a1b` as `000a`), C# kept one segment and failed PS-583,
+    and **Go also decoded it wrong**, joining the parts with `.` (it could not tell an empty
+    delimiter from an absent one; `Field.DelimiterDeclared` now does).
+  - **C:** has no bitfield_string. No new key, so no vocabulary change.
+  - **Cases:** `tests/cr-2026-183-cases.yaml` (the prototype's
+    `TestCR2026183BitfieldStringSegments` case for case, plus a prefix before width splitting and
+    the default delimiter), read by `test_cr_2026_183_cases.py` (reference and generated codec),
+    Go `cr183_test.go`, Java `CR2026183Test`, C# `CR2026_183Tests`. Fixture
+    `_language-conformance/bitfield-string-width-split.yaml`: three decodes that round-trip and
+    two encode rejections (PS-605, PS-606, run by Python and the codec). **Floors:** decode 2842
+    -> 2845 in Go, Java and C#; re-encode +3 everywhere (Python and Java 2239 -> 2242, C# 2240
+    -> 2243, Go 2257 -> 2260, plain 2229 -> 2232), `plain fixed` 225 -> 228.
+  - **Corpus and registry (Python, read only, every vector decoded and re-encoded before and
+    after):** no corpus schema but the fixture has an empty delimiter or changes. The registry
+    has 404 empty-delimiter fields in 66 schemas, 400 splittable: +89 round trips (milesight
+    wt303/wt304 76, browan l0010 13), none lost. 4 fields in 2 schemas are unsplittable (gwf
+    rcm-lrw10, emu profii-lp-codec_generic: 14 vectors) and are now refused with PS-606, where
+    they failed with `empty separator`. No vector relied on a filled part or a missing prefix.
 
 - **CR-2026-169 (PS-581; la-payload-schema main, for 0.5.7): which port entry an encoder
   uses.** An encoder of a schema with `ports` encodes one entry and reports the FPort it used:

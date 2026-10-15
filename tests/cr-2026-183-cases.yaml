@@ -1,0 +1,100 @@
+# CR-2026-183 (PS-096, PS-605, PS-606): encoding a bitfield_string. A value without the
+# declared prefix, or with a segment count other than the part count, is rejected; it is
+# never taken as prefixed, a missing part is never filled with 0 and an extra segment never
+# ignored (PS-605). An empty delimiter splits the value by each part's `:N` width; a field
+# whose parts lack a width holding their largest value, or carry an sdecimal part, is
+# refused for encoding only and still decodes (PS-606).
+#
+# Read by the reference and the generated codec (tests/test_cr_2026_183_cases.py), Go
+# (go/schema/cr183_test.go), Java (CR2026183Test.java) and C# (CR2026_183Tests.cs). C has no
+# bitfield_string (PS-446).
+#
+#   decode: `schema` (YAML text), `payload` (hex) and `expected` (the value of `v`).
+#   cases:  `schema`, `input` (JSON text) and either `payload` (hex) or `error`.
+#
+# The errors are the spec prototype's text (TestCR2026183BitfieldStringSegments). A part
+# format is quoted wherever it carries a colon.
+
+decode:
+
+- name: an_empty_delimiter_joins_the_parts
+  schema: "name: t\nendian: big\nfields:\n  - {name: v, type: bitfield_string, length: 2, delimiter: '', parts: [[8, 8, 'hex:2'], [0, 8, 'hex:2']]}\n"
+  payload: "0a1b"
+  expected: "0a1b"
+
+- name: unsplittable_without_a_width_still_decodes
+  schema: "name: t\nendian: big\nfields:\n  - {name: v, type: bitfield_string, length: 2, delimiter: '', parts: [[8, 8, hex], [0, 8, hex]]}\n"
+  payload: "0a1b"
+  expected: "a1b"
+
+- name: unsplittable_narrow_width_still_decodes
+  schema: "name: t\nendian: big\nfields:\n  - {name: v, type: bitfield_string, length: 2, delimiter: '', parts: [[8, 8, 'decimal:2'], [0, 8, 'decimal:2']]}\n"
+  payload: "0a1b"
+  expected: "1027"
+
+- name: unsplittable_sdecimal_still_decodes
+  schema: "name: t\nendian: big\nfields:\n  - {name: v, type: bitfield_string, length: 2, delimiter: '', parts: [[8, 8, 'sdecimal:3'], [0, 8, 'sdecimal:3']]}\n"
+  payload: "0a1b"
+  expected: "010027"
+
+cases:
+
+- name: the_prefix_given
+  schema: "name: t\nendian: big\nfields:\n  - {name: v, type: bitfield_string, length: 2, prefix: V, delimiter: '.', parts: [[8, 8], [0, 8]]}\n"
+  input: '{"v": "V1.03"}'
+  payload: "0103"
+
+- name: the_prefix_is_required
+  schema: "name: t\nendian: big\nfields:\n  - {name: v, type: bitfield_string, length: 2, prefix: V, delimiter: '.', parts: [[8, 8], [0, 8]]}\n"
+  input: '{"v": "1.3"}'
+  error: "Field 'v': '1.3' does not begin with its prefix 'V' (PS-605)"
+
+- name: an_extra_segment
+  schema: "name: t\nendian: big\nfields:\n  - {name: v, type: bitfield_string, length: 2, prefix: V, delimiter: '.', parts: [[8, 8], [0, 8]]}\n"
+  input: '{"v": "V1.3.5"}'
+  error: "Field 'v': 'V1.3.5' has 3 segment(s) for 2 part(s) (PS-605)"
+
+- name: a_missing_segment
+  schema: "name: t\nendian: big\nfields:\n  - {name: v, type: bitfield_string, length: 2, prefix: V, delimiter: '.', parts: [[8, 8], [0, 8]]}\n"
+  input: '{"v": "V1"}'
+  error: "Field 'v': 'V1' has 1 segment(s) for 2 part(s) (PS-605)"
+
+- name: a_missing_segment_with_the_default_delimiter
+  schema: "name: t\nendian: big\nfields:\n  - {name: v, type: bitfield_string, length: 2, parts: [[8, 8], [0, 8]]}\n"
+  input: '{"v": "7"}'
+  error: "Field 'v': '7' has 1 segment(s) for 2 part(s) (PS-605)"
+
+- name: an_empty_delimiter_splits_by_width
+  schema: "name: t\nendian: big\nfields:\n  - {name: v, type: bitfield_string, length: 2, delimiter: '', parts: [[8, 8, 'hex:2'], [0, 8, 'hex:2']]}\n"
+  input: '{"v": "0A1B"}'
+  payload: "0a1b"
+
+- name: a_prefix_before_width_splitting
+  schema: "name: t\nendian: big\nfields:\n  - {name: v, type: bitfield_string, length: 2, prefix: v, delimiter: '', parts: [[8, 8, 'decimal:3'], [0, 8, 'decimal:3']]}\n"
+  input: '{"v": "v010027"}'
+  payload: "0a1b"
+
+- name: a_value_too_short_for_the_widths
+  schema: "name: t\nendian: big\nfields:\n  - {name: v, type: bitfield_string, length: 2, delimiter: '', parts: [[8, 8, 'hex:2'], [0, 8, 'hex:2']]}\n"
+  input: '{"v": "a1b"}'
+  error: "Field 'v': 'a1b' has 3 characters for parts of widths [2, 2] (PS-606)"
+
+- name: a_value_too_long_for_the_widths
+  schema: "name: t\nendian: big\nfields:\n  - {name: v, type: bitfield_string, length: 2, delimiter: '', parts: [[8, 8, 'hex:2'], [0, 8, 'hex:2']]}\n"
+  input: '{"v": "0a1b2c"}'
+  error: "Field 'v': '0a1b2c' has 6 characters for parts of widths [2, 2] (PS-606)"
+
+- name: unsplittable_without_a_width
+  schema: "name: t\nendian: big\nfields:\n  - {name: v, type: bitfield_string, length: 2, delimiter: '', parts: [[8, 8, hex], [0, 8, hex]]}\n"
+  input: '{"v": "0a1b"}'
+  error: "Field 'v': with an empty delimiter every part needs a :N width that holds its largest value, and none may be sdecimal, so this field cannot be encoded (PS-606)"
+
+- name: unsplittable_narrow_width
+  schema: "name: t\nendian: big\nfields:\n  - {name: v, type: bitfield_string, length: 2, delimiter: '', parts: [[8, 8, 'decimal:2'], [0, 8, 'decimal:2']]}\n"
+  input: '{"v": "0a1b"}'
+  error: "Field 'v': with an empty delimiter every part needs a :N width that holds its largest value, and none may be sdecimal, so this field cannot be encoded (PS-606)"
+
+- name: unsplittable_sdecimal
+  schema: "name: t\nendian: big\nfields:\n  - {name: v, type: bitfield_string, length: 2, delimiter: '', parts: [[8, 8, 'sdecimal:3'], [0, 8, 'sdecimal:3']]}\n"
+  input: '{"v": "0a1b"}'
+  error: "Field 'v': with an empty delimiter every part needs a :N width that holds its largest value, and none may be sdecimal, so this field cannot be encoded (PS-606)"

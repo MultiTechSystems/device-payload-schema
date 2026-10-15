@@ -3239,23 +3239,21 @@ public static class SchemaEncoder
         /// </remarks>
         byte[] EncodeBitfieldString(SchemaField field, string value)
         {
-            var text = value;
-            var prefix = field.Prefix ?? "";
-            if (prefix.Length > 0 && text.StartsWith(prefix))
-                text = text[prefix.Length..];
-            var delimiter = field.Delimiter ?? ".";
-            var segments = text.Split(delimiter);
+            var parts = field.Parts
+                .Where(p => p.Count >= 2 && Helpers.ToInt(p[0]).Item1 && Helpers.ToInt(p[1]).Item1)
+                .ToList();
+            // PS-605, PS-606 (CR-2026-183): the prefix required, the segment count checked, an
+            // empty delimiter split by width.
+            var segments = BitfieldParts.Segments(field.Name, field.Prefix, field.Delimiter, parts, value);
 
             ulong packed = 0;
-            for (int i = 0; i < field.Parts.Count; i++)
+            for (int i = 0; i < parts.Count; i++)
             {
-                var part = field.Parts[i];
-                if (part.Count < 2) continue;
-                var (offOk, bitOff) = Helpers.ToInt(part[0]);
-                var (lenOk, bitLen) = Helpers.ToInt(part[1]);
-                if (!offOk || !lenOk) continue;
+                var part = parts[i];
+                var (_, bitOff) = Helpers.ToInt(part[0]);
+                var (_, bitLen) = Helpers.ToInt(part[1]);
                 object? format = part.Count >= 3 ? part[2] : "decimal";
-                string segment = i < segments.Length ? segments[i] : "0";
+                string segment = segments[i];
                 // PS-096, PS-431, PS-583: parsed by the part's format; a value the width
                 // cannot hold is rejected, never masked.
                 ulong raw = BitfieldParts.ParseSegment(segment, bitLen, format, field.Name);

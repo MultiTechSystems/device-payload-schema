@@ -880,17 +880,45 @@ function encSegmentBits(segment, width, fmt, name) {  // parse_bitfield_segment
   return out;
 }
 
+function encSplitByWidth(text, parts, name, value) {  // split_by_width
+  // PS-606 (CR-2026-183): an empty delimiter splits by each part's `:N` width. A part with
+  // no width holding its largest value, or an sdecimal part, makes the field unencodable.
+  var widths = [], total = 0, i;
+  for (i = 0; i < parts.length; i++) {
+    var bits = Number(parts[i][1]), pf = partFormat(parts[i].length > 2 ? parts[i][2] : "decimal");
+    var largest = pf.base.indexOf("hex") === 0 ? Math.max(1, Math.ceil(bits / 4)) : encPow2Text(bits, true).length;
+    if (pf.base === "sdecimal" || !pf.width || largest > pf.width)
+      encFail("Field '" + name + "': with an empty delimiter every part needs a :N width that holds its largest value, and none may be sdecimal, so this field cannot be encoded (PS-606)");
+    widths.push(pf.width);
+    total += pf.width;
+  }
+  if (text.length !== total)
+    encFail("Field '" + name + "': " + encPyRepr(value) + " has " + text.length + " characters for parts of widths [" + widths.join(", ") + "] (PS-606)");
+  var segs = [], at = 0;
+  for (i = 0; i < widths.length; i++) { segs.push(text.slice(at, at + widths[i])); at += widths[i]; }
+  return segs;
+}
+
 function encBitfieldString(out, f, value, ctx) {      // _encode_bitfield_string
-  var parts = f.parts || [], delim = f.delimiter === undefined ? "." : f.delimiter;
+  var parts = (f.parts || []).filter(function (p) { return p.length >= 2; });
+  var delim = f.delimiter === undefined ? "." : f.delimiter;
   var prefix = f.prefix || "", length = f.length === undefined ? 2 : f.length;
   value = String(value);
-  if (prefix && value.indexOf(prefix) === 0) value = value.slice(prefix.length);
-  var segs = value.split(delim), packed = {};
+  var text = value;
+  // PS-605 (CR-2026-183): a value without the declared prefix is rejected, and a segment
+  // count other than the part count is never filled or cut.
+  if (prefix) {
+    if (text.indexOf(prefix) !== 0)
+      encFail("Field '" + f.name + "': " + encPyRepr(value) + " does not begin with its prefix " + encPyRepr(prefix) + " (PS-605)");
+    text = text.slice(prefix.length);
+  }
+  var segs = delim === "" ? encSplitByWidth(text, parts, f.name, value) : text.split(delim), packed = {};
+  if (segs.length !== parts.length)
+    encFail("Field '" + f.name + "': " + encPyRepr(value) + " has " + segs.length + " segment(s) for " + parts.length + " part(s) (PS-605)");
   for (var i = 0; i < parts.length; i++) {
     var p = parts[i];
-    if (p.length < 2) continue;
     var fmt = p.length > 2 ? p[2] : "decimal";
-    var seg = i < segs.length ? segs[i] : "0";
+    var seg = segs[i];
     var start = Number(p[0]), width = Number(p[1]);
     var bits = encSegmentBits(seg, width, fmt, f.name);
     for (var b = 0; b < width; b++) if (bits[b]) packed[start + b] = 1;
