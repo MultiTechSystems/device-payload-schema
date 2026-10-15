@@ -5177,6 +5177,189 @@ def semantic_warnings(schema: Dict[str, Any]) -> List[str]:
     return warnings
 
 
+def _bit_list(bits) -> str:
+    """Bit numbers as runs: {0, 5, 6, 7} is 'bits 0, 5-7'; {7} is 'bit 7'."""
+    runs: List[List[int]] = []
+    ordered = sorted(bits)
+    for bit in ordered:
+        if runs and bit == runs[-1][1] + 1:
+            runs[-1][1] = bit
+        else:
+            runs.append([bit, bit])
+    text = ', '.join(str(a) if a == b else f"{a}-{b}" for a, b in runs)
+    return ('bit ' if len(ordered) == 1 else 'bits ') + text
+
+
+def _skip_bit_positions(member: Dict[str, Any], endian: str) -> set:
+    """The (byte, bit) positions a bit range, bool or whole integer covers, bytes counted
+    from where it reads, in its byte order (PS-059)."""
+    base, low, high, _ = byte_group_member_range(member)
+    positions = set()
+    for bit in range(low, high + 1):
+        index = bit // 8 if endian == 'little' else base - 1 - bit // 8
+        positions.add((index, bit % 8))
+    return positions
+
+
+class _BitTrack:
+    """PS-607's view of one decode path, as the spec prototype's: the bits read in place, per
+    byte offset, and where the read position is. `known` says whether offsets still count
+    from the frame's start."""
+
+    def __init__(self, known: bool):
+        self.read: Dict[int, set] = {}
+        self.position = 0
+        self.known = known
+
+    def copy(self) -> '_BitTrack':
+        other = _BitTrack(self.known)
+        other.read = {k: set(v) for k, v in self.read.items()}
+        other.position = self.position
+        return other
+
+    def lose(self) -> None:
+        self.read.clear()
+        self.position, self.known = 0, False
+
+
+def _skip_bit_walk(fields: Any, track: _BitTrack, endian: str, notes: List[str]) -> None:
+    """PS-607 along one decode path, as the spec prototype's `_skip_bit_walk`. Bits are
+    tracked across the frame: an object's members continue the same bytes, and each match
+    case or flagged group starts from a copy of the state before it (an inline discriminator
+    read first), so a bit any field of the same path reads counts as read. A construct whose
+    size the walk cannot know ends the tracking afterwards, and a repeat's or tlv's bodies
+    are walked on their own; the check stays silent rather than guess."""
+
+    def advance(count: int, by: str) -> None:
+        for offset in range(track.position, track.position + count):
+            bits = track.read.pop(offset, None)
+            if bits and len(bits) < 8:
+                where = f"byte {offset}" if track.known else "a byte"
+                notes.append(
+                    f"{where} is read in part ({_bit_list(bits)}) and {by} advances past "
+                    f"it; {_bit_list(set(range(8)) - bits)} "
+                    f"{'is' if len(bits) == 7 else 'are'} read by no field. A decoder "
+                    f"discards them and an encoder writes them as 0 (PS-607)")
+        track.position += count
+
+    def branches(bodies) -> None:
+        for body in bodies:
+            if isinstance(body, dict):
+                body = body.get('fields')
+            if isinstance(body, list):
+                _skip_bit_walk(body, track.copy(), endian, notes)
+        track.lose()
+
+    def apart(bodies) -> None:
+        for body in bodies:
+            if isinstance(body, dict) and 'type' in body:
+                body = [body]
+            elif isinstance(body, dict):
+                body = body.get('fields')
+            if isinstance(body, list):
+                _skip_bit_walk(body, _BitTrack(False), endian, notes)
+
+    for item in fields or []:
+        if not isinstance(item, dict):
+            continue
+        kind = str(item.get('type', '')).strip()
+        lower = kind.lower()
+        lower = _META_TYPE_ALIASES.get(lower, lower)
+        if not kind:  # a construct
+            if 'match' in item and isinstance(item['match'], dict):
+                spec = item['match']
+                if 'type' in spec:  # an inline discriminator is read first
+                    _skip_bit_walk([{k: v for k, v in spec.items()
+                                     if k in ('name', 'type', 'consume', 'bit', 'endian')}],
+                                   track, endian, notes)
+                cases = spec.get('cases')
+                bodies = list(cases.values()) if isinstance(cases, dict) else []
+                if spec.get('default') is not None:
+                    bodies.append(spec['default'])
+                branches(bodies)
+            elif 'flagged' in item and isinstance(item['flagged'], dict):
+                branches(item['flagged'].get('groups') or [])
+            elif 'tlv' in item and isinstance(item['tlv'], dict):
+                cases = item['tlv'].get('cases')
+                apart(list(cases.values()) if isinstance(cases, dict) else [])
+                track.lose()
+            elif 'records' in item and isinstance(item['records'], list):
+                apart(item['records'])
+                track.lose()
+            else:
+                track.lose()  # byte_group (PS-553) and the rest
+            continue
+        name = item.get('name')
+        label = f"'{name}'" if name else f"the {lower}"
+        own = item.get('endian', endian)
+        if lower == 'skip':
+            length = item.get('length')
+            if isinstance(length, int) and not isinstance(length, bool):
+                advance(length, f"the skip {label}" if name else "a skip")
+            else:
+                track.lose()
+            continue
+        if lower == 'object':
+            _skip_bit_walk(item.get('fields'), track, own, notes)  # the same bytes go on
+            continue
+        if lower == 'repeat':
+            apart([item.get('element')] + [item.get('fields'), item.get('trailer')])
+            track.lose()
+            continue
+        if 'value' in item or 'compute' in item or 'template' in item \
+                or lower in ('string', 'number', 'boolean'):
+            continue
+        bit_field = lower == 'bool' or _BIT_RANGE.match(kind) is not None
+        if bit_field or (lower in _FIXED_TYPE_SIZES and item.get('consume') == 0):
+            member = item if bit_field else dict(item, type=lower)
+            if lower == 'bool' and 'bit' not in item:
+                member = dict(item, bit=0)
+            try:
+                positions = _skip_bit_positions(member, own)
+            except ValueError:
+                track.lose()
+                continue
+            for index, bit in positions:
+                track.read.setdefault(track.position + index, set()).add(bit)
+            consume = item.get('consume', 0 if bit_field else None)
+            if isinstance(consume, int) and not isinstance(consume, bool) and consume > 0:
+                advance(consume, f"{label}, with consume: {consume},")
+            continue
+        if lower in _FIXED_TYPE_SIZES:
+            for offset in range(track.position, track.position + _FIXED_TYPE_SIZES[lower]):
+                track.read.pop(offset, None)  # read whole
+            track.position += _FIXED_TYPE_SIZES[lower]
+            continue
+        track.lose()
+
+
+def skip_bit_notes(schema: Dict[str, Any]) -> List[str]:
+    """The information note PS-607 allows (CR-2026-184, amended 2026-10-15), in the spec
+    prototype's words: a byte some of whose bits are read by fields that consume nothing,
+    and which a skip or a `consume` then advances past with other bits read by no field on
+    the same decode path. It is information only, never a warning or an error, and never
+    rejects the schema. A byte_group is not checked: PS-553 lets a member leave reserved
+    bits unnamed. A note repeated on several paths is given once."""
+    schema = expand_refs(schema)[0]
+    endian = schema.get('endian', 'big')
+    notes: List[str] = []
+    ports = schema.get('ports')
+    if isinstance(ports, dict) and ports:
+        for port, entry in ports.items():
+            fields = entry.get('fields', []) if isinstance(entry, dict) else entry
+            found: List[str] = []
+            _skip_bit_walk(fields if isinstance(fields, list) else [], _BitTrack(True),
+                           endian, found)
+            notes.extend(f"port {port}: {w}" for w in found)
+    else:
+        header = schema.get('header')
+        fields = schema.get('fields')
+        _skip_bit_walk((header if isinstance(header, list) else [])
+                       + (fields if isinstance(fields, list) else []),
+                       _BitTrack(True), endian, notes)
+    return list(dict.fromkeys(notes))
+
+
 def has_semantic(schema: Dict[str, Any]) -> bool:
     """Whether any message of the schema declares a `semantic` (PS-598)."""
     def walk(fields):
