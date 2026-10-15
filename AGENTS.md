@@ -3483,6 +3483,54 @@ improved. The Go, Java and C# corpus runners write per-vector reports only when
   - **Cases:** `tests/cr-2026-178-cases.yaml` (the prototype's three tests as eight), read by
     `test_cr_2026_178_cases.py`, Go `cr178_test.go`, Java `CR2026178Test`, C# `CR2026_178Tests`.
 
+- **CR-2026-179 (PS-470 amended, PS-597 to PS-600; la-payload-schema main, for 0.5.7):
+  `semantic` is a TTN normalized path, and a generated codec gains `normalizeUplink()`.**
+  - **PS-470:** a `semantic` that is not a string is rejected at load, in the prototype's text:
+    `The semantic of 't' is a string naming a normalized measurement type, such as
+    air.temperature (PS-470)`. Python `annotation_errors` (interpreter, validator, TS013
+    generator), Go `checkAnnotations`, Java `Schema.checkAnnotations`, C# `CheckAnnotations` (a
+    plain scalar YAML 1.2 reads as a number, boolean or null is not a string). The legacy
+    `semantic: {ipso: N}` is rejected with it: `get_field_metadata`/`get_semantic_output` read
+    `ipso: {object}`, `schema_binary.py` no longer reads the old form, and the vocabulary's
+    `semantic` context is gone. Measured before: no corpus, library, example or registry schema
+    used a non-string `semantic`.
+  - **PS-600:** `_meta.fields` entries carry `semantic` unchanged, after `description`, at every
+    depth: Python `field_meta`, Go `fieldMeta`, Java `Meta.fieldMeta`, C# `Meta.FieldMeta`. Before,
+    none of the four carried it. `make gate-verdicts` rule 3 holds them equal.
+  - **PS-597:** `semantic_warnings()` (Python, the prototype's function and words) gives the
+    validator's three warnings - a path TTN does not define, a unit neither the path's nor
+    converted, a path two fields of one message declare outside a repeat; `validate_schema` adds
+    them as warnings. Nothing is rejected.
+  - **PS-598/599:** `normalize_plan()` computes, per message (port), each path's fields and how
+    each reaches TTN's unit (`TTN_PATHS`, `TTN_UNIT_NAMES`, `TTN_CONVERSIONS`, copied from the
+    prototype: °F/degF, mV, Pa/kPa/bar/inHg, km/h/mph/knots/kn/kt, `/`); `run_normalize_plan()`
+    runs it, and the TS013 generator embeds the same plan as `NORMALIZE_PLAN` with
+    `NORMALIZE_RUNTIME_JS` (slim codecs too), only where some field declares `semantic`. A value
+    with no unit on a path that has one, an unconvertible unit, and every value on a duplicate
+    path are left out with a warning. **One addition the prototype lacks:** TTN calls
+    `normalizeUplink` with decodeUplink's output and no fPort, so for a `ports` schema the
+    message is the one given by `input.fPort` if present, else the port entries whose
+    reportable keys hold every declared key of the data; where those disagree on placement,
+    nothing is placed, with a warning.
+  - **Go, Java, C# and C** produce no normalized payload (the generated codec and the IL do).
+    C has no `_meta`; `semantic` is an annotation C carries nothing for, so `schema_binary.py`
+    does not refuse it.
+  - **Cases:** `tests/cr-2026-179-cases.yaml` (the prototype's nine tests as 19), read by
+    `test_cr_2026_179_cases.py` (reference, validator, and the generated normalizeUplink under
+    node, full and slim, which must equal `normalize()`), Go `cr179_test.go`, Java
+    `CR2026179Test`, C# `CR2026_179Tests` (the `meta` and `error` cases). Fixture
+    `meta-semantic.yaml` (`expected_meta` at top level, object member, repeat element): decode
+    +2 in Go, Java and C# (2842 -> 2844); re-encode +2 everywhere, `repeat` 26 -> 28 (Python and
+    Java 2239 -> 2241, C# 2240 -> 2242, Go 2257 -> 2259, plain 2229 -> 2231).
+  - **Measured** (Python, corpus at this branch, registry read only): no decode or encode output
+    changes. With semantic: corpus 132 schemas, 127 normalize every placed path, 9 PS-597
+    warnings; registry 256 schemas, 126 ready, 148 place something, 354 warnings. Nearly every
+    registry warning is a field with no `unit` on a path that has one (relative humidity 141,
+    latitude/longitude 91, co2 41, light 34, wind direction 13, motion count 5): PS-599 leaves
+    them out, where the registry's `bin/normalized.py` counts them ready (its `NO_UNIT_OK`); the
+    rest are `℃` and `%rH`, not in the prototype's spellings. Duplicate paths: 10 schemas (e.g.
+    Milesight am102's `temperature` beside its history object's `temperature`).
+
 - **CR-2026-170 (PS-430, PS-582 and PS-583 new, PS-096 amended; la-payload-schema main for
   0.5.7): padded and signed bitfield_string parts.** A part format is `decimal`, `sdecimal`,
   `hex` or `hex:upper`, optionally followed by `:N`, a minimum width from 1 to 32: a part with

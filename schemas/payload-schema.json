@@ -157,18 +157,8 @@
           "description": "The value an encoder writes where the input omits the field (PS-554); an enum's unmapped label (PS-068)"
         },
         "semantic": {
-          "type": "object",
-          "properties": {
-            "ipso": {
-              "type": "integer",
-              "description": "IPSO Smart Object ID"
-            },
-            "senml": {
-              "type": "string",
-              "description": "SenML name"
-            }
-          },
-          "description": "Semantic mapping for output formats"
+          "type": "string",
+          "description": "A TTN normalized measurement path, such as air.temperature (PS-470); carried in _meta (PS-600) and placed by a generated normalizeUplink (PS-598, PS-599)"
         },
         "description": {
           "type": "string",

@@ -659,8 +659,8 @@ public class Schema {
      * PS-510 (CR-2026-102): a field's {@code ipso} is a mapping carrying {@code object}, and
      * its {@code senml} a mapping. {@code ipso: 3303} loaded and was dropped, so the author
      * believed the field annotated and no consumer saw an annotation. The wording is the
-     * spec prototype's, and Python, Go and C# give it identically. The legacy
-     * {@code semantic: {ipso: N}} is a different key, outside PS-510.
+     * spec prototype's, and Python, Go and C# give it identically. A {@code semantic} is a
+     * string, a TTN normalized path (PS-470, CR-2026-179).
      */
     static void checkAnnotations(Map<?, ?> fm) {
         Object name = fm.get("name") instanceof String s ? s : "?";
@@ -671,6 +671,11 @@ public class Schema {
         }
         if (fm.containsKey("senml") && !(fm.get("senml") instanceof Map)) {
             throw new SchemaException("The senml of '" + name + "' is a mapping, such as {unit: Cel} (PS-510)");
+        }
+        if (fm.containsKey("semantic") && !(fm.get("semantic") instanceof String)) {
+            // PS-470 (CR-2026-179): a TTN normalized path, so a string.
+            throw new SchemaException("The semantic of '" + name + "' is a string naming a normalized "
+                    + "measurement type, such as air.temperature (PS-470)");
         }
     }
 
