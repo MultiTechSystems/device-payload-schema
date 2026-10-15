@@ -103,6 +103,15 @@ func reportsOf(decl map[string]any) string {
 		}
 		return ""
 	}
+	if spec := asStringMap(decl["time"]); spec != nil { // PS-610 (CR-2026-186)
+		switch spec["format"] {
+		case "unix":
+			return "number"
+		case "calendar":
+			return "object"
+		}
+		return "string"
+	}
 	declared := ""
 	if t, ok := decl["type"]; ok && t != nil {
 		declared = fmt.Sprint(t)

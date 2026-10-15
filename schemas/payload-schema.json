@@ -46,6 +46,14 @@
           "maximum": 255,
           "description": "On an ascii field, in place of length: the byte that ends the text. It is consumed and not reported (PS-593, PS-595)."
         },
+        "consume_terminator": {
+          "type": "boolean",
+          "description": "With terminator: false leaves the terminator unread for the next field, and an encoder does not write it (PS-619, PS-620)."
+        },
+        "end_terminates": {
+          "type": "boolean",
+          "description": "With terminator: true lets the end of the data (less any reserve, or a tlv entry's end) end the text too, which is then not an error (PS-619)."
+        },
         "checksum": {
           "type": "object",
           "description": "On an unsigned integer field: the check value over the bytes from `from` to the byte before it, verified on decode and computed on encode (PS-585 to PS-587).",
@@ -82,6 +90,70 @@
             },
             "description": {
               "type": "string"
+            }
+          }
+        },
+        "time": {
+          "type": "object",
+          "description": "On a numeric field: report its value, a count of seconds since epoch after the modifiers, as an instant in UTC in its format (PS-610 to PS-615).",
+          "additionalProperties": false,
+          "required": [
+            "format"
+          ],
+          "properties": {
+            "format": {
+              "enum": [
+                "unix",
+                "iso8601",
+                "calendar",
+                "pattern"
+              ]
+            },
+            "epoch": {
+              "type": "string",
+              "description": "RFC 3339 UTC instant the field's seconds count from (PS-355); not with parts."
+            },
+            "since": {
+              "type": "string",
+              "description": "unix: RFC 3339 UTC instant the reported count is from (PS-611)."
+            },
+            "milliseconds": {
+              "type": "boolean",
+              "description": "unix: report integer milliseconds, truncated (PS-611)."
+            },
+            "fraction": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 9,
+              "description": "iso8601: exactly N fractional digits, truncated (PS-611)."
+            },
+            "month_labels": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "minItems": 12,
+              "maxItems": 12,
+              "description": "calendar: the month names (PS-411, PS-612)."
+            },
+            "keys": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string"
+              },
+              "description": "calendar: part names to member names (PS-412, PS-612)."
+            },
+            "pattern": {
+              "type": "string",
+              "description": "pattern: text with %Y %m %d %H %M %S %L %b %a %% replaced (PS-613)."
+            },
+            "parts": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string",
+                "pattern": "^\\$"
+              },
+              "description": "On type: number only: year, month, day and optionally hour, minute and second as $references (PS-614)."
             }
           }
         },

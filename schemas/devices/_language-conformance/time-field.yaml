@@ -1,0 +1,115 @@
+# A numeric field reported as an instant (PS-610 to PS-615, CR-2026-186). The value after
+# the modifiers counts seconds from `epoch`, and the field is reported in UTC in its format:
+# a calendar object per element (Laird RS1xx), ISO 8601 with three fractional digits from the
+# GPS epoch (MCCI), the text JavaScript's toUTCString writes (Ezurio rs26x), milliseconds since
+# another instant, and an instant derived from date parts read earlier. A reference binds the
+# number, and an encoder parses the instant back, so every vector round-trips.
+#
+# Each port is one format. Rejected schemas, decode errors and the refusals on encode are in
+# tests/cr-2026-186-cases.yaml, since no vector here expects a failure.
+name: probe_time_field
+endian: big
+ports:
+  1:
+    fields:
+      - {name: count, type: u8}
+      - name: readings
+        type: repeat
+        count: $count
+        fields:
+          - name: timestamp
+            type: u32
+            time:
+              format: calendar
+              epoch: "2015-01-01T00:00:00Z"
+              month_labels: [January, February, March, April, May, June, July, August,
+                             September, October, November, December]
+              keys: {hour: hours, minute: minutes, second: seconds}
+          - {name: temperature, type: s16, div: 100}
+  2:
+    fields:
+      - name: timestamp
+        type: u32
+        add: -17
+        time: {format: iso8601, epoch: "1980-01-06T00:00:00Z", fraction: 3}
+  3:
+    fields:
+      - name: Timestamp
+        type: u32
+        time: {format: pattern, pattern: "%a, %d %b %Y %H:%M:%S GMT"}
+  4:
+    fields:
+      - name: uptime_ms
+        type: u32
+        div: 10
+        time:
+          format: unix
+          epoch: "2015-01-01T00:00:00Z"
+          since: "2000-01-01T00:00:00Z"
+          milliseconds: true
+  5:
+    fields:
+      - {name: _year, type: u8, add: 2000}
+      - {name: _month, type: u8}
+      - {name: _day, type: u8}
+      - {name: _hour, type: u8}
+      - {name: _minute, type: u8}
+      - {name: _second, type: u8}
+      - name: time_stamp
+        type: number
+        time:
+          format: iso8601
+          parts: {year: $_year, month: $_month, day: $_day, hour: $_hour, minute: $_minute,
+                  second: $_second}
+test_vectors:
+  - name: a_calendar_object_per_element
+    source: generated
+    fPort: 1
+    payload: "02 0D3A5F29 0974 1C2B3D4E FF38"
+    expected:
+      count: 2
+      readings:
+        - timestamp: {year: 2022, month: January, day: 12, hours: 15, minutes: 0, seconds: 57}
+          temperature: 24.2
+        - timestamp: {year: 2029, month: December, day: 22, hours: 20, minutes: 36, seconds: 30}
+          temperature: -2
+  - name: gps_seconds_as_to_iso_string
+    source: generated
+    fPort: 2
+    payload: "54A48E12"
+    expected: {timestamp: "2025-01-05T00:00:01.000Z"}
+  - name: gps_seconds_as_to_iso_string_two
+    source: generated
+    fPort: 2
+    payload: "4B3C2D1E"
+    expected: {timestamp: "2020-01-05T04:48:13.000Z"}
+  - name: as_to_utc_string
+    source: generated
+    fPort: 3
+    payload: "687E393C"
+    expected: {Timestamp: "Mon, 21 Jul 2025 12:57:32 GMT"}
+  - name: as_to_utc_string_two
+    source: generated
+    fPort: 3
+    payload: "01234567"
+    expected: {Timestamp: "Sun, 09 Aug 1970 22:25:43 GMT"}
+  - name: milliseconds_since_another_instant
+    source: generated
+    fPort: 4
+    payload: "12345678"
+    expected: {uptime_ms: 503927589600}
+  - name: milliseconds_since_another_instant_two
+    source: generated
+    fPort: 4
+    payload: "0000000D"
+    expected: {uptime_ms: 473385601300}
+  - name: date_parts
+    source: generated
+    fPort: 5
+    payload: "18 03 0B 15 05 2F"
+    expected: {time_stamp: "2024-03-11T21:05:47Z"}
+  - name: date_parts_two
+    source: generated
+    fPort: 5
+    payload: "0C 0C 1F 17 3B 3A"
+    expected: {time_stamp: "2012-12-31T23:59:58Z"}

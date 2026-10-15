@@ -169,8 +169,11 @@ VOCABULARY: Dict[str, Dict[str, Tuple[Tuple[str, ...], str]]] = {
         "numeral": (_DECODERS, "decimal | hex: an ascii field reported as the integer its digits give (PS-560)"),
         "nul": (_DECODERS, "trailing | stop | drop: how an ascii field treats its 0x00 bytes (PS-534)"),
         "terminator": (_DECODERS, "a byte 0 to 255 that ends a variable-length ascii field, in place of length (PS-593)"),
+        "consume_terminator": (_DECODERS, "with terminator: false leaves the terminator unread for the next field (PS-619, PS-620)"),
+        "end_terminates": (_DECODERS, "with terminator: true lets the end of the data end the text too (PS-619)"),
         "checksum": (_DECODERS, "a check value over earlier bytes, verified on decode and computed on encode (PS-585)"),
         "template": (_DECODERS, "text joined from earlier values on a type: string field, ${name} or ${name:format} (PS-590)"),
+        "time": (_DECODERS, "report a numeric field as an instant: unix, iso8601, calendar or pattern (PS-610)"),
         "valid_range": (("py", "go", "cs", "outschema"), "quality flag (_quality)"),
         "resolution": (("py", "go", "cs"), "measurement resolution annotation"),
         "unece": (("py", "go", "cs"), "UN/ECE unit code annotation"),
@@ -266,6 +269,17 @@ VOCABULARY: Dict[str, Dict[str, Tuple[Tuple[str, ...], str]]] = {
         "seed": (_DECODERS, "starting value of sum8 or xor8, a byte (PS-585)"),
         "from": (_DECODERS, "byte offset where the covered range starts (PS-585)"),
         "on_mismatch": (_DECODERS, "error | warn (PS-586)"),
+    },
+    "time": {
+        "format": (_DECODERS, "unix | iso8601 | calendar | pattern (PS-610)"),
+        "epoch": (_DECODERS, "the instant the field's seconds count from, RFC 3339 UTC (PS-355, PS-610)"),
+        "since": (_DECODERS, "unix: the instant the reported count is from (PS-611)"),
+        "milliseconds": (_DECODERS, "unix: report milliseconds, truncated (PS-611)"),
+        "fraction": (_DECODERS, "iso8601: exactly N fractional digits, 1 to 9, truncated (PS-611)"),
+        "month_labels": (_DECODERS, "calendar: twelve month names (PS-411, PS-612)"),
+        "keys": (_DECODERS, "calendar: part names to member names (PS-412, PS-612)"),
+        "pattern": (_DECODERS, "pattern: text with %Y %m %d %H %M %S %L %b %a %% (PS-613)"),
+        "parts": (_DECODERS, "type: number: year, month, day[, hour, minute, second] as $references (PS-614)"),
     },
     "sampled": {
         "interval": (("py", "go", "java", "cs"), "seconds, a $ reference or {configured: name} (PS-567)"),
@@ -506,7 +520,7 @@ def iter_keys(schema: Any) -> Iterator[Tuple[str, str, str]]:
                 for i, cond in enumerate(value.get("when") or []):
                     if isinstance(cond, dict):
                         yield from rec("guard_when", cond, "%s.when[%d]" % (kpath, i))
-            elif key in ("compute", "ipso", "senml", "semantic", "sampled", "checksum") and isinstance(
+            elif key in ("compute", "ipso", "senml", "semantic", "sampled", "checksum", "time") and isinstance(
                 value, dict
             ):
                 yield from rec(key, value, kpath)

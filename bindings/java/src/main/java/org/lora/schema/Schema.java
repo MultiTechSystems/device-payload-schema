@@ -151,8 +151,12 @@ public class Schema {
         Sampled.check(raw);
         // CR-2026-174: a checksum on an unsigned integer wide enough for its algorithm (PS-585).
         Checksum.check(raw);
+        // CR-2026-185: a checksum field sits where `from` counts from the frame (PS-608).
+        Checksum.checkPlacement(raw);
         // CR-2026-161: a lookup's labels are of one type (PS-571).
         Reports.check(raw);
+        // CR-2026-186: a `time` on a numeric field, with the keys of its format (PS-610 to PS-614).
+        TimeField.check(raw);
         Schema schema = new Schema();
         schema.pointers = DecodeRecord.pointerMap(raw);                // PS-572
         schema.repeatOnlyNames = Wave6a.repeatOnlyNames(raw);
@@ -1254,6 +1258,8 @@ public class Schema {
         if (fm.get("numeral") instanceof String numeral) f.setNumeral(numeral);
         if (fm.get("nul") instanceof String nul) f.setNul(nul);
         f.setTerminator(AsciiText.terminatorOf(fm.get("terminator")));
+        f.setKeepTerminator(Boolean.FALSE.equals(fm.get("consume_terminator")));   // PS-619
+        f.setEndTerminates(Boolean.TRUE.equals(fm.get("end_terminates")));         // PS-619
         if (fm.get("checksum") instanceof Map<?, ?> checksum) {                 // PS-585
             f.setChecksum((Map<String, Object>) checksum, String.valueOf(fm.get("type")));
         }
@@ -1879,7 +1885,10 @@ public class Schema {
                 // later fields can reference, but is not reported. Without this an
                 // intermediate used to combine two words appeared in the output.
                 if (!field.getName().startsWith("_")) {
-                    Object reported = normalizeOutput(value);
+                    // PS-610 (CR-2026-186): reported as an instant in its format; a
+                    // reference still binds the number.
+                    Object reported = TimeField.isTimeField(field)
+                            ? TimeField.format(field, value) : normalizeOutput(value);
                     if (reported != null) {
                         String outputName = resolveFieldName(field, ctx);
                         if (!outputName.equals(field.getName())) {
@@ -2125,12 +2134,17 @@ public class Schema {
             }
             
             case ASCII -> {
-                if (field.getTerminator() != null) length = AsciiText.terminatedSpan(field, ctx);   // PS-593
+                int consumed = 0;
+                if (field.getTerminator() != null) {                     // PS-593, PS-619
+                    int[] span = AsciiText.terminatedSpan(field, ctx);
+                    length = span[0];
+                    consumed = span[1];
+                }
                 // PS-588 (CR-2026-175): `consume: 0` re-reads the span; the position stays.
                 int echoStart = ctx.getOffset();
                 byte[] data = ctx.read(length);
                 if (field.isEcho()) ctx.setOffset(echoStart);
-                else if (field.getTerminator() != null) ctx.setOffset(ctx.getOffset() + 1);   // consumed, not reported
+                else ctx.setOffset(ctx.getOffset() + consumed);   // consumed, not reported, or left
                 // PS-538: each byte is the ISO 8859-1 character of the same number, so the
                 // value is lossless and re-encodes to the same bytes (PS-537). US_ASCII
                 // decoded a byte above 0x7F as U+FFFD. PS-073's warning reports it.
@@ -2779,9 +2793,14 @@ public class Schema {
                 DecodeRecord rec = ctx.getRecord();
                 boolean pushed = rec != null && rec.push(field.getRaw(), "tlv", entryIndex);
                 Map<String, Object> caseResult;
+                // PS-486, PS-619: an entry with a length is decoded within it, so the end of
+                // the entry is the end of the data for its value.
+                int entryLimit = ctx.getLimit();
+                if (dataLength >= 0) ctx.setLimit(ctx.getOffset() + dataLength);
                 try {
                     caseResult = decodeFields(caseFields, ctx);
                 } finally {
+                    ctx.setLimit(entryLimit);
                     if (rec != null) rec.pop(pushed);
                 }
                 
@@ -3628,6 +3647,8 @@ public class Schema {
     }
 
     private Object decodeComputed(Field field, DecodeContext ctx) {
+        // PS-614 (CR-2026-186): the instant its parts name; null where a part has no value.
+        if (TimeField.hasParts(field)) return TimeField.fromParts(field, ctx);
         boolean computed = field.getRef() != null || field.getCompute() != null;
         if (computed && field.getGuard() != null && !guardPasses(field.getGuard(), ctx, false)) {
             // PS-444: a failing guard reports the declared fallback untouched - no

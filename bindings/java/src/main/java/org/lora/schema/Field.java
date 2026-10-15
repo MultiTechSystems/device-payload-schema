@@ -45,6 +45,14 @@ public class Field {
     private Integer terminator;
     public Integer getTerminator() { return terminator; }
     public void setTerminator(Integer terminator) { this.terminator = terminator; }
+    /** {@code consume_terminator: false} leaves the terminator unread and unwritten (PS-619, PS-620). */
+    private boolean keepTerminator;
+    public boolean isKeepTerminator() { return keepTerminator; }
+    public void setKeepTerminator(boolean keep) { this.keepTerminator = keep; }
+    /** {@code end_terminates: true}: the end of the data ends the text too (PS-619). */
+    private boolean endTerminates;
+    public boolean isEndTerminates() { return endTerminates; }
+    public void setEndTerminates(boolean end) { this.endTerminates = end; }
     /** A {@code checksum} declaration and the type it sits on (PS-585, CR-2026-174). */
     private Map<String, Object> checksum;
     private String checksumType;

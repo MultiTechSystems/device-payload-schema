@@ -111,6 +111,56 @@ public static class Checksum
     /// <summary>Throws the first PS-585 violation anywhere in the document, test vectors skipped.</summary>
     internal static void Check(YamlMappingNode root) => Walk(root);
 
+    // --- placement (PS-608, CR-2026-185) -------------------------------------------------
+
+    /// <summary>The constructs a checksum field may not sit within (CHECKSUM_EXCLUDED).</summary>
+    static readonly Dictionary<string, string> Excluded = new()
+    {
+        ["byte_group"] = "a byte_group", ["tlv"] = "a tlv entry", ["records"] = "a records entry",
+    };
+
+    /// <summary>
+    /// PS-608: `from` counts from the frame's first byte (PS-585), so a checksum field is
+    /// rejected at load as a byte_group member, or within a tlv entry, a records entry or a
+    /// repeat's <c>fields</c> or <c>element</c>; a repeat's trailer is allowed. The spec
+    /// prototype's check_checksum_placement over the header, fields and ports of the
+    /// <c>$ref</c>-spliced document; the first violation only.
+    /// </summary>
+    internal static void CheckPlacement(YamlMappingNode root)
+    {
+        foreach (var key in new[] { "header", "fields", "ports" })
+            if (Placement(Get(root, key), null) is { } error)
+                throw new InvalidOperationException(error);
+    }
+
+    static string? Placement(YamlNode? node, string? inside)
+    {
+        if (node is YamlSequenceNode seq)
+        {
+            foreach (var item in seq.Children)
+                if (Placement(item, inside) is { } e) return e;
+        }
+        else if (node is YamlMappingNode map)
+        {
+            if (Get(map, "checksum") != null && Get(map, "type") != null && inside != null)
+            {
+                var name = (Get(map, "name") as YamlScalarNode)?.Value ?? "None";
+                return $"Field '{name}': a checksum field cannot sit within {inside}; its `from` "
+                    + "counts from the frame (PS-608)";
+            }
+            bool repeat = (Get(map, "type") as YamlScalarNode)?.Value == "repeat";
+            foreach (var kv in map.Children)
+            {
+                var key = (kv.Key as YamlScalarNode)?.Value ?? "";
+                if (key == "checksum") continue;
+                var within = Excluded.TryGetValue(key, out var w) ? w : inside;
+                if (repeat && (key == "fields" || key == "element")) within = "a repeat element";
+                if (Placement(kv.Value, within) is { } e) return e;
+            }
+        }
+        return null;
+    }
+
     static void Walk(YamlNode? node)
     {
         if (node is YamlSequenceNode seq)
@@ -176,16 +226,16 @@ public static class Checksum
     /// <summary>
     /// The declared checksum over <c>data[from..position]</c> against the value read, in
     /// the field's effective byte order and before any modifier. A mismatch is a decode error
-    /// reported verbatim, or with <c>on_mismatch: warn</c> a warning. A range starting after
-    /// the field is an error (PS-585).
+    /// reported verbatim, or with <c>on_mismatch: warn</c> a warning. A range starting at or
+    /// after the field covers nothing and is an error (PS-608, CR-2026-185).
     /// </summary>
     internal static void Verify(SchemaField field, byte[] data, int position, ulong carried,
         List<string> warnings)
     {
         var spec = field.Checksum!;
-        if (spec.From > position)
+        if (spec.From >= position)
             throw new FieldErrorException($"Field '{field.Name}': the checksum range starts at byte "
-                + $"{spec.From}, after the field at byte {position} (PS-585)");
+                + $"{spec.From}, at or after the field at byte {position}, so it covers nothing (PS-608)");
         var computed = Compute(spec.Algo, data.AsSpan(spec.From, position - spec.From), spec.Seed);
         if (computed == carried) return;
         var message = $"Field '{field.Name}': {spec.Algo} over bytes {spec.From} to {position - 1} is "
@@ -213,6 +263,9 @@ public static class Checksum
             var spec = slot.Field.Checksum!;
             if (spec.From > slot.Position)
                 throw new FieldErrorException(UnwrittenMessage(slot.Field.Name));
+            if (spec.From == slot.Position)     // PS-608 (CR-2026-185): it covers nothing
+                throw new FieldErrorException($"Field '{slot.Field.Name}': the checksum range starts "
+                    + $"at byte {spec.From}, where the field is, so it covers nothing (PS-608)");
             var value = Compute(spec.Algo, frame.AsSpan(spec.From, slot.Position - spec.From), spec.Seed);
             int size = Width(slot.Field.RawType)!.Value / 8;
             for (int i = 0; i < size; i++)

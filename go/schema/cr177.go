@@ -27,15 +27,23 @@ func applyNulMode(text, mode string) string {
 	return strings.TrimRight(text, "\x00")
 }
 
-// terminatedSpan is PS-593: the number of text bytes before the field's terminator. A
-// payload that ends before one is an underflow, which the field names (PS-535).
-func terminatedSpan(field *Field, ctx *DecodeContext) (int, error) {
+// terminatedSpan is PS-593: the number of text bytes before the field's terminator, and
+// whether one was found. A payload that ends before one is an underflow, which the field
+// names (PS-535), unless the field declares `end_terminates: true` (PS-619, CR-2026-188):
+// then the end of the data (ctx.Data stops at a reserve or a tlv entry's end) ends it.
+func terminatedSpan(field *Field, ctx *DecodeContext) (int, bool, error) {
 	for i := ctx.Offset; i < len(ctx.Data); i++ {
 		if int(ctx.Data[i]) == field.Terminator {
-			return i - ctx.Offset, nil
+			return i - ctx.Offset, true, nil
 		}
 	}
-	return 0, &BufferUnderflowError{Detail: fmt.Sprintf(
+	if field.EndTerminates {
+		if n := len(ctx.Data) - ctx.Offset; n > 0 {
+			return n, false, nil
+		}
+		return 0, false, nil
+	}
+	return 0, false, &BufferUnderflowError{Detail: fmt.Sprintf(
 		"no terminator byte 0x%02X before the end of the payload (PS-593)", field.Terminator)}
 }
 
@@ -86,6 +94,21 @@ func checkAsciiText(field map[string]any) error {
 			if _, both := field["length"]; both {
 				return fmt.Errorf("Field '%s': an ascii field declares length or terminator, not both (PS-593)", name)
 			}
+		}
+	}
+	// PS-619 (CR-2026-188): consume_terminator and end_terminates need a terminator and
+	// are true or false.
+	consumeT, hasConsume := field["consume_terminator"]
+	endT, hasEnd := field["end_terminates"]
+	if hasConsume || hasEnd {
+		if !hasTerm {
+			return fmt.Errorf("Field '%s': consume_terminator and end_terminates belong to a field with a terminator (PS-619)", name)
+		}
+		if _, ok := consumeT.(bool); hasConsume && !ok {
+			return fmt.Errorf("Field '%s': consume_terminator is true or false (PS-619)", name)
+		}
+		if _, ok := endT.(bool); hasEnd && !ok {
+			return fmt.Errorf("Field '%s': end_terminates is true or false (PS-619)", name)
 		}
 	}
 	if isAscii {

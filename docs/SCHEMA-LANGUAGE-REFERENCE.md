@@ -54,15 +54,18 @@ PS-587). It declares `checksum`, a mapping:
 |-----|---------|
 | `algo` | `sum8` (sum of the bytes, modulo 256), `xor8` (the bytes XORed), `crc8/smbus` (poly 0x07, init 0, not reflected) or `crc16/kermit` (poly 0x1021 reflected, init 0) |
 | `seed` | starting value of `sum8` or `xor8`, 0 to 255 (default 0); not allowed with a CRC |
-| `from` | byte offset in the frame where the covered range starts (default 0) |
+| `from` | byte offset where the covered range starts, counted from the frame's first byte wherever the field sits (default 0) |
 | `on_mismatch` | `error` (default): the decode fails; `warn`: a warning, and the rest is reported |
 
 The covered range runs from `from` to the byte before the field. A decoder compares the
 value read (in the field's type and byte order) with the checksum of that range; an encoder
-computes it over the bytes it wrote and ignores any input value. A checksum inside a tlv
-entry or a repeat element cannot be encoded (its range is not written when it is reached).
-A type other than `uN`, an unknown `algo`, a `seed` with a CRC, or a type too narrow for
-the result (`u8` for `crc16/kermit`) is rejected at load.
+computes it over the bytes it wrote and ignores any input value. A checksum field may sit at
+the top level, in a port entry, in a match case, in a flagged group, and after a construct
+that declares `reserve` - a repeat's `trailer` included; one that is a byte_group member, or
+sits within a tlv entry, a `records` entry or a repeat element, is rejected at load
+(PS-608). A range that covers nothing (`from` at or past the field) is a decode error and an
+encode rejection (PS-608). A type other than `uN`, an unknown `algo`, a `seed` with a CRC,
+or a type too narrow for the result (`u8` for `crc16/kermit`) is rejected at load.
 
 ```yaml
 - {name: _counter, type: u8}
@@ -171,9 +174,21 @@ holding 0x00 under `stop` is rejected; `drop` does not round-trip a dropped 0x00
 value followed by its terminator, with no padding and no fill for a `numeral`; a value holding the
 terminator is rejected (PS-595).
 
+A field with `terminator` may also declare `consume_terminator: false`, which stops before the
+terminator and leaves it for the next field to read, and an encoder then does not write it; and
+`end_terminates: true`, with which the end of the data (the payload less any `reserve`, or a tlv
+entry's declared length) ends the text too, an empty text being `""` (PS-619). Without
+`end_terminates`, reaching the end is still PS-593's error. Unless `consume_terminator: false`,
+an encoder writes the terminator even under `end_terminates`, so a frame that ended without one
+re-encodes with it (PS-620). Either key without `terminator`, or with a value other than true or
+false, is rejected at load.
+
 ```yaml
 - {name: model, type: ascii, length: 8, nul: stop}   # 45 4D 33 31 30 00 58 59 -> "EM310"
 - {name: version, type: ascii, terminator: 0x00}     # 31 2E 32 00 -> "1.2"
+# Each element: a channel byte, then a name up to the next 0xFF channel byte or the end.
+# FF 45 4D 34 33 30 31 FF 58 -> [{channel: 255, model: "EM4301"}, {channel: 255, model: "X"}]
+- {name: model, type: ascii, terminator: 0xFF, consume_terminator: false, end_terminates: true}
 ```
 
 A `bytes` field reports a **lowercase** hex string by default (PS-281). Its `format:` is
@@ -1220,6 +1235,49 @@ a value given for it.
 - A reference to an undeclared name, an object or a repeat, a format that is not a part
   format, and `template` beside `value` or off `type: string` are rejected at load.
 
+## Time Fields (`time`)
+
+A numeric field - an integer, float, nibble-decimal or minifloat type, a bit range, or a
+computed `number` or `integer` - may declare `time` (PS-610). Its value after the modifiers
+is a count of seconds since `epoch` (an RFC 3339 UTC instant, 1970-01-01T00:00:00Z where
+absent), and the field is reported as that instant, in UTC, in its `format`. A reference to
+the field still binds the number.
+
+```yaml
+- name: timestamp                    # GPS seconds, as toISOString writes them
+  type: u32
+  add: -17
+  time: {format: iso8601, epoch: "1980-01-06T00:00:00Z", fraction: 3}
+- name: Timestamp                    # as toUTCString writes it
+  type: u32
+  time: {format: pattern, pattern: "%a, %d %b %Y %H:%M:%S GMT"}
+- name: time_stamp                   # from calendar parts decoded earlier
+  type: number
+  time:
+    format: unix
+    milliseconds: true
+    parts: {year: $_year, month: $_month, day: $_day, hour: $_hour}
+```
+
+- `format: unix` reports seconds since 1970, or since `since:`; `milliseconds: true` reports
+  an integer count of milliseconds (PS-611).
+- `format: iso8601` reports `YYYY-MM-DDTHH:MM:SSZ`; `fraction: N` (1 to 9) writes exactly N
+  fractional digits, and without it digits appear only where the value has them (PS-611).
+- `format: calendar` reports `{year, month, day, hour, minute, second}`, with
+  `month_labels:` (twelve names) and `keys:` (part to member name) as PS-411 and PS-412
+  define them (PS-612).
+- `format: pattern` writes `pattern:` with `%Y`, `%m`, `%d`, `%H`, `%M`, `%S`, `%L`
+  (milliseconds), `%b` (`Jan`), `%a` (`Mon`) and `%%` replaced; names are English (PS-613).
+- `parts:` on a `type: number` field maps `year`, `month`, `day` and optionally `hour`,
+  `minute`, `second` to fields decoded earlier; a part that is not whole, or a date that
+  does not exist, is an error naming the field. `epoch` does not apply (PS-614).
+- Milliseconds, `fraction` and `%L` truncate, as JavaScript's `Date` does.
+- An encoder parses the value back in its format (PS-615). A pattern lacking `%Y`, `%m` or
+  `%b`, `%d`, `%H`, `%M` or `%S`, and `parts` naming a field that reads no bytes, decode
+  but are refused for encoding; a `%a` that is not the date's weekday is rejected.
+- `time` on another type or beside `lookup`, an unknown format, or a key of another format
+  is rejected at load.
+
 ## TLV (Type-Length-Value)
 
 Parse tag-based variable content. Supports single and multi-byte tags.
@@ -1637,6 +1695,11 @@ TTN's unit (PS-598, PS-599): it converts °F, mV, Pa/kPa/bar/inHg, km/h/mph/knot
 fraction (`/`), and otherwise leaves the value out with a warning - a field with no `unit`
 on a path that has one included, and every value on a path two fields declare. So declare
 `unit` beside `semantic`, and do not put a battery in % on `battery`, which is in V.
+TTN calls `normalizeUplink()` with no FPort (PS-609, CR-2026-185): for a schema with
+`ports`, an `fPort` in its input selects the entry; otherwise the candidates are the uplink
+entries reporting every key of the data, and their placement is used where they all place
+the same values, else nothing is placed, with a warning naming the FPorts or saying none
+fits.
 
 All three are needed for the semantic points in `tools/score_schema.py`; see
 `schemas/devices/decentlab/dl-5tm.yaml` for the canonical form. A bare `ipso: 3303` is

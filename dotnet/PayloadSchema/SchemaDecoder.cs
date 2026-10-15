@@ -312,7 +312,9 @@ public static class SchemaDecoder
                     var outputName = ResolveFieldName(field, ctx);
                     if (outputName != field.Name)
                         ctx.Produced(field, outputName);                      // PS-492
-                    result[outputName] = value;
+                    // PS-610 (CR-2026-186): reported as an instant in its format; a
+                    // reference still binds the number.
+                    result[outputName] = field.Time != null ? TimeFields.Format(field, value) : value;
                 }
                 // Keyed by the schema-level name in Variables so $references keep
                 // working when name_from is in play (PS-267). A looked-up field binds
@@ -652,11 +654,13 @@ public static class SchemaDecoder
 
             case FieldType.Ascii:
             {
-                if (field.Terminator != null) length = AsciiText.TerminatedSpan(field, ctx);   // PS-593
+                int consumed = 0;
+                if (field.Terminator != null)                                   // PS-593, PS-619
+                    (length, consumed) = AsciiText.TerminatedSpan(field, ctx);
                 int start = ctx.Offset;
                 var data = ctx.Read(length);
                 if (field.IsEcho) ctx.Offset = start;              // PS-588 (CR-2026-175)
-                else if (field.Terminator != null) ctx.Offset++;   // consumed, not reported
+                else ctx.Offset += consumed;                       // consumed, not reported, or left
                 value = Helpers.DecodeAscii(field.Name, data, ctx.Warnings, field.Nul);
                 if (field.Numeral != null)
                     value = Numeral.Decode(field.Name, (string)value, field.Numeral);   // PS-560
@@ -747,7 +751,8 @@ public static class SchemaDecoder
 
             case FieldType.Number:
             {
-                value = DecodeNumber(field, ctx);
+                // PS-614 (CR-2026-186): the instant its parts name.
+                value = field.Time?.Parts != null ? TimeFields.FromParts(field, ctx) : DecodeNumber(field, ctx);
                 if (field.IntegerResult && value is double d && !double.IsNaN(d) && !double.IsInfinity(d))
                 {
                     // PS-388: a fractional part is an error, never truncated or rounded.
@@ -1719,7 +1724,14 @@ public static class SchemaDecoder
                 var caseFields = field.TLVCases[caseKey];
                 Dictionary<string, object?> caseResult;
                 var pushed = ctx.Trace?.Push(field.Anchor, "tlv", entryIndex) ?? false;
-                try { caseResult = DecodeFields(caseFields, ctx, null); }
+                // PS-486, PS-619: an entry with a length is decoded within it, so the end of
+                // the entry is the end of the data for its value.
+                try
+                {
+                    caseResult = dataLength >= 0
+                        ? ctx.WithRegion(ctx.Offset + dataLength, () => DecodeFields(caseFields, ctx, null))
+                        : DecodeFields(caseFields, ctx, null);
+                }
                 finally { ctx.Trace?.Pop(pushed); }
 
                 if (merge)

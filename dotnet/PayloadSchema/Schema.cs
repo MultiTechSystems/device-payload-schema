@@ -139,6 +139,10 @@ public class SchemaField
     public string? Nul { get; set; }
     /// <summary>The byte that ends a variable-length ascii field, in place of length (PS-593).</summary>
     public int? Terminator { get; set; }
+    /// <summary><c>consume_terminator: false</c>: the terminator is left unread and not written (PS-619, PS-620).</summary>
+    public bool KeepTerminator { get; set; }
+    /// <summary><c>end_terminates: true</c>: the end of the data ends the text too (PS-619).</summary>
+    public bool EndTerminates { get; set; }
     /// <summary>A check value over the bytes before the field (PS-585 to PS-587, CR-2026-174).</summary>
     public ChecksumSpec? Checksum { get; set; }
     /// <summary>A computed field written `type: integer` (PS-283); its Type is Number.</summary>
@@ -193,6 +197,8 @@ public class SchemaField
     public string? NameFrom { get; set; }
     /// <summary>A `type: string` field's text joined from earlier values (PS-590, CR-2026-176).</summary>
     public string? Template { get; set; }
+    /// <summary>The instant this field reports in place of its number (PS-610, CR-2026-186).</summary>
+    public TimeSpec? Time { get; set; }
 
     // Variable
     public string? Var { get; set; }
