@@ -1038,6 +1038,10 @@ public static partial class SchemaParser
         if (fm.TryGetValue("nul", out var nulNode)) f.Nul = Scalar(nulNode);
         if (fm.TryGetValue("terminator", out var termNode) && AsciiText.ParseInteger(termNode) is long tv)
             f.Terminator = (int)tv;
+        if (fm.TryGetValue("consume_terminator", out var ctNode))                 // PS-619
+            f.KeepTerminator = AsciiText.BooleanOf(ctNode) == false;
+        if (fm.TryGetValue("end_terminates", out var etNode))                     // PS-619
+            f.EndTerminates = AsciiText.BooleanOf(etNode) == true;
         f.Checksum = PayloadSchema.Checksum.Parse(fm);                    // PS-585 (CR-2026-174)
         if (fm.TryGetValue("byte_group", out var bgNode))
         {

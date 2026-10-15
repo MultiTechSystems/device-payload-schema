@@ -787,7 +787,11 @@ function encFieldInner(out, f, value, endian, ctx) {  // _encode_field_inner
       encFail("Field '" + f.name + "': an ascii value of " + u.length + " bytes is longer than its length of " + fixed + " (PS-537)");
     }
     if (high) ctx.wa.push("Field '" + f.name + "': a character above U+007F in an ascii value (PS-537)");
-    if (term !== null) { for (var t = 0; t < u.length; t++) out.push(u[t]); out.push(term); return; }   // PS-595
+    if (term !== null) {                              // PS-595, PS-620
+      for (var t = 0; t < u.length; t++) out.push(u[t]);
+      if (f.consume_terminator !== false) out.push(term);   // else the next field writes it
+      return;
+    }
     encPad(out, u, fixed !== null ? fixed : u.length);
     return;
   }
@@ -5290,11 +5294,20 @@ function writeS(buf, pos, size, value, endian) {
             if ftype == 'ascii' and field.get('terminator') is not None:
                 # PS-593 (CR-2026-177): the text runs to the first terminator byte; a
                 # payload that ends first is an underflow naming the field.
+                # PS-619 (CR-2026-188): with `end_terminates: true` the end of the data
+                # (the buffer, cut at a reserve or a tlv entry's length) ends it too, and
+                # with `consume_terminator: false` the terminator is left for the next field.
                 term = int(field['terminator'])
+                consume = 1 if field.get('consume_terminator') is not False else 0
+                if field.get('end_terminates') is True:
+                    missing = f'{js_name}_t = 0; return Math.max(buf.length - pos, 0);'
+                else:
+                    missing = (f'throw underflow("no terminator byte 0x{term:02X} before the '
+                               f'end of the payload (PS-593)");')
+                lines.append(f'{i}  var {js_name}_t = {consume};')
                 lines.append(
                     f'{i}  var {js_name}_n = (function () {{ var _e = buf.indexOf({term}, pos); '
-                    f'if (_e < 0) throw underflow("no terminator byte 0x{term:02X} before the '
-                    f'end of the payload (PS-593)"); return _e - pos; }})();')
+                    f'if (_e < 0) {{ {missing} }} return _e - pos; }})();')
             else:
                 lines.append(f'{i}  var {js_name}_n = {length_to_js(field)};')
             # A declared length the payload cannot supply is an error, as in every
@@ -5326,7 +5339,7 @@ function writeS(buf, pos, size, value, endian) {
                 if echo:
                     lines.append(f'{i}  pos = {js_name}_p0;')
                 elif field.get('terminator') is not None:
-                    lines.append(f'{i}  pos += 1;')              # PS-593: consumed, not reported
+                    lines.append(f'{i}  pos += {js_name}_t;')    # PS-593, PS-619: consumed
                 if field.get('numeral'):
                     # PS-560: the whole text is a numeral of the declared base, or an error
                     # naming the field; parseInt alone would take a prefix.
@@ -5819,10 +5832,16 @@ function writeS(buf, pos, size, value, endian) {
                 lines.append(f'{i}      var _tlvOuter = d; d = {{ tag: {tag_parts_expr} }};')
             else:
                 lines.append(f'{i}      var _tlvO{fold_id} = d; d = {{}};')
+            if length_size:
+                # PS-486, PS-619: the value is decoded within its entry's length, so the
+                # end of the entry is the end of the data for it.
+                lines.append(f'{i}      var _tlvB{fold_id} = buf; buf = buf.slice(0, pos + _tlvLen);')
             self.indent += 2
             for cf in case_fields:
                 lines.extend(self._gen_decode_field(cf))
             self.indent -= 2
+            if length_size:
+                lines.append(f'{i}      buf = _tlvB{fold_id};')
             if separate:
                 lines.append(f'{i}      if (!_tlvOuter.channels) {{ _tlvOuter.channels = []; }}')
                 lines.append(f'{i}      _tlvOuter.channels.push(d); d = _tlvOuter;')

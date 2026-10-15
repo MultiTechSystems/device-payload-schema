@@ -1250,6 +1250,8 @@ public class Schema {
         if (fm.get("numeral") instanceof String numeral) f.setNumeral(numeral);
         if (fm.get("nul") instanceof String nul) f.setNul(nul);
         f.setTerminator(AsciiText.terminatorOf(fm.get("terminator")));
+        f.setKeepTerminator(Boolean.FALSE.equals(fm.get("consume_terminator")));   // PS-619
+        f.setEndTerminates(Boolean.TRUE.equals(fm.get("end_terminates")));         // PS-619
         if (fm.get("checksum") instanceof Map<?, ?> checksum) {                 // PS-585
             f.setChecksum((Map<String, Object>) checksum, String.valueOf(fm.get("type")));
         }
@@ -2124,12 +2126,17 @@ public class Schema {
             }
             
             case ASCII -> {
-                if (field.getTerminator() != null) length = AsciiText.terminatedSpan(field, ctx);   // PS-593
+                int consumed = 0;
+                if (field.getTerminator() != null) {                     // PS-593, PS-619
+                    int[] span = AsciiText.terminatedSpan(field, ctx);
+                    length = span[0];
+                    consumed = span[1];
+                }
                 // PS-588 (CR-2026-175): `consume: 0` re-reads the span; the position stays.
                 int echoStart = ctx.getOffset();
                 byte[] data = ctx.read(length);
                 if (field.isEcho()) ctx.setOffset(echoStart);
-                else if (field.getTerminator() != null) ctx.setOffset(ctx.getOffset() + 1);   // consumed, not reported
+                else ctx.setOffset(ctx.getOffset() + consumed);   // consumed, not reported, or left
                 // PS-538: each byte is the ISO 8859-1 character of the same number, so the
                 // value is lossless and re-encodes to the same bytes (PS-537). US_ASCII
                 // decoded a byte above 0x7F as U+FFFD. PS-073's warning reports it.
@@ -2778,9 +2785,14 @@ public class Schema {
                 DecodeRecord rec = ctx.getRecord();
                 boolean pushed = rec != null && rec.push(field.getRaw(), "tlv", entryIndex);
                 Map<String, Object> caseResult;
+                // PS-486, PS-619: an entry with a length is decoded within it, so the end of
+                // the entry is the end of the data for its value.
+                int entryLimit = ctx.getLimit();
+                if (dataLength >= 0) ctx.setLimit(ctx.getOffset() + dataLength);
                 try {
                     caseResult = decodeFields(caseFields, ctx);
                 } finally {
+                    ctx.setLimit(entryLimit);
                     if (rec != null) rec.pop(pushed);
                 }
                 

@@ -3314,7 +3314,7 @@ public static class SchemaEncoder
                     var text = Numeral.Encode(field.Name, Helpers.ToFloat64(value).Item2,
                         fixedLen, field.Numeral);
                     return Helpers.EncodeAscii(field.Name, text, fixedLen,
-                        _result.Warnings, field.Nul, field.Terminator);
+                        _result.Warnings, field.Nul, field.Terminator, !field.KeepTerminator);
                 }
                 case FieldType.Ascii or FieldType.String:
                     // PS-537. A fixed `length` pads and bounds the value; `remaining` or a
@@ -3322,7 +3322,8 @@ public static class SchemaEncoder
                     return Helpers.EncodeAscii(field.Name, value?.ToString() ?? "",
                         field.Length > 0 && field.LengthRef == null ? field.Length : null,
                         _result.Warnings, field.Nul,
-                        field.Type == FieldType.Ascii ? field.Terminator : null);
+                        field.Type == FieldType.Ascii ? field.Terminator : null,
+                        !field.KeepTerminator);
             }
 
             throw new InvalidOperationException($"Cannot encode type: {field.Type}");

@@ -167,6 +167,8 @@ VOCABULARY: Dict[str, Dict[str, Tuple[Tuple[str, ...], str]]] = {
         "numeral": (_DECODERS, "decimal | hex: an ascii field reported as the integer its digits give (PS-560)"),
         "nul": (_DECODERS, "trailing | stop | drop: how an ascii field treats its 0x00 bytes (PS-534)"),
         "terminator": (_DECODERS, "a byte 0 to 255 that ends a variable-length ascii field, in place of length (PS-593)"),
+        "consume_terminator": (_DECODERS, "with terminator: false leaves the terminator unread for the next field (PS-619, PS-620)"),
+        "end_terminates": (_DECODERS, "with terminator: true lets the end of the data end the text too (PS-619)"),
         "checksum": (_DECODERS, "a check value over earlier bytes, verified on decode and computed on encode (PS-585)"),
         "template": (_DECODERS, "text joined from earlier values on a type: string field, ${name} or ${name:format} (PS-590)"),
         "time": (_DECODERS, "report a numeric field as an instant: unix, iso8601, calendar or pattern (PS-610)"),

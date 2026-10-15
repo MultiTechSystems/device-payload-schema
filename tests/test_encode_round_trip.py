@@ -135,7 +135,7 @@ DEVICES = REPO_ROOT / "schemas" / "devices"
 # literal-selects-branch (2), match, and tag-entry-constants (4), tlv, and
 # tlv-case-field-list's literal_only, tlv - an entry reporting only a constant, which
 # encoded to no bytes with no error.
-FLOOR_TOTAL = 2305  # +9: time-field (CR-2026-186; every vector round-trips, all repeat); +5: bytes-encode-exact (CR-2026-181); +10: bytes-format-forms (all plain fixed; every vector round-trips); +11: byte-group-member-var (tlv); +4: bitfield-string-field-endian (two fixtures); +4: expected-error (CR-2026-167: its four successful decodes round-trip; the rejections are skipped); +1: repeat-sampled (CR-2026-156); earlier moves follow
+FLOOR_TOTAL = 2309  # +4: ascii-terminator-or-end (CR-2026-188, repeat; its two frames the end ended re-encode with a terminator); +5: bytes-encode-exact (CR-2026-181); +10: bytes-format-forms (all plain fixed; every vector round-trips); +11: byte-group-member-var (tlv); +4: bitfield-string-field-endian (two fixtures); +4: expected-error (CR-2026-167: its four successful decodes round-trip; the rejections are skipped); +1: repeat-sampled (CR-2026-156); earlier moves follow
 
 #: Per-shape floors, so a regression in a shape that works cannot hide behind the 948
 #: TLV vectors that do not. A shape absent here has no working round-trip to protect.
@@ -158,7 +158,7 @@ FLOOR_BY_SHAPE = {
     # carry only the definitions they reach, so one no longer has a `repeat` in an
     # unreferenced definition for the classifier to find.
     # 19 -> 25: CR-2026-121 and CR-2026-123 (see FLOOR_TOTAL).
-    "repeat": 37,  # +9: time-field (CR-2026-186); +2: meta-semantic (CR-2026-179); +1: repeat-sampled (CR-2026-156)
+    "repeat": 41,  # +4: ascii-terminator-or-end (CR-2026-188, repeat; its two frames the end ended re-encode with a terminator); +2: meta-semantic (CR-2026-179); +1: repeat-sampled (CR-2026-156)
 }
 
 #: Encoding must never raise. It used to, 26 times: "Cannot encode type: number" for any

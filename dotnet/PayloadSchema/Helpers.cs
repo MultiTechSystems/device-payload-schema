@@ -47,7 +47,7 @@ public static class Helpers
     /// which could split a character ("ABCé" to 414243c3).
     /// </summary>
     public static byte[] EncodeAscii(string? name, string text, int? length, List<string> warnings,
-        string? nul = null, int? terminator = null)
+        string? nul = null, int? terminator = null, bool writeTerminator = true)
     {
         foreach (var ch in text)
             if (ch > 0xFF)
@@ -59,6 +59,7 @@ public static class Helpers
         if (nul == "stop" && text.Contains('\0'))                               // PS-595
             throw new FieldErrorException($"Field '{name}': a nul: stop value holds a 0x00 byte (PS-595)");
         if (terminator != null) length = null;                                 // PS-593: no width
+        if (!writeTerminator) terminator = null;   // PS-620: the field after it writes the terminator
         if (length is int fixedLength && text.Length > fixedLength)
             throw new FieldErrorException($"Field '{name}': an ascii value of {text.Length} bytes "
                 + $"is longer than its length of {fixedLength} (PS-537)");

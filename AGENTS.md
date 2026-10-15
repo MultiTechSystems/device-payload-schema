@@ -232,10 +232,10 @@ implementation has a runner that reads the same YAML and the same vectors:
 
 | Implementation | Runner | Decode floor | Re-encode floor |
 |---|---|---|---|
-| Python | `tests/test_corpus_conformance.py` | every vector | 2290 |
-| Go | `go/schema/corpus_conformance_test.go` | 2901 | 2308 (plain API 2280) |
-| C# | `dotnet/PayloadSchema.Tests/CorpusConformanceTests.cs` | 2901 | 2291 |
-| Java | `bindings/java/.../CorpusConformanceTest.java` | 2901 | 2290 |
+| Python | `tests/test_corpus_conformance.py` | every vector | 2294 |
+| Go | `go/schema/corpus_conformance_test.go` | 2906 | 2312 (plain API 2284) |
+| C# | `dotnet/PayloadSchema.Tests/CorpusConformanceTests.cs` | 2906 | 2295 |
+| Java | `bindings/java/.../CorpusConformanceTest.java` | 2906 | 2294 |
 | C | `tools/c-corpus-harness.py` (builds each expressible schema through the struct API) | 575 of 575 attempted | n/a |
 
 These figures move with every schema added. `make check-floors` prints each floor beside
@@ -832,10 +832,10 @@ exercised to the best-covered part of the project:
 
 | | Runner | Round-trips |
 |---|---|---|
-| Python | `tests/test_encode_round_trip.py` | 2290 |
-| Go | `go/schema/corpus_encode_test.go` | 2308 (plain 2280) |
-| Java | `bindings/java/.../CorpusEncodeRoundTripTest.java` | 2290 |
-| C# | `dotnet/.../CorpusEncodeRoundTripTests.cs` | 2291 |
+| Python | `tests/test_encode_round_trip.py` | 2294 |
+| Go | `go/schema/corpus_encode_test.go` | 2312 (plain 2284) |
+| Java | `bindings/java/.../CorpusEncodeRoundTripTest.java` | 2294 |
+| C# | `dotnet/.../CorpusEncodeRoundTripTests.cs` | 2295 |
 | C | `src/test_encoder.c`, built by `make test-c` (unit tests, not a corpus round trip) | n/a |
 
 - **A name may be an object under one tag and a scalar under another, and a tlv encoder
@@ -3472,6 +3472,50 @@ improved. The Go, Java and C# corpus runners write per-vector reports only when
   - **Measured before:** no corpus, library or example schema, and none of the registry's
     schemas, declares `nul` or `terminator` or an `ascii` field without `length`, so none is
     rejected and no decode or encode output changes.
+
+- **CR-2026-188 (PS-593 amended, PS-619, PS-620; la-payload-schema `cr/0.5.8-apply-188`
+  80d8653, for 0.5.8): text to a terminator it does not consume, or to the end.** An `ascii`
+  field with `terminator` may declare `consume_terminator: false` (stop before the terminator
+  and leave it for the next field) and `end_terminates: true` (the end of the data also ends
+  the text; empty text is `""`; without it the end is still PS-593's error). Encode (PS-620):
+  with `consume_terminator: false` the terminator is never written; otherwise it is, also under
+  `end_terminates`, so a frame that ended without one re-encodes a byte longer; a value holding
+  the terminator is always PS-595's rejection. The yobiiq shape (an element of a channel byte
+  and a model running to the next 0xFF channel byte or the frame's end) decodes and round-trips.
+  - **Load (the prototype's text):** `Field 'a': consume_terminator and end_terminates belong to
+    a field with a terminator (PS-619)` and `Field 'a': end_terminates is true or false
+    (PS-619)`. Python `ascii_text_errors` (so the validator and the TS013 generator too), Go
+    `checkAsciiText`, Java `AsciiText.check`, C# `AsciiText.Check` (`BooleanOf` reads a plain
+    YAML 1.2 boolean).
+  - **Where:** Python `terminated_span` (now returns the span and the terminator bytes
+    consumed) and `encode_ascii(..., consume_terminator)`; the generator's ascii branch and the
+    runtime's string branch; Go `terminatedSpan` (`cr177.go`) with `Field.KeepTerminator`/
+    `EndTerminates`; Java `AsciiText.terminatedSpan` and `Encoder.encodeAscii`; C#
+    `AsciiText.TerminatedSpan` and `Helpers.EncodeAscii(..., writeTerminator)`.
+  - **"The end of the data" includes a tlv entry's declared length, and that needed a change
+    beyond the keys.** The prototype decodes an entry's value in a sub-context of its length
+    (`decode_tlv_value`); none of the five did, so a case body read the whole payload and an
+    `end_terminates` text in an entry ran into the next entry's tag. All five now cut the data
+    at the entry's end while its case body decodes (Python `entry_buf`, the codec's
+    `buf.slice`, Go `ctx.Data`, Java `setLimit`, C# `WithRegion`); a case body that reads past
+    its declared length is now PS-535 there, as PS-486 intends. Measured with Python over the
+    corpus and the registry (38902 vectors, decode output, errors and re-encoded bytes): no
+    vector changed.
+  - **Before:** every implementation ignored both keys - the terminator was always consumed
+    and the end was always PS-593's error - and the validator refused them as unknown keys.
+  - **C:** has no terminator; `tools/schema_binary.py` refuses both keys by name (PS-446) and
+    the C harness files them as C gaps.
+  - **Round trip:** `encode-round-trip.py` files a vector of an `end_terminates` field that
+    writes its terminator and does not re-encode as the inherent reason `end-terminated`.
+  - **Cases and fixture:** `tests/cr-2026-188-cases.yaml` (9 decode, 5 encode, 4 load; the
+    prototype's `TestCR2026188TerminatorOrEnd` and a reserve, a tlv entry, a found terminator
+    and `consume_terminator: true`) read by `test_cr_2026_188_cases.py` (reference and
+    generated codec), Go `cr188_test.go`, Java `CR2026188Test`, C# `CR2026_188Tests`. Fixture
+    `ascii-terminator-or-end` (5 vectors, `source: generated`): decode 2901 -> 2906 in Go, Java
+    and C#; re-encode +4 everywhere, all `repeat` 28 -> 32 (Python, Java 2290 -> 2294; C# 2291
+    -> 2295; Go 2308 -> 2312, plain 2280 -> 2284); port 2's frame the end ended does not.
+  - **Measured:** no corpus, library, example or registry schema declares either key, so none
+    is rejected and no decode or encode output changes.
 
 - **CR-2026-175 (PS-453 and PS-015 amended, PS-588, PS-589; la-payload-schema main 9e8957a, for
   0.5.7): a byte string that does not consume reports its span again.** A `bytes`, `hex` or

@@ -132,6 +132,11 @@ type Field struct {
 	Nul           string `json:"nul,omitempty" yaml:"nul,omitempty"`
 	Terminator    int    `json:"terminator,omitempty" yaml:"terminator,omitempty"`
 	HasTerminator bool   `json:"-" yaml:"-"`
+	// KeepTerminator is `consume_terminator: false` (PS-619): the terminator is left
+	// unread, and an encoder does not write it (PS-620). EndTerminates is
+	// `end_terminates: true`: the end of the data ends the text too (PS-619).
+	KeepTerminator bool `json:"-" yaml:"-"`
+	EndTerminates  bool `json:"-" yaml:"-"`
 	// GroupEndian is a byte_group's own byte order (PS-364), empty for the context's.
 	GroupEndian string `json:"-" yaml:"-"`
 	// IntegerResult marks a computed field written `type: integer` (PS-283); its Type
@@ -1303,6 +1308,12 @@ func parseFieldMap(fm map[string]any, node *yaml.Node) Field {
 	if term, ok := terminatorValue(fm["terminator"]); ok {
 		f.Terminator = term
 		f.HasTerminator = true
+	}
+	if b, ok := fm["consume_terminator"].(bool); ok && !b {
+		f.KeepTerminator = true // PS-619
+	}
+	if b, ok := fm["end_terminates"].(bool); ok && b {
+		f.EndTerminates = true // PS-619
 	}
 	if typ, ok := fm["type"].(string); ok {
 		f.Type = canonicalFieldType(typ)
@@ -2764,12 +2775,16 @@ func decodeField(field Field, ctx *DecodeContext) (any, error) {
 		value = field.Value
 
 	case TypeAscii, TypeAsciiLower:
+		consumed := 0
 		if field.HasTerminator {
-			span, err := terminatedSpan(&field, ctx) // PS-593
+			span, found, err := terminatedSpan(&field, ctx) // PS-593, PS-619
 			if err != nil {
 				return nil, err
 			}
 			length = span
+			if found && !field.KeepTerminator {
+				consumed = 1
+			}
 		}
 		start := ctx.Offset
 		data, err := ctx.Read(length)
@@ -2778,8 +2793,8 @@ func decodeField(field Field, ctx *DecodeContext) (any, error) {
 		}
 		if isEcho(field) {
 			ctx.Offset = start // PS-588 (CR-2026-175): the span is read again
-		} else if field.HasTerminator {
-			ctx.Offset++ // consumed, not reported
+		} else {
+			ctx.Offset += consumed // PS-593: consumed, not reported; PS-619: or left
 		}
 		value = decodeASCII(field.Name, data, ctx, field.Nul) // PS-534, PS-538
 		if field.Numeral != "" {
@@ -3671,7 +3686,14 @@ func decodeTLV(field Field, ctx *DecodeContext) (map[string]any, error) {
 			ctx.TLVOrder = append(ctx.TLVOrder, caseKey)
 			caseFields := field.TLVCases[caseKey]
 			pushed := ctx.trace.pushTLV(field, entryIndex)
+			// PS-486, PS-619: an entry with a length is decoded within it, so the end of
+			// the entry is the end of the data for its value.
+			entryData := ctx.Data
+			if dataLength >= 0 {
+				ctx.Data = entryData[:ctx.Offset+dataLength]
+			}
 			caseResult, err := decodeFields(caseFields, ctx)
+			ctx.Data = entryData
 			ctx.trace.pop(pushed)
 			if err != nil {
 				return nil, err
@@ -6361,6 +6383,9 @@ func encodeField(field Field, value any, ctx *EncodeContext) error {
 			data, err := encodeASCII(field.Name, strVal, fixed, ctx, field.Nul, terminator)
 			if err != nil {
 				return err
+			}
+			if terminator >= 0 && field.KeepTerminator {
+				data = data[:len(data)-1] // PS-620: the field after it writes the terminator
 			}
 			ctx.Write(data)
 		}

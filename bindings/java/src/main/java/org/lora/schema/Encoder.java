@@ -3522,7 +3522,10 @@ final class Encoder {
                 break;
             }
         }
-        if (terminator != null) {                                   // PS-595
+        if (terminator != null && field.isKeepTerminator()) {
+            return raw;                     // PS-620: the field after it writes the terminator
+        }
+        if (terminator != null) {                                   // PS-595, PS-620
             byte[] out = java.util.Arrays.copyOf(raw, raw.length + 1);
             out[raw.length] = (byte) (int) terminator;
             return out;
