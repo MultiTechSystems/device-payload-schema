@@ -48,7 +48,8 @@ func TestCR051Literals(t *testing.T) {
 			t.Errorf("%s: accepted (PS-358)", field)
 		}
 	}
-	if _, err := decodeHex(t, "name: p\nfields:\n  - {name: s, type: string, length: 2}\n", "6162"); err == nil ||
+	// CR-2026-176 (PS-361 amended): refused at load, where decode used to refuse it.
+	if _, err := ParseSchema("name: p\nfields:\n  - {name: s, type: string, length: 2}\n"); err == nil ||
 		!strings.Contains(err.Error(), "PS-361") {
 		t.Errorf("string with no value: %v", err)
 	}

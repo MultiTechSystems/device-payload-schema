@@ -15,6 +15,7 @@ Usage:
     payload = interpreter.encode(data_dict)
 """
 
+import copy
 import calendar
 import struct
 import re
@@ -284,9 +285,13 @@ class Frame(bytes):
     pending, so the field after the construct shares them, as a decoder reads it: vobo's
     digital inputs peek a word inside a flagged block that the field after it reads."""
 
-    def __new__(cls, data=b'', pending=0, covered=None, peeks=None, echoes=None):
+    def __new__(cls, data=b'', pending=0, covered=None, peeks=None, checksums=None,
+                echoes=None):
         frame = super().__new__(cls, data)
         frame.pending = pending
+        # PS-587 (CR-2026-174): each checksum written as a placeholder, (position, field,
+        # byteorder), computed where the whole frame is known (`fill_checksums`).
+        frame.checksums = checksums or []
         # CR-2026-141 (PS-551): per byte, the bits some field wrote (None: all of them),
         # and each bit range or bool placed, for the check where the frame closes.
         frame.covered = covered
@@ -321,19 +326,71 @@ def prefixed_frame(prefix: bytes, body) -> 'Frame':
     return Frame(bytes(prefix) + bytes(body), getattr(body, 'pending', 0),
                  b'\xff' * shift + frame_covered(body),
                  [(p[0] + shift,) + tuple(p[1:]) for p in frame_peeks(body)],
-                 [(e[0] + shift,) + tuple(e[1:]) for e in frame_echoes(body)])
+                 [(c[0] + shift,) + tuple(c[1:]) for c in frame_checksums(body)],
+                 echoes=[(e[0] + shift,) + tuple(e[1:]) for e in frame_echoes(body)])
+
+
+def frame_checksums(data) -> list:
+    """The checksum placeholders in `data`, (position, field, byteorder) (CR-2026-174)."""
+    return list(getattr(data, 'checksums', None) or [])
+
+
+def fill_checksums(frame: bytes, placed: list, written: Optional[list] = None) -> bytes:
+    """PS-587 (CR-2026-174): compute each checksum over the bytes of the finished frame
+    from its `from` to the byte before it, earliest first, so an outer checksum covers an
+    inner one's value. A range starting past the field is rejected."""
+    out = bytearray(frame)
+    for position, field_def, order in sorted(placed, key=lambda c: c[0]):
+        spec = field_def['checksum']
+        start = int(spec.get('from', 0))
+        if start > position:
+            raise FieldError(checksum_unwritten_message(field_def.get('name')))
+        value = compute_checksum(spec['algo'], bytes(out[start:position]),
+                                 int(spec.get('seed', 0)))
+        size = CHECKSUM_WIDTHS[field_def['type']] // 8
+        out[position:position + size] = value.to_bytes(size, order)
+        if written is not None:
+            for i, f in enumerate(written):
+                if f is field_def:
+                    del written[i]
+                    break
+    return bytes(out)
 
 
 #: The byte strings a `consume: 0` re-reads (PS-588, CR-2026-175).
 NON_CONSUMING_TYPES = ('bytes', 'hex', 'ascii')
 
 
-def is_echo(field_def) -> bool:
-    """A `bytes`, `hex` or `ascii` field declaring `consume: 0` (PS-588): it reads and
-    reports its span and leaves the read position, so later fields read the bytes again."""
-    return (isinstance(field_def, dict) and field_def.get('type') in NON_CONSUMING_TYPES
-            and 'consume' in field_def and field_def.get('consume') == 0
+def _declares_consume_zero(field_def) -> bool:
+    return ('consume' in field_def and field_def.get('consume') == 0
             and not isinstance(field_def.get('consume'), bool))
+
+
+def whole_number_size(ftype) -> Optional[int]:
+    """The byte width of a whole numeric type (PS-453): an integer `uN`/`sN` or an alias,
+    a float, a minifloat, `udec`/`sdec` or a word-ordered variant; None for anything else."""
+    if not isinstance(ftype, str):
+        return None
+    if ftype in INTEGER_TYPE_INFO:
+        return INTEGER_TYPE_INFO[ftype][0]
+    return _FIXED_TYPE_SIZES.get(ftype)
+
+
+def is_peeked_number(field_def) -> bool:
+    """A whole numeric field declaring `consume: 0` (PS-603, CR-2026-182): it reads its
+    value in place and leaves the read position, so later fields read the bytes again."""
+    return (isinstance(field_def, dict) and whole_number_size(field_def.get('type')) is not None
+            and _declares_consume_zero(field_def))
+
+
+def is_echo(field_def) -> bool:
+    """A field that re-reads bytes the fields after it consume: a `bytes`, `hex` or `ascii`
+    field declaring `consume: 0` (PS-588), or a whole numeric one (PS-603). It writes no
+    bytes on encode, and a value given for it is checked against the frame (PS-589,
+    PS-604)."""
+    return (isinstance(field_def, dict)
+            and (field_def.get('type') in NON_CONSUMING_TYPES or is_peeked_number(field_def))
+            and _declares_consume_zero(field_def))
 
 
 def frame_echoes(data) -> list:
@@ -344,6 +401,8 @@ def frame_echoes(data) -> list:
 def echo_length(field_def, data) -> Optional[int]:
     """The byte count of a non-consuming byte string, read from the input it is encoded
     with: None for `remaining`, which reaches the end of the frame it is checked in."""
+    if is_peeked_number(field_def):
+        return whole_number_size(field_def.get('type'))     # PS-604
     raw = field_def.get('length', 1)
     if isinstance(raw, str):
         text = raw.strip()
@@ -391,21 +450,26 @@ def check_echoes(frame) -> None:
     string equals what the field decodes from the bytes the other fields wrote over its
     span, or the input is rejected naming the field."""
     data = bytes(frame)
-    for position, field_def, given, length in frame_echoes(frame):
+    for position, field_def, given, length, *decoder in frame_echoes(frame):
         if length is None:
             length = max(0, len(data) - position)
         if position + length > len(data):
             written = 'too few bytes'
         else:
             try:
-                found = echo_value(field_def, data[position:position + length])
+                span = data[position:position + length]
+                # A whole number decodes through its own type, arithmetic and lookup
+                # (PS-604); the interpreter hands its decoder in with the echo.
+                found = decoder[0](span) if decoder and decoder[0] else echo_value(
+                    field_def, span)
             except ValueError:
                 found = None
             if found is not None and normalize_output(found) == normalize_output(given):
                 continue
             written = echo_text(found) if found is not None else 'too few bytes'
+        rule = 'PS-604' if is_peeked_number(field_def) else 'PS-589'
         raise ValueError(f"Field '{field_def.get('name')}' is given {echo_text(given)}, but "
-                         f"the other fields write {written} over its span (PS-589)")
+                         f"the other fields write {written} over its span ({rule})")
 
 
 def peek_disagreement(peeks, frame: bytes) -> str:
@@ -465,16 +529,17 @@ class FrameBuffer:
         # range or bool placed (see Frame).
         self.covered = bytearray()
         self.peeks = []
+        self.checksums = []         # PS-587 (CR-2026-174), as Frame
         self.echoes = []        # CR-2026-175 (PS-589): see Frame.echoes
 
-    def echo(self, field_def, data) -> None:
+    def echo(self, field_def, data, decoder=None) -> None:
         """PS-589: a non-consuming byte string writes nothing and is not required; a value
         given for it is checked where the frame closes. It reads from the position a
         decoder is at, which is the start of any bytes still pending."""
         name = field_def.get('name')
         if name and data.get(name) is not None:
             self.echoes.append((len(self.buf), field_def, data[name],
-                                echo_length(field_def, data)))
+                                echo_length(field_def, data), decoder))
 
     def cover(self, position: int, mask: bytes) -> None:
         if len(self.covered) < position + len(mask):
@@ -487,6 +552,7 @@ class FrameBuffer:
         offset = len(self.buf)
         covered = frame_covered(data)
         peeks = frame_peeks(data)
+        checksums = frame_checksums(data)
         self.echoes.extend((e[0] + offset,) + tuple(e[1:]) for e in frame_echoes(data))
         data = bytes(data)
         if self.pending and data and any(
@@ -496,6 +562,7 @@ class FrameBuffer:
             raise ValueError(peek_disagreement(self.peeks, bytes(self.buf) + data))
         self.cover(offset, covered)
         self.peeks.extend((p[0] + offset,) + tuple(p[1:]) for p in peeks)
+        self.checksums.extend((c[0] + offset,) + tuple(c[1:]) for c in checksums)
         if self.pending and data:
             shared = min(len(self.pending), len(data))
             data = bytes(b | self.pending[i] if i < shared else b
@@ -542,7 +609,7 @@ class FrameBuffer:
         size = len(self.buf) + len(self.pending)
         covered = bytes(self.covered[:size]).ljust(size, b'\0')
         return Frame(bytes(self.buf + self.pending), len(self.pending), covered,
-                     list(self.peeks), list(self.echoes))
+                     list(self.peeks), list(self.checksums), list(self.echoes))
 
 
 def is_peek_field(field_def) -> bool:
@@ -572,7 +639,7 @@ def covered_peeks(fields) -> list:
         if is_peek_field(f):
             pending.append(f)
             continue
-        if ftype in COMPUTED_TYPES or is_literal(f):
+        if ftype in COMPUTED_TYPES or is_literal(f) or is_string_template(f):
             continue
         construct = any(k in f for k in ('match', 'tlv', 'byte_group', 'flagged', '$ref'))
         bits = isinstance(ftype, str) and any(m in ftype for m in ('[', ':', '<'))
@@ -1123,9 +1190,12 @@ def fixed_element_size(fields):
             return None
         ftype = str(field.get('type', ''))
         base = INTEGER_TYPE_INFO.get(ftype)
+        if is_peeked_number(field):
+            continue                    # reads in place, advancing nothing (PS-603)
         if ftype in _FIXED_TYPE_SIZES or base:
             total += _FIXED_TYPE_SIZES.get(ftype) or base[0]
-        elif ftype in COMPUTED_TYPES or is_literal(field) or is_echo(field):
+        elif (ftype in COMPUTED_TYPES or is_literal(field) or is_echo(field)
+              or is_string_template(field)):
             continue                    # an echo re-reads, advancing nothing (PS-588)
         elif '[' in ftype or ftype == 'bool':
             consume = field.get('consume', 0)
@@ -1533,55 +1603,119 @@ def object_key_withdrawn(field_def):
 REF_PREFIX = '#/definitions/'
 
 
+#: The three kinds of definition (PS-345, CR-2026-168): the key each carries, the shape its
+#: value takes and how a message describes that shape.
+DEFINITION_KINDS = (('fields', (list,), 'a list of fields'), ('field', (dict,), 'a field'),
+                    ('lookup', (dict, list), 'a lookup table'))
+
+
+def definition_kind(definitions, name, chain):
+    """The kind of definition `name` is (PS-345), or ValueError: a cycle (PS-349), an
+    undefined name (PS-348), or a definition carrying none or several kinds."""
+    if name in chain:
+        raise ValueError(f"`$ref` cycle: {' -> '.join(list(chain) + [name])} (PS-349)")
+    if name not in definitions:
+        raise ValueError(f"`$ref` to '{REF_PREFIX}{name}', which `definitions` does "
+                         f"not define (PS-348)")
+    group = definitions[name]
+    kinds = [k for k, _, _ in DEFINITION_KINDS if isinstance(group, dict) and k in group]
+    if len(kinds) != 1:
+        raise ValueError(f"definition '{name}' must carry exactly one of `fields`, "
+                         f"`field` or `lookup`, not {kinds or 'none'} (PS-345)")
+    for key, shape, described in DEFINITION_KINDS:
+        if key == kinds[0] and not isinstance(group[key], shape):
+            raise ValueError(f"definition '{name}': `{key}` must be {described} (PS-345)")
+    return kinds[0]
+
+
 def expand_refs(schema):
-    """Splice every `{$ref: '#/definitions/name'}` into the field list it sits in.
+    """Resolve every reference to `definitions` (CR-2026-045, CR-2026-168).
 
-    Returns (expanded schema, errors). The errors are the reasons the schema is invalid
-    and must be rejected rather than decoded:
+    Returns (expanded schema, errors). A `{$ref: '#/definitions/name'}` in a field list is
+    replaced by the group's fields, or by the one field with each key the reference
+    carries replacing the defined key whole (PS-346, PS-578); a field's `lookup` given as
+    `#/definitions/name` becomes that table (PS-579). References resolve transitively
+    (PS-580). The `definitions` kept on the result are themselves resolved, so no later
+    check sees a reference. The errors are the reasons the schema is invalid and must be
+    rejected rather than decoded, in the spec prototype's words:
 
-    - a definition that is not a field group `{fields: [...]}` (PS-345);
-    - a reference that does not resolve (PS-348), or names a file (PS-462: support is
-      optional, and this implementation rejects it rather than guess);
+    - a definition that carries none, or more than one, of `fields`, `field` and
+      `lookup`, or one of the wrong shape (PS-345);
+    - a reference that does not resolve, or names a definition of the wrong kind (PS-348);
+      or names a file (PS-462: support is optional, and this implementation rejects it);
+    - a group reference carrying other keys, or a nameless resolved field (PS-578);
     - a pointer not of the form `#/definitions/<name>` (PS-461);
     - a cycle, direct or transitive (PS-349).
 
-    `definitions` and `test_vectors` are carried over as they are.
+    `test_vectors` are carried over as they are.
     """
     if not isinstance(schema, dict):
         return schema, []
     definitions = schema.get('definitions') or {}
     errors = []
     if not isinstance(definitions, dict):
-        return schema, ["'definitions' must map names to field groups (PS-345)"]
-    for name, group in definitions.items():
-        if not (isinstance(group, dict) and isinstance(group.get('fields'), list)):
-            errors.append(
-                f"definition '{name}' is not a field group with a `fields` array (PS-345)")
+        return schema, ["`definitions` must map names to definitions (PS-345)"]
 
-    def resolve(ref, stack):
-        if not isinstance(ref, str) or not ref.startswith(REF_PREFIX):
+    def target(ref):
+        if not isinstance(ref, str) or not ref.startswith(REF_PREFIX) \
+                or '/' in ref[len(REF_PREFIX):] or not ref[len(REF_PREFIX):]:
             if isinstance(ref, str) and '#' in ref and not ref.startswith('#'):
                 raise ValueError(f"$ref {ref!r} names another document; this implementation "
                                  f"resolves only #/definitions/<name> (PS-462)")
             raise ValueError(f"$ref {ref!r} is not of the form #/definitions/<name> (PS-461)")
-        name = ref[len(REF_PREFIX):]
-        if name in stack:
-            raise ValueError(f"$ref cycle: {' -> '.join(stack + [name])} (PS-349)")
-        group = definitions.get(name)
-        if not (isinstance(group, dict) and isinstance(group.get('fields'), list)):
-            raise ValueError(f"$ref {ref!r} does not resolve to a field group (PS-348)")
-        return expand(group['fields'], stack + [name])
+        return ref[len(REF_PREFIX):]
 
-    def expand(node, stack):
+    def group_fields(name, chain):
+        definition_kind(definitions, name, chain)
+        return expand(definitions[name]['fields'], chain + [name])
+
+    def field_definition(name, chain):
+        return expand(copy.deepcopy(definitions[name]['field']), chain + [name])
+
+    def reference(item, chain):
+        name = target(item['$ref'])
+        found = definition_kind(definitions, name, chain)
+        overrides = {key: value for key, value in item.items() if key != '$ref'}
+        if found == 'lookup':
+            raise ValueError(f"`$ref` to '{REF_PREFIX}{name}' in a field list names a lookup "
+                             f"table, not a field or a field group (PS-346, PS-348)")
+        if found == 'fields':
+            if overrides:
+                raise ValueError(f"a `$ref` to the field group '{name}' carries nothing "
+                                 f"else: {item!r} (PS-578)")
+            return group_fields(name, chain)
+        field = field_definition(name, chain)
+        field.update(expand(overrides, chain))         # each key replaced whole (PS-578)
+        if not isinstance(field.get('name'), str) and field.get('type') != 'skip':
+            raise ValueError(f"the field resolved from '{REF_PREFIX}{name}' has no `name`; "
+                             f"the definition or the reference declares one (PS-578, PS-553)")
+        return [field]
+
+    def lookup_table(pointer, chain):
+        name = target(pointer)
+        if definition_kind(definitions, name, chain) != 'lookup':
+            raise ValueError(f"`lookup: {pointer}` names a definition that is not a lookup "
+                             f"table (PS-579, PS-348)")
+        return copy.deepcopy(definitions[name]['lookup'])
+
+    def expand(node, chain):
         if isinstance(node, dict):
-            return {k: expand(v, stack) for k, v in node.items()}
+            out = {}
+            for key, value in node.items():
+                if key == 'lookup' and isinstance(value, str):
+                    out[key] = lookup_table(value, chain)        # PS-579
+                elif key == 'lookup':
+                    out[key] = value                             # a table's keys are data
+                else:
+                    out[key] = expand(value, chain)
+            return out
         if isinstance(node, list):
             out = []
             for item in node:
                 if isinstance(item, dict) and '$ref' in item:
-                    out.extend(resolve(item['$ref'], stack))
+                    out.extend(reference(item, chain))
                 else:
-                    out.append(expand(item, stack))
+                    out.append(expand(item, chain))
             return out
         return node
 
@@ -1595,14 +1729,24 @@ def expand_refs(schema):
         except ValueError as exc:
             errors.append(str(exc))
             expanded[key] = value
-    # A definition no field list reaches is still checked for cycles and dangling refs.
+    # Every definition is checked even where unreferenced, so a malformed library is
+    # reported; the definitions kept on the result are the resolved ones.
+    resolved = {}
     for name, group in definitions.items():
-        if isinstance(group, dict) and isinstance(group.get('fields'), list):
-            try:
-                expand(group['fields'], [name])
-            except ValueError as exc:
-                if str(exc) not in errors:
-                    errors.append(str(exc))
+        try:
+            found = definition_kind(definitions, name, [])
+            if found == 'fields':
+                resolved[name] = dict(group, fields=group_fields(name, []))
+            elif found == 'field':
+                resolved[name] = dict(group, field=field_definition(name, []))
+            else:
+                resolved[name] = copy.deepcopy(group)
+        except ValueError as exc:
+            if str(exc) not in errors:
+                errors.append(str(exc))
+            resolved[name] = group
+    if 'definitions' in schema:
+        expanded['definitions'] = resolved
     return expanded, errors
 
 
@@ -1839,9 +1983,64 @@ def reported_fields(fields):
     return found
 
 
+def merged_members(fields, path=()):
+    """The members of a merged object, at every depth (CR-2026-173): (path, member,
+    is_object) for each named member, where a member of `type: object` is itself
+    combined member by member and any other member - a scalar, a repeat, an array - is a
+    leaf. An object member declaring `on_repeat: last` is a leaf too: the later report
+    replaces it whole. The spec prototype's `merged_members`."""
+    found = []  # type: List[tuple]
+    for member in fields if isinstance(fields, list) else []:
+        if not isinstance(member, dict) or not member.get('name'):
+            continue
+        here = path + (member['name'],)
+        is_object = member.get('type') == 'object' and member.get('on_repeat') != 'last'
+        found.append((here, member, is_object))
+        if is_object:
+            found.extend(merged_members(member.get('fields'), here))
+    return found
+
+
+def merged_leaves(field_def):
+    """A merged object's leaf paths, at every depth (CR-2026-173)."""
+    return {path for path, _, is_object in merged_members(field_def.get('fields'))
+            if not is_object}
+
+
+def merged_objects(field_def):
+    """The paths a merged object combines as objects (CR-2026-173)."""
+    return {path for path, _, is_object in merged_members(field_def.get('fields'))
+            if is_object}
+
+
+def leaf_paths(value, objects, path=()):
+    """The leaf paths of a merged object's value, descending only into the members the
+    schema declares as objects to be combined (CR-2026-173)."""
+    paths = set()
+    for key, member in (value.items() if isinstance(value, dict) else ()):
+        here = path + (key,)
+        if here in objects and isinstance(member, dict):
+            paths |= leaf_paths(member, objects, here)
+        else:
+            paths.add(here)
+    return paths
+
+
+def value_at(value, paths):
+    """The part of a nested value holding exactly the given leaf paths."""
+    out = {}  # type: Dict[str, Any]
+    for path in sorted(paths):
+        source, target = value, out
+        for key in path[:-1]:
+            source = source[key]
+            target = target.setdefault(key, {})
+        target[path[-1]] = source[path[-1]]
+    return out
+
+
 def tlv_repeat_modes(tlv_def):
     """How each name a tlv reports combines when more than one entry reports it (PS-157,
-    PS-525, PS-526): (mode by name, the members of each merged object that declare
+    PS-525, PS-526): (mode by name, the leaf paths of each merged object that declare
     `last`, the schema errors).
 
     A field's own `on_repeat` takes precedence over the tlv's. A tlv's `merge` reaches
@@ -1854,6 +2053,7 @@ def tlv_repeat_modes(tlv_def):
     modes = {}  # type: Dict[str, str]
     last_members = {}  # type: Dict[str, set]
     shared = {}  # type: Dict[tuple, list]
+    objects = {}  # type: Dict[str, set]
     if not isinstance(tlv_def, dict):
         return modes, last_members, errors
     default = tlv_def.get('on_repeat', 'collect')
@@ -1881,18 +2081,32 @@ def tlv_repeat_modes(tlv_def):
                               f"`on_repeat`, {modes[name]} and {mode} (PS-526)")
                 continue
             if mode == 'merge':
-                last_members.setdefault(name, set()).update(
-                    member['name'] for member in field_def.get('fields') or []
-                    if isinstance(member, dict) and member.get('on_repeat') == 'last'
-                    and member.get('name'))
-                for member in field_def.get('fields') or []:
-                    if isinstance(member, dict) and member.get('name'):
-                        shared.setdefault((name, member['name']), []).append(member)
-    for (name, member), declarations in shared.items():
-        # CR-2026-128: merged cases share a member only where it declares `last`.
+                # CR-2026-173: a member that is an object is combined member by member
+                # too. PS-526 concerns two cases declaring a leaf; one case naming a
+                # member twice counts once.
+                in_case = set()
+                for path, member, member_is_object in merged_members(
+                        field_def.get('fields')):
+                    if member_is_object:
+                        objects.setdefault(name, set()).add(path)
+                        continue
+                    if path in in_case:
+                        continue
+                    in_case.add(path)
+                    shared.setdefault((name, path), []).append(member)
+                    if member.get('on_repeat') == 'last':
+                        last_members.setdefault(name, set()).add(path)
+    for (name, path), declarations in shared.items():
+        dotted = '.'.join(path)
+        if path in objects.get(name, set()):
+            errors.append(f"tlv: the merged object '{name}' declares '{dotted}' as an "
+                          f"object in one case and as a value in another (PS-526)")
+            continue
+        # CR-2026-128: merged cases share a leaf only where it declares `last`, at any
+        # depth (CR-2026-173).
         if len(declarations) > 1 and any(d.get('on_repeat') != 'last'
                                          for d in declarations):
-            errors.append(f"tlv: cases share the member '{member}' of the merged object "
+            errors.append(f"tlv: cases share the member '{dotted}' of the merged object "
                           f"'{name}' without `on_repeat: last` (PS-526)")
     return modes, last_members, errors
 
@@ -1928,9 +2142,10 @@ def on_repeat_schema_errors(node):
                         allowed.add(id(field_def))
                         if modes.get(name) != 'merge':
                             continue
-                        for member in field_def.get('fields') or []:
-                            if isinstance(member, dict) \
-                                    and member.get('on_repeat') == 'last':
+                        # A merged object's leaf may declare `last` at any depth
+                        # (PS-525, CR-2026-173).
+                        for _, member, _ in merged_members(field_def.get('fields')):
+                            if member.get('on_repeat') == 'last':
                                 allowed.add(id(member))
             for key, value in item.items():
                 if key not in _ON_REPEAT_OPAQUE:
@@ -1964,33 +2179,41 @@ def _reports_list(field_def):
 
 def tlv_encode_plan(tlv_def, modes, last_members):
     """What PS-527 needs of a tlv's cases: `members`, for each merged object, every
-    member some case declares - a supplied member outside it is an error. Shared
-    members are `last` ones, as PS-526 requires, so each written case carries them.
+    leaf path some case declares, at any depth (CR-2026-173) - a supplied leaf outside
+    it is an error - and `objects`, the paths it combines as objects. Shared leaves are
+    `last` ones, as PS-526 requires, so each written case carries them.
     `last_members` is accepted for the callers' symmetry with tlv_repeat_modes."""
     members = {}  # type: Dict[str, set]
+    objects = {}  # type: Dict[str, set]
     for case_key, body in (tlv_def.get('cases') or {}).items():
         if case_key == 'default' or not isinstance(body, list):
             continue
         for name, field_def in reported_fields(body).items():
             if modes.get(name) != 'merge':
                 continue
-            for member in field_def.get('fields') or []:
-                if isinstance(member, dict) and member.get('name'):
-                    members.setdefault(name, set()).add(member['name'])
-    return {'members': members}
+            members.setdefault(name, set()).update(merged_leaves(field_def))
+            objects.setdefault(name, set()).update(merged_objects(field_def))
+    return {'members': members, 'objects': objects}
 
 
-def combine_repeated(name, earlier, value, mode, last_members):
+def combine_repeated(name, earlier, value, mode, last_members, path=()):
     """`last` keeps the later value; `merge` combines two objects member by member,
-    and a member reported twice is an error unless it declares `on_repeat: last`
-    (PS-525)."""
+    recursing where both carry an object (CR-2026-173), and a leaf reported twice is an
+    error unless it declares `on_repeat: last` (PS-525). `last_members` holds leaf
+    paths."""
     if mode == 'last':
         return value
     combined = dict(earlier)
     for member, member_value in value.items():
-        if member in combined and member not in last_members:
+        here = path + (member,)
+        if member in combined and here not in last_members \
+                and isinstance(combined[member], dict) and isinstance(member_value, dict):
+            combined[member] = combine_repeated(name, combined[member], member_value,
+                                                mode, last_members, here)
+            continue
+        if member in combined and here not in last_members:
             raise ValueError(f"tlv: the merged object '{name}' reports its member "
-                             f"'{member}' twice (PS-525)")
+                             f"'{'.'.join(here)}' twice (PS-525)")
         combined[member] = member_value
     return combined
 
@@ -2010,6 +2233,11 @@ def annotation_errors(field_def):
                       f"{{object: 3303}}; a bare object number is not a shorthand (PS-510)")
     if 'senml' in field_def and not isinstance(field_def['senml'], dict):
         errors.append(f"The senml of '{name}' is a mapping, such as {{unit: Cel}} (PS-510)")
+    if 'semantic' in field_def and not isinstance(field_def['semantic'], str):
+        # PS-470 (CR-2026-179): a TTN normalized path, so a string; the legacy
+        # `semantic: {ipso: N}` is withdrawn with it, `ipso:` being the IPSO annotation.
+        errors.append(f"The semantic of '{name}' is a string naming a normalized "
+                      f"measurement type, such as air.temperature (PS-470)")
     return errors
 
 
@@ -2017,8 +2245,8 @@ def annotation_schema_errors(node, _top=True):
     """annotation_errors() for every field mapping, wherever it sits: a port list, a case
     body, an object's or repeat's members, a byte_group or flagged group. Walked like
     arithmetic_schema_errors(), over the schema after its `$ref`s are spliced, and over
-    `definitions` too, referenced or not, as Go and C# parse them. The legacy
-    `semantic: {ipso: N}` is a different key, outside PS-510, and is not descended into."""
+    `definitions` too, referenced or not, as Go and C# parse them. An annotation's own
+    contents are not fields and are not descended into."""
     errors = []
     if isinstance(node, dict):
         if not _top:
@@ -2099,6 +2327,8 @@ def reference_errors(schema):
                     names = list(indexed.groups()) if indexed else [v[1:]]
                 elif k in TEMPLATE_KEYS or (in_senml and k == 'name'):
                     names = TEMPLATE_REFERENCE.findall(v)
+                elif k == 'template':
+                    names = STRING_TEMPLATE_REFERENCE.findall(v)              # PS-590
                 ahead.extend((n, k) for n in names if n not in declared)
             elif k == 'default':
                 if key == 'match' and isinstance(v, (dict, list)):
@@ -2365,19 +2595,50 @@ def reraise_text(text: str) -> ValueError:
         exc = BufferUnderflow(text)
         exc.named = True
         return exc
+    if _NAMED_CHECKSUM.match(text):
+        return FieldError(text)             # PS-585, PS-586: verbatim (CR-2026-174)
     return ValueError(text)
+
+
+_NAMED_CHECKSUM = re.compile(r"^Field '.*\(PS-58[56]\)$", re.S)
 
 
 ASCII_HIGH_BYTE_WARNING = "Field '{}': a byte above 0x7F in an ascii value (PS-073, PS-538)"
 
 
-def decode_ascii(name: Any, raw: bytes, warnings: List[str]) -> str:
+#: PS-534 (CR-2026-177): what an ascii field does with its 0x00 bytes.
+NUL_MODES = ('trailing', 'stop', 'drop')
+
+
+def apply_nul_mode(text: str, mode: str) -> str:
+    """PS-534: `trailing` drops trailing NULs and keeps the rest; `stop` ends the text at the
+    first NUL; `drop` removes every NUL. Whitespace is never trimmed."""
+    if mode == 'stop':
+        return text.split('\x00', 1)[0]
+    if mode == 'drop':
+        return text.replace('\x00', '')
+    return text.rstrip('\x00')
+
+
+def decode_ascii(name: Any, raw: bytes, warnings: List[str], nul: str = 'trailing') -> str:
     """PS-534, PS-538: each byte is the ISO 8859-1 character of the same number, so the
-    value is lossless and re-encodes to the same bytes (PS-537); trailing 0x00 padding
-    only is dropped. A byte above 0x7F is reported with PS-073's warning."""
+    value is lossless and re-encodes to the same bytes (PS-537); the field's `nul` mode
+    (trailing 0x00 padding by default) is applied. A byte above 0x7F is reported with
+    PS-073's warning."""
     if any(byte > 0x7F for byte in raw):
         warnings.append(ASCII_HIGH_BYTE_WARNING.format(name))
-    return raw.decode('latin-1').rstrip('\x00')
+    return apply_nul_mode(raw.decode('latin-1'), nul)
+
+
+def terminated_span(field_def: Dict[str, Any], buf: bytes, pos: int) -> int:
+    """PS-593: the number of bytes of text before the field's terminator; a payload that
+    ends before one is an underflow, which the field names (PS-535)."""
+    terminator = field_def['terminator']
+    end = buf.find(bytes([terminator]), pos)
+    if end < 0:
+        raise BufferUnderflow(f"no terminator byte 0x{terminator:02X} before the end of "
+                              f"the payload (PS-593)")
+    return end - pos
 
 
 #: PS-560: the whole text of a `numeral` field, by base.
@@ -2399,6 +2660,9 @@ def encode_numeral(name: Any, value: Any, length: Optional[int], numeral: str) -
     digits = format(abs(n), 'd' if numeral == 'decimal' else 'X')
     sign = '-' if n < 0 else ''
     width = len(sign) + len(digits) if length is None else length
+    if length is None and n < 0 and numeral == 'hex':                  # PS-168, PS-595
+        raise FieldError(f"Field '{name}': {format_lookup_value(value)} is negative, which a "
+                         f"hex numeral cannot write (PS-168)")
     if (n < 0 and numeral == 'hex') or len(sign) + len(digits) > width:
         raise FieldError(f"Field '{name}': {format_lookup_value(value)} does not fit "
                          f"{length if length is not None else len(digits)} {numeral} digits (PS-168)")
@@ -2478,6 +2742,53 @@ def parse_bitfield_segment(segment: str, bits: int, fmt: Any, name: Any) -> int:
     return number & ((1 << bits) - 1)
 
 
+def split_by_width(text: str, parts: List[Any], name: Any, value: Any) -> List[str]:
+    """PS-606 (CR-2026-183): with an empty delimiter, split by each part's `:N` width. Every
+    part must declare a width that holds its largest value, and none may be sdecimal, or the
+    field cannot be encoded (it still decodes); a value of any other length is rejected."""
+    widths = []
+    for part in parts:
+        bits = int(part[1])
+        base, width = parse_part_format(part[2] if len(part) > 2 else 'decimal')
+        largest = len(format_part_number((1 << bits) - 1, base, None)) if bits else 1
+        if base == 'sdecimal' or width is None or largest > width:
+            raise FieldError(f"Field '{name}': with an empty delimiter every part needs a "
+                             f":N width that holds its largest value, and none may be "
+                             f"sdecimal, so this field cannot be encoded (PS-606)")
+        widths.append(width)
+    if len(text) != sum(widths):
+        raise FieldError(f"Field '{name}': {value!r} has {len(text)} characters for parts "
+                         f"of widths {widths} (PS-606)")
+    segments, at = [], 0
+    for width in widths:
+        segments.append(text[at:at + width])
+        at += width
+    return segments
+
+
+def bitfield_segments(field_def: Dict[str, Any], value: str) -> List[str]:
+    """A bitfield_string value's segments, one per part (PS-096 steps 1 and 2): the declared
+    prefix removed - a value without it is rejected (PS-605) - then split on the delimiter,
+    or by width where it is empty (PS-606). A segment count other than the part count is
+    rejected, never filled or cut (PS-605)."""
+    name = field_def.get('name')
+    parts = [p for p in field_def.get('parts', []) if len(p) >= 2]
+    text = value
+    prefix = field_def.get('prefix', '')
+    if prefix:
+        if not text.startswith(prefix):
+            raise FieldError(f"Field '{name}': {value!r} does not begin with its prefix "
+                             f"{prefix!r} (PS-605)")
+        text = text[len(prefix):]
+    delimiter = field_def.get('delimiter', '.')
+    segments = (split_by_width(text, parts, name, value) if delimiter == ''
+                else text.split(delimiter))
+    if len(segments) != len(parts):
+        raise FieldError(f"Field '{name}': {value!r} has {len(segments)} segment(s) for "
+                         f"{len(parts)} part(s) (PS-605)")
+    return segments
+
+
 def bitfield_part_errors(node, _top=True):
     """PS-430: every bitfield_string part's format, walked over the whole schema."""
     errors = []
@@ -2499,7 +2810,8 @@ def bitfield_part_errors(node, _top=True):
 
 
 def encode_ascii(name: Any, value: Any, length: Optional[int],
-                 warnings: List[str]) -> bytes:
+                 warnings: List[str], nul: str = 'trailing',
+                 terminator: Optional[int] = None) -> bytes:
     """PS-537: a character above U+00FF, or a value longer than a fixed `length`, is
     rejected naming the field; U+0080..U+00FF is written as the byte of the same number
     with a warning; a short value is padded with 0x00. `length` is None where the field's
@@ -2509,12 +2821,21 @@ def encode_ascii(name: Any, value: Any, length: Optional[int],
         raise FieldError(f"Field '{name}': an ascii value holds a character above "
                          f"U+00FF, which has no byte (PS-537)")
     encoded = text.encode('latin-1')
+    if terminator is not None and terminator in encoded:               # PS-595
+        raise FieldError(f"Field '{name}': the value holds its terminator byte "
+                         f"0x{terminator:02X} (PS-595)")
+    if nul == 'stop' and b'\x00' in encoded:                           # PS-595
+        raise FieldError(f"Field '{name}': a nul: stop value holds a 0x00 byte (PS-595)")
+    if terminator is not None:
+        length = None
     if length is not None and len(encoded) > length:
         raise FieldError(f"Field '{name}': an ascii value of {len(encoded)} bytes is "
                          f"longer than its length of {length} (PS-537)")
     if any(byte > 0x7F for byte in encoded):
         warnings.append(f"Field '{name}': a character above U+007F in an ascii value "
                         f"(PS-537)")
+    if terminator is not None:
+        return encoded + bytes([terminator])                           # PS-595
     if length is None:
         return encoded
     return encoded + b'\x00' * (length - len(encoded))
@@ -2584,6 +2905,123 @@ def render_template_value(value, reference, template):
     raise ValueError(
         "template %r references %r, which is not a number, string or boolean "
         "and cannot be written into a key (PS-532)" % (template, reference))
+
+
+#: `$$`, `${name}` or `${name:format}` in a string field's `template` (PS-590, CR-2026-176).
+STRING_TEMPLATE_RE = re.compile(r'\$\$|\$\{(\w+)(?::([^}]*))?\}')
+#: The names a string field's `template` references, as the spec prototype's
+#: key_vocabulary.STRING_TEMPLATE_REFERENCE reads them (PS-539).
+STRING_TEMPLATE_REFERENCE = re.compile(r'\$\{(\w+)(?::[^}]*)?\}')
+
+
+def is_string_template(field_def):
+    """A `type: string` field declaring `template`: computed, reading no bytes (PS-590)."""
+    return (isinstance(field_def, dict) and field_def.get('type') == 'string'
+            and 'template' in field_def)
+
+
+def given_text(value):
+    """A value as a PS-591 warning writes it, the spec prototype's js_text: a boolean as
+    true or false, a number as JavaScript's String(n), anything else in single quotes."""
+    if isinstance(value, bool):
+        return 'true' if value else 'false'
+    if isinstance(value, (int, float)):
+        return format_lookup_value(value)
+    return "'" + str(value) + "'"
+
+
+def render_string_template(field_def, values, labels, warnings):
+    """A template string field's value (PS-590 to PS-592, CR-2026-176), or OMITTED.
+
+    `${name}` writes what PS-532 writes - a looked-up field's label (`labels`), else the
+    value bound; `${name:format}` writes the number the reference binds (PS-523) in a part
+    format of PS-430 (`format_part_number`, CR-2026-170's); `$$` writes `$`. A reference
+    with no value - never bound, or a lookup miss under a bare reference - makes the field
+    absent (PS-592). A format given a value that is not an integer, or hex given a negative
+    one, makes it absent with a warning naming the field and the reference (PS-591)."""
+    name = field_def.get('name')
+    absent = []
+
+    def substitute(match):
+        reference, fmt = match.group(1), match.group(2)
+        if reference is None:
+            return '$'
+        if reference not in values:
+            absent.append(reference)
+            return ''
+        number = values[reference]
+        if fmt is None:
+            value = labels.get(reference, number)
+            if value is OMITTED:
+                absent.append(reference)
+                return ''
+            return render_template_value(value, reference, field_def.get('template'))
+        base, width = parse_part_format(fmt)
+        integral = (not isinstance(number, bool) and isinstance(number, (int, float))
+                    and math.isfinite(number) and number == int(number)
+                    and not (base.startswith('hex') and number < 0))
+        if not integral:
+            warnings.append(f"Field '{name}': ${{{reference}:{fmt}}} is given "
+                            f"{given_text(number)}, which the format cannot write, so the "
+                            f"field is absent (PS-591)")
+            absent.append(reference)
+            return ''
+        return format_part_number(int(number), base, width)
+
+    text = STRING_TEMPLATE_RE.sub(substitute, str(field_def.get('template')))
+    return OMITTED if absent else text
+
+
+def string_neither_message(name):
+    """PS-361 for a `type: string` field declaring neither `value` nor `template`, in the
+    spec prototype's text."""
+    return (f"Field '{name}': `type: string` is a literal that declares `value`, or a "
+            f"template that declares `template`; a string read from the payload is `ascii` "
+            f"(PS-361)")
+
+
+def string_template_errors(node, _top=True):
+    """PS-361, PS-590, PS-532, PS-430 at load, in the spec prototype's text: `template` sits
+    on a `type: string` field that declares no `value` and is a string; it references no
+    object or repeat its field list declares before it; each `${name:format}` is a part
+    format. Its undeclared or late references are PS-539's (`reference_errors`)."""
+    errors = []
+    if isinstance(node, list):
+        structured = set()          # objects and repeats this list declares so far (PS-532)
+        for entry in node:
+            if isinstance(entry, dict) and isinstance(entry.get('template'), str):
+                for reference in STRING_TEMPLATE_REFERENCE.findall(entry['template']):
+                    if reference in structured:
+                        errors.append(
+                            f"The template of '{entry.get('name', '<unnamed>')}' references "
+                            f"`{reference}`, an object or repeat, which has no text (PS-532, "
+                            f"PS-590)")
+            if (isinstance(entry, dict) and entry.get('type') in ('object', 'repeat')
+                    and isinstance(entry.get('name'), str)):
+                structured.add(entry['name'])
+            errors.extend(string_template_errors(entry, False))
+    elif isinstance(node, dict):
+        if node.get('type') == 'string' and 'template' not in node and 'value' not in node:
+            errors.append(string_neither_message(node.get('name')))
+        if 'template' in node and ('type' in node or 'name' in node):
+            template = node['template']
+            if (node.get('type') != 'string' or 'value' in node
+                    or not isinstance(template, str)):
+                errors.append(f"The template of '{node.get('name', '<unnamed>')}' is a string "
+                              f"on a `type: string` field that declares no `value` (PS-361, "
+                              f"PS-590)")
+            else:
+                for match in STRING_TEMPLATE_RE.finditer(template):
+                    if match.group(2) is not None:
+                        problem = part_format_error(match.group(2))
+                        if problem:
+                            errors.append(problem)
+        for key, value in node.items():
+            if (_top and key in ('test_vectors', 'definitions')) or key in (
+                    'lookup', 'values', 'value', 'else'):
+                continue
+            errors.extend(string_template_errors(value, False))
+    return errors
 
 
 def lookup_template_pattern(template):
@@ -3387,6 +3825,158 @@ def numeral_errors(node, _top=True):
     return errors
 
 
+def ascii_text_errors(node, _top=True):
+    """PS-534, PS-593, PS-072: `nul` and `terminator` are defined on an ascii field only; `nul`
+    is trailing, stop or drop; a terminator is a byte 0 to 255 declared in place of `length`.
+    Walked over the whole schema, in the spec prototype's text."""
+    errors = []
+    if isinstance(node, list):
+        for item in node:
+            errors.extend(ascii_text_errors(item, False))
+    elif isinstance(node, dict):
+        if 'type' in node and ('nul' in node or 'terminator' in node):
+            name = node.get('name')
+            if str(node.get('type')).lower() != 'ascii':
+                errors.append(f"Field '{name}': nul and terminator are defined only on an "
+                              f"ascii field, not on {node.get('type')} (PS-534, PS-593)")
+            else:
+                if 'nul' in node and node['nul'] not in NUL_MODES:
+                    errors.append(f"Field '{name}': nul must be trailing, stop or drop, not "
+                                  f"{node['nul']!r} (PS-534)")
+                if 'terminator' in node:
+                    term = node['terminator']
+                    if (isinstance(term, bool) or not isinstance(term, int)
+                            or not 0 <= term <= 255):
+                        errors.append(f"Field '{name}': terminator must be a byte value 0 to "
+                                      f"255, not {term!r} (PS-593)")
+                    if 'length' in node:
+                        errors.append(f"Field '{name}': an ascii field declares length or "
+                                      f"terminator, not both (PS-593)")
+        if (str(node.get('type')).lower() == 'ascii' and 'length' not in node
+                and 'terminator' not in node):
+            errors.append(f"Field '{node.get('name')}': ascii type requires 'length' field, "
+                          f"or 'terminator' (PS-072)")
+        for key, value in node.items():
+            if _top and key == 'test_vectors':
+                continue
+            errors.extend(ascii_text_errors(value, False))
+    return errors
+
+
+#: PS-585 (CR-2026-174): each checksum algorithm and the bits its result needs.
+CHECKSUM_ALGOS = {'sum8': 8, 'xor8': 8, 'crc8/smbus': 8, 'crc16/kermit': 16}
+CHECKSUM_KEYS = ('algo', 'seed', 'from', 'on_mismatch')
+#: The unsigned integer types a checksum may be declared on, by width in bits.
+CHECKSUM_WIDTHS = {'u8': 8, 'u16': 16, 'u24': 24, 'u32': 32, 'u64': 64,
+                   'uint8': 8, 'uint16': 16, 'uint24': 24, 'uint32': 32, 'uint64': 64}
+
+
+def compute_checksum(algo: str, data: bytes, seed: int = 0) -> int:
+    """PS-585 (CR-2026-174): the four checksum algorithms. The CRCs are the catalogue
+    entries: over b'123456789', crc8/smbus is 0xF4 and crc16/kermit 0x2189."""
+    if algo == 'sum8':
+        return (seed + sum(data)) & 0xFF
+    if algo == 'xor8':
+        value = seed
+        for b in data:
+            value ^= b
+        return value
+    if algo == 'crc8/smbus':            # poly 0x07, init 0, not reflected, no final XOR
+        crc = 0
+        for b in data:
+            crc ^= b
+            for _ in range(8):
+                crc = ((crc << 1) ^ 0x07) & 0xFF if crc & 0x80 else (crc << 1) & 0xFF
+        return crc
+    if algo == 'crc16/kermit':          # poly 0x1021 reflected (0x8408), init 0, no final XOR
+        crc = 0
+        for b in data:
+            crc ^= b
+            for _ in range(8):
+                crc = (crc >> 1) ^ 0x8408 if crc & 1 else crc >> 1
+        return crc
+    raise ValueError(f"Unknown checksum algorithm {algo!r} (PS-585)")
+
+
+def checksum_field_errors(field: Dict[str, Any]) -> List[str]:
+    """PS-585 (CR-2026-174) for one field declaring `checksum`, in the spec prototype's
+    order and text (key_vocabulary.check_checksum): a mapping of known keys, on an unsigned
+    integer wide enough for its algorithm; `seed` a byte, on sum8 and xor8 only; `from` a
+    byte offset; `on_mismatch` error or warn. The first failure only, as the prototype."""
+    name = field.get('name', '<unnamed>')
+    spec = field['checksum']
+    if not isinstance(spec, dict):
+        return [f"The checksum of '{name}' is a mapping, such as {{algo: xor8}} (PS-585)"]
+    for key in spec:
+        if key not in CHECKSUM_KEYS and key != 'description' \
+                and not str(key).startswith('x-'):
+            return [f"`{key}` is not a key of the checksum of '{name}' (PS-448)"]
+    width = CHECKSUM_WIDTHS.get(field.get('type'))
+    if width is None:
+        return [f"Field '{name}': a checksum is declared on an unsigned integer type "
+                f"(u8 to u64), not {field.get('type')!r} (PS-585)"]
+    algo = spec.get('algo')
+    if algo not in CHECKSUM_ALGOS:
+        return [f"The checksum of '{name}': `algo` is one of "
+                f"{', '.join(sorted(CHECKSUM_ALGOS))}, not {algo!r} (PS-585)"]
+    if width < CHECKSUM_ALGOS[algo]:
+        return [f"Field '{name}': {field['type']} cannot hold a {algo} result (PS-585)"]
+    if 'seed' in spec and algo not in ('sum8', 'xor8'):
+        return [f"The checksum of '{name}': `seed` applies to sum8 and xor8, not {algo} "
+                f"(PS-585)"]
+    seed = spec.get('seed', 0)
+    if not isinstance(seed, int) or isinstance(seed, bool) or not 0 <= seed <= 255:
+        return [f"The checksum of '{name}': `seed` is a byte, 0 to 255 (PS-585)"]
+    start = spec.get('from', 0)
+    if not isinstance(start, int) or isinstance(start, bool) or start < 0:
+        return [f"The checksum of '{name}': `from` is a byte offset, 0 or more (PS-585)"]
+    if spec.get('on_mismatch', 'error') not in ('error', 'warn'):
+        return [f"The checksum of '{name}': `on_mismatch` is `error` or `warn` (PS-586)"]
+    return []
+
+
+def checksum_errors(node, _top=True):
+    """PS-585 (CR-2026-174) over the whole schema, test vectors skipped."""
+    errors = []
+    if isinstance(node, list):
+        for item in node:
+            errors.extend(checksum_errors(item, False))
+    elif isinstance(node, dict):
+        if 'checksum' in node and ('type' in node or 'name' in node):
+            errors.extend(checksum_field_errors(node))
+        for key, value in node.items():
+            if _top and key == 'test_vectors':
+                continue
+            if isinstance(value, (list, dict)):
+                errors.extend(checksum_errors(value, False))
+    return errors
+
+
+def checksum_mismatch(field_def: Dict[str, Any], buf: bytes, start_pos: int,
+                      carried: int) -> Optional[str]:
+    """PS-586: the declared checksum over `buf[from:start_pos]` against the value read.
+    Returns the mismatch message, or None where they agree. A range starting after the
+    field is an error (PS-585)."""
+    spec = field_def['checksum']
+    name = field_def.get('name')
+    start = int(spec.get('from', 0))
+    if start > start_pos:
+        raise FieldError(f"Field '{name}': the checksum range starts at byte {start}, after "
+                         f"the field at byte {start_pos} (PS-585)")
+    computed = compute_checksum(spec['algo'], bytes(buf[start:start_pos]),
+                                int(spec.get('seed', 0)))
+    if computed == carried:
+        return None
+    return (f"Field '{name}': {spec['algo']} over bytes {start} to {start_pos - 1} is "
+            f"0x{computed:X}, but the frame carries 0x{carried:X} (PS-586)")
+
+
+def checksum_unwritten_message(name) -> str:
+    """PS-587: a checksum whose covered range is not fully written when it is reached."""
+    return (f"Field '{name}': the bytes its checksum covers are not all written when it "
+            f"is reached (PS-587)")
+
+
 def schema_iterator_errors(schema):
     """iterator_errors over the top-level and port field lists, and every tlv's reserve.
 
@@ -3396,7 +3986,10 @@ def schema_iterator_errors(schema):
     errors = field_name_errors(schema)
     errors.extend(withdrawn_errors(schema))                          # CR-2026-159
     errors.extend(numeral_errors(schema))                            # PS-560
+    errors.extend(ascii_text_errors(schema))                         # PS-534, PS-593
+    errors.extend(checksum_errors(schema))                           # PS-585
     errors.extend(bitfield_part_errors(schema))                      # PS-430
+    errors.extend(string_template_errors(schema))                    # PS-590
     errors.extend(lookup_type_errors(schema))                        # PS-571
     errors.extend(iterator_errors(schema.get('fields')))
     errors.extend(ipso_instance_errors(schema))                      # PS-548
@@ -4163,6 +4756,8 @@ def field_meta(field_def, repeat=None, siblings=None):
         entry['senml'] = {'name': senml['name']}               # PS-480; a template, PS-373
     if field_def.get('description'):
         entry['description'] = field_def['description']
+    if isinstance(field_def.get('semantic'), str):
+        entry['semantic'] = field_def['semantic']                  # PS-600
     if declared_type == 'repeat' and repeat_members(field_def)[1] is not None:
         # PS-531: the element's own entry, nested, without its name; the repeat keeps
         # `type: repeat` and its identity.
@@ -4317,6 +4912,369 @@ def meta_declaration_errors(schema):
         if isinstance(group, list):
             check(group, 'port %s' % port)
     return errors
+
+
+# =============================================================================
+# TTN normalized payload (CR-2026-179: PS-470, PS-597 to PS-600)
+# =============================================================================
+
+#: The TTN normalized measurement paths and their units, as the spec prototype copies them
+#: (by hand, not fetched) from the `measurement` definition of lib/payload.json in TTN
+#: lorawan-devices at commit 7a0cb2e; keep it in step when TTN extends its schema. None: the
+#: path takes no unit (a boolean, a text, pH).
+TTN_PATHS: Dict[str, Optional[str]] = {
+    'time': None, 'battery': 'V',
+    'soil.depth': 'cm', 'soil.moisture': '%', 'soil.temperature': '°C', 'soil.ec': 'dS/m',
+    'soil.pH': None, 'soil.n': 'ppm', 'soil.p': 'ppm', 'soil.k': 'ppm',
+    'air.location': None, 'air.temperature': '°C', 'air.relativeHumidity': '%',
+    'air.pressure': 'hPa', 'air.co2': 'ppm', 'air.lightIntensity': 'lux',
+    'wind.speed': 'm/s', 'wind.direction': '°',
+    'rain.intensity': 'mm/hour', 'rain.cumulative': 'mm',
+    'water.leak': None, 'water.temperature.min': '°C', 'water.temperature.max': '°C',
+    'water.temperature.avg': '°C', 'water.temperature.current': '°C',
+    'metering.water.total': 'L',
+    'action.motion.detected': None, 'action.motion.count': 'count', 'action.contactState': None,
+    'position.latitude': '°', 'position.longitude': '°',
+}
+
+#: The spellings that already are a path's unit: TTN's own, and its SenML name (Clause 9).
+TTN_UNIT_NAMES: Dict[str, frozenset] = {
+    '°C': frozenset({'°C', 'Cel'}), '%': frozenset({'%', '%RH', '/100'}),
+    'hPa': frozenset({'hPa'}), 'ppm': frozenset({'ppm'}), 'lux': frozenset({'lux', 'lx'}),
+    'm/s': frozenset({'m/s'}), '°': frozenset({'°', 'deg', 'lat', 'lon'}),
+    'mm/hour': frozenset({'mm/hour', 'mm/h'}), 'mm': frozenset({'mm'}),
+    'L': frozenset({'L', 'l'}), 'cm': frozenset({'cm'}), 'V': frozenset({'V'}),
+    'dS/m': frozenset({'dS/m'}), 'count': frozenset({'count'}),
+}
+
+#: PS-599's closed list, by the path's unit and the field's: each a conversion name the
+#: generated codec's normalizeUplink implements identically (TTN_CONVERSION_JS).
+TTN_CONVERSIONS: Dict[str, Dict[str, str]] = {
+    '°C': {'°F': 'degF', 'degF': 'degF'},
+    'V': {'mV': 'mV'},
+    'hPa': {'Pa': 'Pa', 'kPa': 'kPa', 'bar': 'bar', 'inHg': 'inHg'},
+    'm/s': {'km/h': 'km/h', 'mph': 'mph', 'knots': 'knots', 'kn': 'knots', 'kt': 'knots'},
+    '%': {'/': 'fraction'},
+}
+
+#: Each conversion, in the order of operations the generated codec writes it, so both give
+#: the same binary64 result.
+TTN_CONVERSION_FUNCS = {
+    'degF': lambda x: (x - 32) * 5 / 9,
+    'mV': lambda x: x / 1000,
+    'Pa': lambda x: x / 100,
+    'kPa': lambda x: x * 10,
+    'bar': lambda x: x * 1000,
+    'inHg': lambda x: x * 33.86388640341,
+    'km/h': lambda x: x / 3.6,
+    'mph': lambda x: x * 0.44704,
+    'knots': lambda x: x * 1852 / 3600,
+    'fraction': lambda x: x * 100,
+}
+
+
+def ttn_unit_rule(field_def: Dict[str, Any], path: str) -> Tuple[str, Optional[str]]:
+    """How a field's value reaches `path`'s unit (PS-599): ('same', None), ('convert', name)
+    or ('none', why). A field's unit is its `unit` or its `senml.unit`."""
+    target = TTN_PATHS.get(path)
+    if target is None:
+        return ('same', None)
+    senml = field_def.get('senml') if isinstance(field_def.get('senml'), dict) else {}
+    units = [u for u in (field_def.get('unit'), senml.get('unit')) if isinstance(u, str)]
+    if not units:
+        return ('none', f"declares no unit, and {path} is in {target}")
+    if any(u in TTN_UNIT_NAMES.get(target, {target}) for u in units):
+        return ('same', None)
+    for u in units:
+        if u in TTN_CONVERSIONS.get(target, {}):
+            return ('convert', TTN_CONVERSIONS[target][u])
+    return ('none', f"unit {units[0]!r} is not {target} and no rule converts it")
+
+
+def _semantic_fields(fields, prefix=()):
+    """(output path, field) for every field that reports into this object, looking through
+    the merging constructs and into objects; a repeat is yielded as itself, and its elements
+    are walked by the caller. The spec prototype's _semantic_fields."""
+    for item in fields or []:
+        if not isinstance(item, dict):
+            continue
+        if 'type' in item:
+            name = item.get('name')
+            if not isinstance(name, str) or not name or name.startswith('_'):
+                continue
+            if item.get('type') == 'object':
+                yield from _semantic_fields(item.get('fields'), prefix + (name,))
+            else:
+                yield prefix + (name,), item
+            continue
+        spec = next((item[k] for k in ('match', 'tlv', 'flagged', 'byte_group') if k in item),
+                    None)
+        if isinstance(spec, list):
+            for part in spec:
+                yield from _semantic_fields(part if isinstance(part, list) else [part], prefix)
+        elif isinstance(spec, dict):
+            yield from _semantic_fields(spec.get('fields'), prefix)
+            for body in (spec.get('cases') or {}).values():
+                yield from _semantic_fields(body if isinstance(body, list) else None, prefix)
+            default = spec.get('default')
+            yield from _semantic_fields(default if isinstance(default, list) else
+                                        default.get('fields') if isinstance(default, dict)
+                                        else None, prefix)
+            for group in spec.get('groups') or []:
+                yield from _semantic_fields(group.get('fields') if isinstance(group, dict)
+                                            else None, prefix)
+
+
+def _semantic_groups(fields):
+    """The message-level fields by semantic path, each path to {output path: field}; and the
+    repeats, as (output path, repeat field)."""
+    by_path: Dict[str, Dict[Tuple[str, ...], Dict[str, Any]]] = {}
+    repeats = []
+    for out, item in _semantic_fields(fields):
+        if item.get('type') == 'repeat':
+            repeats.append((out, item))
+        elif isinstance(item.get('semantic'), str):
+            by_path.setdefault(item['semantic'], {}).setdefault(out, item)
+    return by_path, repeats
+
+
+def _repeat_element_fields(repeat):
+    element = repeat.get('element')
+    if isinstance(element, dict):
+        return [dict(element, name='value')], True
+    return repeat.get('fields'), False
+
+
+def _uplink_field_lists(schema) -> List[Tuple[Optional[str], list]]:
+    """(port key, field list) of every message a schema decodes: its `ports` entries, a
+    downlink-only entry left out, else its top-level `fields`."""
+    ports = schema.get('ports')
+    if isinstance(ports, dict) and ports:
+        lists = []
+        for key, entry in ports.items():
+            if isinstance(entry, dict):
+                if entry.get('direction') == 'downlink':
+                    continue
+                lists.append((str(key), entry.get('fields') or []))
+            elif isinstance(entry, list):
+                lists.append((str(key), entry))
+        return lists
+    fields = schema.get('fields')
+    return [(None, fields if isinstance(fields, list) else [])]
+
+
+def semantic_warnings(schema: Dict[str, Any]) -> List[str]:
+    """The validator warnings PS-597 asks for, in the spec prototype's words: a `semantic`
+    that is no TTN path, a unit that is neither the path's nor one PS-599 converts, and a
+    path two fields of one message declare outside a repeat. None rejects the schema."""
+    schema = expand_refs(schema)[0]
+    warnings: List[str] = []
+
+    def check(fields):
+        by_path, repeats = _semantic_groups(fields)
+        for path, found in by_path.items():
+            names = ', '.join("'" + '.'.join(out) + "'" for out in found)
+            if path not in TTN_PATHS:
+                warnings.append(f"semantic {path!r} of {names} is not a TTN normalized path "
+                                f"(PS-597)")
+                continue
+            if len(found) > 1:
+                warnings.append(f"semantic {path!r} is declared by {names}; normalizeUplink "
+                                f"omits every value on it (PS-598)")
+            for out, item in found.items():
+                rule, why = ttn_unit_rule(item, path)
+                if rule == 'none':
+                    warnings.append(f"Field '{'.'.join(out)}' ({path}) {why}; the value is "
+                                    f"left out of the normalized payload (PS-597, PS-599)")
+        for _, repeat in repeats:
+            element = repeat.get('element')
+            check([dict(element, name=element.get('name') or 'value')]
+                  if isinstance(element, dict) else repeat.get('fields'))
+
+    for _, fields in _uplink_field_lists(schema):
+        check(fields)
+    return warnings
+
+
+def has_semantic(schema: Dict[str, Any]) -> bool:
+    """Whether any message of the schema declares a `semantic` (PS-598)."""
+    def walk(fields):
+        by_path, repeats = _semantic_groups(fields)
+        return bool(by_path) or any(walk(_repeat_element_fields(r)[0]) for _, r in repeats)
+    return any(walk(fields) for _, fields in _uplink_field_lists(expand_refs(schema)[0]))
+
+
+def _measurement_plan(fields) -> List[Dict[str, Any]]:
+    """One measurement's placements, from a field list: per path, the output paths that
+    report it and how each reaches the path's unit. The JSON-able form the generated codec
+    embeds; normalize() runs the same plan."""
+    by_path, _ = _semantic_groups(fields)
+    plan = []
+    for path, found in by_path.items():
+        if path not in TTN_PATHS:
+            continue                      # PS-597 warned at load; no path to place it at
+        entries = []
+        for out, item in found.items():
+            rule, how = ttn_unit_rule(item, path)
+            entries.append({'at': list(out), 'rule': rule, 'how': how})
+        plan.append({'path': path, 'fields': entries})
+    return plan
+
+
+def _top_level_names(fields) -> Tuple[set, bool]:
+    """The keys a field list can report at the top of its output, and whether it can report
+    a key that is not declared (a `name_from` template)."""
+    names, open_ = set(), False
+
+    def walk(items):
+        nonlocal open_
+        for item in items or []:
+            if not isinstance(item, dict):
+                continue
+            if 'name_from' in item:
+                open_ = True
+            name = item.get('name')
+            if isinstance(name, str) and name and not name.startswith('_'):
+                names.add(name)
+            for key in ('match', 'tlv', 'flagged', 'byte_group'):
+                spec = item.get(key)
+                if isinstance(spec, list):
+                    walk(spec)
+                elif isinstance(spec, dict):
+                    if key == 'tlv' and spec.get('merge') is False:
+                        names.add('channels')
+                    walk(spec.get('fields'))
+                    for body in (spec.get('cases') or {}).values():
+                        walk(body if isinstance(body, list) else None)
+                    default = spec.get('default')
+                    walk(default if isinstance(default, list) else
+                         default.get('fields') if isinstance(default, dict) else None)
+                    for group in spec.get('groups') or []:
+                        walk(group.get('fields') if isinstance(group, dict) else None)
+    walk(fields)
+    return names, open_
+
+
+def normalize_plan(schema: Dict[str, Any]) -> Dict[str, Any]:
+    """The whole normalizeUplink() plan of a schema (PS-598, PS-599): per message (a port
+    key, or '' for a schema without ports) its measurement plan, its repeats' element plans,
+    and the keys it can report, by which a decoded payload with no FPort finds its message.
+    The generated codec embeds it as JSON and normalize() runs it, so both give one result."""
+    schema = expand_refs(schema)[0]
+    messages = []
+    shapes: Dict[str, int] = {}
+    for port, fields in _uplink_field_lists(schema):
+        _, repeats = _semantic_groups(fields)
+        names, open_ = _top_level_names(fields)
+        messages.append({
+            'port': port,
+            'plan': _measurement_plan(fields),
+            'repeats': [{'at': list(out), 'element': _repeat_element_fields(r)[1],
+                         'plan': _measurement_plan(_repeat_element_fields(r)[0])}
+                        for out, r in repeats],
+            'names': sorted(names),
+            'open': open_,
+        })
+        # Messages with one plan place alike, so a payload either fits needs no choosing.
+        shape = json.dumps([messages[-1]['plan'], messages[-1]['repeats']], sort_keys=True)
+        messages[-1]['shape'] = shapes.setdefault(shape, len(shapes))
+    return {'ports': isinstance(schema.get('ports'), dict) and bool(schema.get('ports')),
+            'messages': messages}
+
+
+def _run_measurement(plan, data, warnings) -> Dict[str, Any]:
+    """One normalized measurement from one decoded object (PS-598, PS-599)."""
+    out: Dict[str, Any] = {}
+    for step in plan:
+        path = step['path']
+        present = []
+        for entry in step['fields']:
+            node = data
+            for key in entry['at']:
+                node = node.get(key) if isinstance(node, dict) else None
+            if node is not None:
+                present.append((entry, node))
+        if not present:
+            continue
+        if len(step['fields']) > 1:       # PS-598, as IL-180: place none of them
+            names = ', '.join("'" + '.'.join(e['at']) + "'" for e in step['fields'])
+            warnings.append(f"{path}: declared by {names}; every value on it is left out "
+                            f"(PS-598)")
+            continue
+        entry, value = present[0]
+        where = '.'.join(entry['at'])
+        if entry['rule'] == 'none':
+            warnings.append(f"{path}: field '{where}' {entry['how']}; left out (PS-599)")
+            continue
+        if entry['rule'] == 'convert':
+            if not isinstance(value, (int, float)) or isinstance(value, bool):
+                warnings.append(f"{path}: field '{where}' is not a number; left out (PS-599)")
+                continue
+            value = TTN_CONVERSION_FUNCS[entry['how']](value)
+            if isinstance(value, float) and value.is_integer():
+                value = int(value)        # as JavaScript would write it
+        node = out
+        parts = path.split('.')
+        for part in parts[:-1]:
+            node = node.setdefault(part, {})
+        node[parts[-1]] = value
+    return out
+
+
+def run_normalize_plan(plan: Dict[str, Any], decoded: Dict[str, Any],
+                       fport: Optional[int] = None) -> Dict[str, Any]:
+    """Run a normalize_plan() over decoded data: {data, warnings}. `data` is one measurement,
+    or a list of them where a repeat gives one per element.
+
+    TTN calls normalizeUplink() with the decoded data and no FPort, so for a schema with
+    `ports` the message is the one given by `fport` where known, else the one whose reported
+    keys hold every key of the data that some message declares; where that is not one
+    message (or several with one plan), nothing is placed and a warning says so."""
+    warnings: List[str] = []
+    messages = plan['messages']
+    chosen = None
+    if not plan['ports']:
+        chosen = messages[0] if messages else None
+    elif fport is not None:
+        chosen = next((m for m in messages if m['port'] == str(fport)), None)
+        if chosen is None:
+            chosen = next((m for m in messages if m['port'] == 'default'), None)
+    else:
+        declared = set().union(*(m['names'] for m in messages)) if messages else set()
+        keys = {k for k in decoded if k in declared}
+        fits = [m for m in messages if m['open'] or keys <= set(m['names'])]
+        if len({m['shape'] for m in fits}) == 1:
+            chosen = fits[0]
+        elif fits:
+            warnings.append("normalizeUplink cannot tell which port entry decoded this "
+                            "data; nothing is placed (PS-598)")
+    if chosen is None:
+        return {'data': {}, 'warnings': warnings}
+    base = _run_measurement(chosen['plan'], decoded, warnings)
+    measurements = []
+    for repeat in chosen['repeats']:
+        node = decoded
+        for key in repeat['at']:
+            node = node.get(key) if isinstance(node, dict) else None
+        if not isinstance(node, list):
+            continue
+        for item in node:
+            m = _run_measurement(repeat['plan'], {'value': item} if repeat['element'] else item,
+                                 warnings)
+            if m:
+                measurements.append(m)
+    if measurements:
+        return {'data': ([base] if base else []) + measurements, 'warnings': warnings}
+    return {'data': base, 'warnings': warnings}
+
+
+def normalize(decoded: Dict[str, Any], schema: Dict[str, Any],
+              fport: Optional[int] = None) -> Dict[str, Any]:
+    """TTN normalizeUplink() output for a decoded uplink, from the schema's `semantic`
+    (PS-598, PS-599): {data, warnings}. The spec prototype's normalize(), with the message
+    found from the data where no FPort is given (run_normalize_plan)."""
+    return run_normalize_plan(normalize_plan(schema), decoded, fport)
+
 
 
 class SchemaInterpreter:
@@ -4853,13 +5811,48 @@ class SchemaInterpreter:
                     return self._decode_field_endian(field_def, buf, pos)
                 finally:
                     self._meta_depth -= 1
-            return self._decode_field_endian(field_def, buf, pos)
+            value, end = self._decode_field_endian(field_def, buf, pos)
+            # PS-603 (CR-2026-182): a whole number declaring `consume: 0` reads in place.
+            return value, (pos if is_peeked_number(field_def) else end)
         except BufferUnderflow as exc:
             # PS-535: the innermost field that read past the end is named; an enclosing
             # object or repeat passes its member's error through unchanged.
             if exc.named:
                 raise
             raise name_underflow(exc, field_def.get('name'), field_def.get('type')) from exc
+
+    def _echo_decoder(self, field_def: Dict[str, Any]):
+        """PS-604 (CR-2026-182): what a whole number that does not consume decodes from
+        the bytes over its span, as a decoder reads it; None for a byte string, which
+        echo_value decodes. A span that does not decode is no value."""
+        if not is_peeked_number(field_def):
+            return None
+        endian = self.endian
+
+        def decode(span: bytes) -> Any:
+            saved = self.endian
+            # The decode's own tables are scratch here: what this records is no output.
+            tables = {k: getattr(self, k, None)
+                      for k in ('_lookup_numbers', '_pre_lookup', '_labels')}
+            self._lookup_numbers, self._pre_lookup = IdentityTable(), IdentityTable()
+            self.endian = endian
+            try:
+                value = self._decode_field_endian(field_def, span, 0)[0]
+                if value is None:
+                    return None
+                value = self._apply_modifiers(value, field_def)
+                return None if value is OMITTED else value
+            except (BufferUnderflow, ValueError, TypeError):
+                return None
+            finally:
+                self.endian = saved
+                for key, table in tables.items():
+                    if table is None:
+                        if hasattr(self, key):
+                            delattr(self, key)
+                    else:
+                        setattr(self, key, table)
+        return decode
 
     def _produced(self, field_def: Dict[str, Any], key: Optional[str] = None) -> None:
         """PS-490: record the declaration about to report `key` (its name by default).
@@ -4956,6 +5949,14 @@ class SchemaInterpreter:
         if field_type in type_info:
             size, signed = type_info[field_type]
             value, new_pos = self._read_int(buf, pos, size, signed)
+            if 'checksum' in field_def:
+                # PS-586 (CR-2026-174): the check value against the bytes it covers.
+                mismatch = checksum_mismatch(field_def, buf, pos, value)
+                if mismatch:
+                    if field_def['checksum'].get('on_mismatch', 'error') == 'warn':
+                        self._nested_warnings.append(mismatch)
+                    else:
+                        raise FieldError(mismatch)
             # Apply encoding if specified (sign_magnitude, bcd, gray)
             encoding = field_def.get('encoding')
             if encoding:
@@ -5031,6 +6032,11 @@ class SchemaInterpreter:
                     pos if is_echo(field_def) else pos + length)
         
         if field_type == 'string':
+            if 'template' in field_def:
+                # PS-590 to PS-592 (CR-2026-176): a string joined from values decoded
+                # earlier, reading no bytes; OMITTED where a reference is absent.
+                return render_string_template(field_def, self._variables, self._labels,
+                                              self._nested_warnings), pos
             if 'value' in field_def:
                 # A string literal (spec "Literal Types"): a constant in the output,
                 # read from no bytes. This read the payload as a one-byte string, so a
@@ -5039,9 +6045,7 @@ class SchemaInterpreter:
                 return field_def['value'], pos
             # PS-361: `string` is a literal or nothing; a string read from the payload
             # is `ascii`. This read the bytes as UTF-8.
-            raise ValueError(
-                f"Field '{field_def.get('name', '?')}': type string declares no value; a "
-                f"string read from the payload is type ascii (PS-361)")
+            raise ValueError(string_neither_message(field_def.get('name', '?')))
         
         if field_type == 'boolean':
             # A boolean literal (PS-357, PS-519): reported as declared, read from no
@@ -5053,14 +6057,20 @@ class SchemaInterpreter:
             return field_def['value'], pos
 
         if field_type == 'ascii':
-            length = resolve_length(field_def, buf, pos, variables=self._variables)
+            terminated = field_def.get('terminator') is not None
+            if terminated:
+                length = terminated_span(field_def, buf, pos)            # PS-593
+            else:
+                length = resolve_length(field_def, buf, pos, variables=self._variables)
             if pos + length > len(buf):
                 raise BufferUnderflow.need(length, pos, len(buf))
             value = decode_ascii(field_def.get('name'), buf[pos:pos + length],
-                                 self._nested_warnings)
-            if field_def.get('numeral'):
+                                 self._nested_warnings, field_def.get('nul', 'trailing'))
+            if field_def.get('numeral'):                                 # PS-594
                 value = decode_numeral(field_def.get('name'), value, field_def['numeral'])
-            return value, pos if is_echo(field_def) else pos + length          # PS-588
+            if is_echo(field_def):                                       # PS-588
+                return value, pos
+            return value, pos + length + (1 if terminated else 0)
         
         # `hex:upper` is a `bytes` format (PS-079), not a type (CR-2026-037), so it
         # falls through to the unknown-type error below.
@@ -7253,6 +8263,7 @@ class SchemaInterpreter:
             return result
 
         output = FrameBuffer()          # CR-2026-136: laid out as the decoder reads it
+        self._checksum_open = []        # PS-587: checksums placed and not yet computed
 
         fields = self._resolve_fields(fPort)
         # The fields this message is encoded from: a reference is looked for among them
@@ -7398,14 +8409,22 @@ class SchemaInterpreter:
             # it is checked where the frame closes.
             if is_echo(field_def):
                 try:
-                    output.echo(field_def, data)
+                    output.echo(field_def, data, self._echo_decoder(field_def))
                 except ValueError as e:
                     result.errors.append(error_text(f"Error encoding {name}: ", e))
                 continue
             
             # PS-359: a literal came from no bytes and writes none, and its key is not
             # required of the input. This warned "Missing field" for it.
-            if is_literal(field_def):
+            if is_literal(field_def) or is_string_template(field_def):   # PS-590: computed
+                continue
+            # PS-587 (CR-2026-174): a checksum is computed over the bytes written, never
+            # taken from the input; its value is filled in when the frame is finished.
+            if 'checksum' in field_def:
+                try:
+                    output.extend(self._checksum_placeholder(field_def, output))
+                except Exception as e:
+                    result.errors.append(error_text(f"Error encoding {name}: ", e))
                 continue
             # PS-360: `value` on a field that reads bytes is the constant to write,
             # whatever the input supplies. The input's value was written instead.
@@ -7507,6 +8526,17 @@ class SchemaInterpreter:
                     result.errors.append(remaining_mismatch_message(
                         check['match'], check['tail'], selected, check['chosen']))
                     break
+        if not result.errors:
+            # PS-587 (CR-2026-174): each checksum over the finished frame. One a construct
+            # encoded apart from the frame - a tlv entry, a repeat element - did not reach
+            # it, since the bytes before it were not written when it was.
+            try:
+                frame = fill_checksums(frame, frame_checksums(frame), self._checksum_open)
+                if self._checksum_open:
+                    raise FieldError(checksum_unwritten_message(
+                        self._checksum_open[0].get('name')))
+            except ValueError as e:
+                result.errors.append(str(e))
         if not result.errors and not frame:
             # PS-442: the last line against a construct that wrote nothing and said so
             # to no one - a match with no case chosen, a tlv entry no case claimed.
@@ -7549,7 +8579,8 @@ class SchemaInterpreter:
         """
         if not isinstance(source, dict) or not source.get('name'):
             return False
-        if source.get('type') in COMPUTED_TYPES or is_literal(source):
+        if source.get('type') in COMPUTED_TYPES or is_literal(source) or \
+                is_string_template(source):
             return False
         return not any(key in source for key in (
             'value', 'name_from', 'lookup', 'mult', 'div', 'add', 'transform',
@@ -7718,7 +8749,8 @@ class SchemaInterpreter:
         def internal(f):
             name = f.get('name')
             if not isinstance(name, str) or not name.startswith('_') \
-                    or f.get('type') in COMPUTED_TYPES or is_literal(f) or 'value' in f:
+                    or f.get('type') in COMPUTED_TYPES or is_literal(f) or 'value' in f \
+                    or is_string_template(f):
                 return
             recorded = trace.lookup('internal', f)
             if recorded is _UNRECORDED:
@@ -7859,7 +8891,8 @@ class SchemaInterpreter:
                 continue
             name = f.get('name')
             if not name or str(name).startswith('_') \
-                    or (f.get('type') in COMPUTED_TYPES and not is_literal(f)):
+                    or (f.get('type') in COMPUTED_TYPES and not is_literal(f)) \
+                    or is_string_template(f):
                 continue
             key = name
             if f.get('name_from'):
@@ -7930,24 +8963,17 @@ class SchemaInterpreter:
     
     def _encode_bitfield_string(self, field_def: Dict[str, Any], value: str) -> bytes:
         """Encode bitfield_string: parse string back into packed integer bytes."""
-        parts = field_def.get('parts', [])
-        delimiter = field_def.get('delimiter', '.')
-        prefix = field_def.get('prefix', '')
+        parts = [p for p in field_def.get('parts', []) if len(p) >= 2]
         length = field_def.get('length', 2)
-        
-        if prefix and value.startswith(prefix):
-            value = value[len(prefix):]
-        
-        segments = value.split(delimiter)
+        # PS-605, PS-606 (CR-2026-183): the prefix required, the segment count checked, an
+        # empty delimiter split by width.
+        segments = bitfield_segments(field_def, value)
         int_val = 0
         
-        for i, part in enumerate(parts):
-            if len(part) < 2:
-                continue
+        for part, seg in zip(parts, segments):
             bit_off = int(part[0])
             bit_len = int(part[1])
             fmt = part[2] if len(part) > 2 else 'decimal'
-            seg = segments[i] if i < len(segments) else '0'
             # PS-096, PS-431, PS-583: parsed by the part's format, a value the width cannot
             # hold rejected rather than masked.
             int_val |= parse_bitfield_segment(seg, bit_len, fmt, field_def.get('name')) << bit_off
@@ -7978,7 +9004,7 @@ class SchemaInterpreter:
                 continue
             name = gf.get('name', '')
             gtype = str(gf.get('type', ''))
-            if gtype in COMPUTED_TYPES or is_literal(gf):
+            if gtype in COMPUTED_TYPES or is_literal(gf) or is_string_template(gf):
                 continue                # no bits of its own (PS-359)
             if not name:
                 value = gf.get('default', 0)
@@ -8646,10 +9672,13 @@ class SchemaInterpreter:
                 out.extend(padding(length))             # CR-2026-141: no value
                 continue
             if is_echo(f):
-                out.echo(f, data)               # PS-589 (CR-2026-175): writes nothing
+                out.echo(f, data, self._echo_decoder(f))   # PS-589, PS-604: writes nothing
                 continue
-            if is_literal(f):
+            if is_literal(f) or is_string_template(f):
                 continue            # PS-359: a literal writes no bytes
+            if 'checksum' in f:
+                out.extend(self._checksum_placeholder(f, out))       # PS-587
+                continue
             if 'value' in f:
                 # PS-360: the constant is written whatever the input says.
                 out.extend(self._encode_field(f, f['value']))
@@ -8685,6 +9714,23 @@ class SchemaInterpreter:
             out.extend(self._encode_field(f, value))
         tails.close()
         return out.frame()
+
+    def _checksum_placeholder(self, field_def: Dict[str, Any], out: 'FrameBuffer') -> 'Frame':
+        """PS-587 (CR-2026-174): the checksum's bytes, zero until the frame is finished
+        (`fill_checksums`). Bits a peek left pending would be ORed into it, so its range
+        is not fully written: rejected, as the spec prototype rejects a pending overlay."""
+        # Inside a tlv entry or a repeat element or trailer, the bytes are encoded apart
+        # from the frame, so the bytes before them are not written when it is reached.
+        if out.pending or getattr(self, '_ps564_depth', 1):
+            raise FieldError(checksum_unwritten_message(field_def.get('name')))
+        size = CHECKSUM_WIDTHS[field_def['type']] // 8
+        endian = field_def.get('endian')
+        little = (endian == 'little') if endian else self.endian == Endian.LITTLE
+        if not hasattr(self, '_checksum_open'):
+            self._checksum_open = []
+        self._checksum_open.append(field_def)
+        return Frame(bytes(size), 0, None, [],
+                     [(0, field_def, 'little' if little else 'big')])
 
     @tail_unchecked
     def _encode_repeat_elements(self, field_def: Dict[str, Any], data: Dict[str, Any],
@@ -8724,7 +9770,7 @@ class SchemaInterpreter:
         # (computed fields and literals) can be encoded.
         if field_def.get('present_if') and any(
                 isinstance(f, dict) and f.get('type') not in COMPUTED_TYPES
-                and not is_literal(f) for f in record_fields):
+                and not is_literal(f) and not is_string_template(f) for f in record_fields):
             raise ValueError(
                 f"repeat field {name!r} declares present_if and its elements read payload "
                 f"bytes, so the elements it dropped cannot be encoded (PS-387)")
@@ -8882,7 +9928,12 @@ class SchemaInterpreter:
             name = f.get('name')
             if not name or str(name).startswith('_'):
                 continue
-            if is_literal(f) or f.get('type') in COMPUTED_TYPES or is_echo(f):
+            if 'checksum' in f:
+                # PS-587: computed, never taken from the input, so never required.
+                out.append((f, True))
+                continue
+            if (is_literal(f) or f.get('type') in COMPUTED_TYPES or is_echo(f)
+                    or is_string_template(f)):
                 # A literal or computed field writes no bytes, but only this case reports
                 # it, so it claims its name, never required: a literal where the input
                 # gives its value (wt303's `device_request`, a literal-only entry), a
@@ -9069,9 +10120,12 @@ class SchemaInterpreter:
         plan = tlv_encode_plan(tlv_def, modes, last_members)
         # PS-527: a supplied member of a merged object that no case declares has
         # nowhere to be written.
+        # CR-2026-173: by leaf path, at every depth, as `a.b`.
+        given_leaves = {n: leaf_paths(data[n], plan['objects'].get(n, set()))
+                        for n in plan['members'] if isinstance(data.get(n), dict)}
         for n, members in plan['members'].items():
-            if isinstance(data.get(n), dict):
-                stray = sorted(set(data[n]) - members)
+            if n in given_leaves:
+                stray = sorted('.'.join(p) for p in given_leaves[n] - members)
                 if stray:
                     raise ValueError(f"tlv: the merged object '{n}' is given {stray}, "
                                      f"which no case declares (PS-527)")
@@ -9093,7 +10147,10 @@ class SchemaInterpreter:
         # em400-mud's [3, 103] (temperature) is declared before [131, 103]
         # (temperature, temperature_alarm), and taking temperature first strands the
         # alarm, which no case would then take in full (CR-2026-029).
-        entries.sort(key=lambda entry: -sum(self._claim_width(f) for f in entry[2]))
+        # A merged object counts its leaves, at every depth (CR-2026-173).
+        entries.sort(key=lambda entry: -sum(
+            len(merged_leaves(f)) if modes.get(f['name']) == 'merge'
+            and f.get('type') == 'object' else self._claim_width(f) for f in entry[2]))
 
         queues = {}  # type: Dict[str, list]
         for _, _, required, optional in entries:
@@ -9104,12 +10161,15 @@ class SchemaInterpreter:
                     collected = isinstance(value, list) and not _reports_list(f) \
                         and modes.get(n, 'collect') == 'collect'
                     queues[n] = list(value) if collected else [value]
-        pending = {n: set(data[n]) for n in plan['members']
-                   if isinstance(data.get(n), dict)}
+        pending = {n: set(paths) for n, paths in given_leaves.items()}
+        # The entries holding parts of one merged object go out in case declaration
+        # order (CR-2026-173): counting a nested object's leaves ranks the case filling
+        # it first, and the order the cases are tried in is no order for the payload.
+        declared_at = {key: i for i, key in enumerate(cases)}
 
-        def members_of(f):
-            return {m['name'] for m in f.get('fields') or []
-                    if isinstance(m, dict) and m.get('name')}
+        def position(n, case_key):
+            merged = modes.get(n) == 'merge'
+            return (order.index(n), declared_at[case_key] if merged else 0)
 
         def fits(f, value, exact_only):
             # An object element supplies exactly the members its case declares, and a
@@ -9132,7 +10192,7 @@ class SchemaInterpreter:
                 return False
             if is_literal(f):
                 return same_label(f['value'], value)        # PS-359, PS-513
-            if f.get('type') in COMPUTED_TYPES:
+            if f.get('type') in COMPUTED_TYPES or is_string_template(f):
                 return True             # written from what it is computed from (PS-434)
             fit, exact = self._case_takes(f, value)
             return fit and (exact or not exact_only)
@@ -9152,11 +10212,11 @@ class SchemaInterpreter:
                         for f in required:
                             n = f['name']
                             if modes.get(n) == 'merge':
-                                members = members_of(f)
-                                if n not in pending or not members <= set(data[n]):
+                                members = merged_leaves(f)
+                                if n not in pending or not members <= given_leaves[n]:
                                     complete = False
                                     break
-                                values[n] = {m: data[n][m] for m in members}
+                                values[n] = value_at(data[n], members)
                                 if members & pending[n]:
                                     taken.append(n)
                             else:
@@ -9177,11 +10237,12 @@ class SchemaInterpreter:
                             break
                         for n in values:
                             if modes.get(n) == 'merge':
-                                pending[n] -= set(values[n])
+                                pending[n] -= leaf_paths(
+                                    values[n], plan['objects'].get(n, set()))
                             else:
                                 queues[n].pop(0)
                         written.append((case_key, case_fields, dict(data, **values),
-                                        min(order.index(n) for n in values)))
+                                        min(position(n, case_key) for n in values)))
                         progress = True
         for n, queue in queues.items():
             if queue:
@@ -9189,7 +10250,8 @@ class SchemaInterpreter:
                                  f"full (PS-502, PS-527)")
         for n, members in pending.items():
             if members:
-                raise ValueError(f"tlv: no case takes the members {sorted(members)} of "
+                raise ValueError(f"tlv: no case takes the members "
+                                 f"{sorted('.'.join(p) for p in members)} of "
                                  f"the merged object '{n}' in full (PS-527)")
         # A `name_from` field reports under a key built from its template, which no
         # claim above can name. Where the template reads a tag component (rakwireless's
@@ -9414,7 +10476,7 @@ class SchemaInterpreter:
             # (PS-602) is rejected naming the field; this cut and zero-padded it.
             return check_byte_string_length(field_def, byte_string_input(field_def, value))
         
-        if is_literal(field_def):
+        if is_literal(field_def) or is_string_template(field_def):
             # A literal came from no bytes, so it writes none (PS-359).
             return b''
         if field_type in ('string', 'ascii'):
@@ -9427,7 +10489,8 @@ class SchemaInterpreter:
                 value = encode_numeral(field_def.get('name'), value, fixed,
                                        field_def['numeral'])
             return encode_ascii(field_def.get('name'), value, fixed,
-                                self._encode_warnings)
+                                self._encode_warnings, field_def.get('nul', 'trailing'),
+                                field_def.get('terminator') if field_type == 'ascii' else None)
         
         if field_type in ('hex', 'base64'):
             # PS-601 and PS-602 apply to the hex and base64 types as to `bytes` with that
@@ -9629,10 +10692,6 @@ class SchemaInterpreter:
                        'description', 'semantic', 'ipso', 'senml', 'senml_unit'):
                 if key in field_def:
                     meta[key] = field_def[key]
-            # Flatten semantic sub-dict
-            if 'semantic' in meta:
-                for k, v in meta.pop('semantic').items():
-                    meta[k] = v
             return meta
         
         def collect_fields(fields: List[Dict[str, Any]], result: Dict[str, Dict]):
@@ -9699,8 +10758,7 @@ class SchemaInterpreter:
             if name not in decoded:
                 continue
             
-            semantic = field_def.get('semantic', {})
-            ipso = semantic.get('ipso')
+            ipso = (field_def.get('ipso') or {}).get('object')
             
             if ipso:
                 obj_id = str(ipso)
@@ -9938,11 +10996,11 @@ if __name__ == '__main__':
         'endian': 'big',
         'fields': [
             {'name': 'temperature', 'type': 's16', 'mult': 0.01, 'unit': '°C',
-             'semantic': {'ipso': 3303}},
+             'ipso': {'object': 3303}},
             {'name': 'humidity', 'type': 'u8', 'mult': 0.5, 'unit': '%RH',
-             'semantic': {'ipso': 3304}},
+             'ipso': {'object': 3304}},
             {'name': 'battery_mv', 'type': 'u16', 'unit': 'mV',
-             'semantic': {'ipso': 3316}},
+             'ipso': {'object': 3316}},
             {'name': 'status', 'type': 'u8'},
         ]
     }

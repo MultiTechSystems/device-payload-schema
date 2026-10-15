@@ -153,6 +153,10 @@ func checkTypeVocabulary(raw map[string]any) error {
 					}
 				}
 			}
+			// PS-532, PS-590 (CR-2026-176): a template string writes no object or repeat.
+			if err := checkTemplateAggregates(field, aggregates); err != nil {
+				return err
+			}
 			if spelling == "object" || spelling == "repeat" {
 				if name != "" {
 					aggregates[name] = true
@@ -304,8 +308,21 @@ func checkFieldRules(field map[string]any, at string) error {
 			return fmt.Errorf("%s: encoding applies only to an unsigned integer type uN, not %v (PS-422)", at, field["type"])
 		}
 	}
+	// PS-361, PS-590, PS-430 (CR-2026-176): `template` on a string field without `value`,
+	// a string field declaring one of the two, and each ${name:format} a part format.
+	if err := checkStringTemplate(field); err != nil {
+		return err
+	}
 	// PS-560 (CR-2026-150): numeral is decimal or hex, on an ascii field only.
 	if err := checkNumeral(field); err != nil {
+		return err
+	}
+	// PS-534, PS-593 (CR-2026-177): nul and terminator on an ascii field.
+	if err := checkAsciiText(field); err != nil {
+		return err
+	}
+	// PS-585 (CR-2026-174): a checksum on an unsigned integer wide enough for its algo.
+	if err := checkChecksum(field); err != nil {
 		return err
 	}
 	// PS-510 (CR-2026-102): ipso and senml are mappings.
@@ -532,8 +549,8 @@ func checkPortDeclarations(raw map[string]any) error {
 // checkAnnotations holds PS-510 (CR-2026-102): a field's `ipso` is a mapping carrying
 // `object`, and its `senml` a mapping. `ipso: 3303` loaded and was dropped, so the author
 // believed the field annotated and no consumer saw an annotation. The wording is the spec
-// prototype's, and Python, Java and C# give it identically. The legacy
-// `semantic: {ipso: N}` is a different key, outside PS-510.
+// prototype's, and Python, Java and C# give it identically. A `semantic` is a string, a
+// TTN normalized path (PS-470, CR-2026-179).
 func checkAnnotations(field map[string]any) error {
 	name, ok := field["name"].(string)
 	if !ok {
@@ -547,6 +564,12 @@ func checkAnnotations(field map[string]any) error {
 	}
 	if senml, has := field["senml"]; has && asStringMap(senml) == nil {
 		return fmt.Errorf("The senml of '%s' is a mapping, such as {unit: Cel} (PS-510)", name)
+	}
+	if semantic, has := field["semantic"]; has {
+		// PS-470 (CR-2026-179): a TTN normalized path, so a string.
+		if _, ok := semantic.(string); !ok {
+			return fmt.Errorf("The semantic of '%s' is a string naming a normalized measurement type, such as air.temperature (PS-470)", name)
+		}
 	}
 	return nil
 }

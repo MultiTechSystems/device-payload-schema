@@ -1,0 +1,95 @@
+# Two entries fill one nested object of the object they merge into, and the combining
+# goes on at every depth (PS-525, CR-2026-173). Port 1 is the specification's nested
+# example: tags 0x10 and 0x11 each report part of `settings.heating_control`. Port 2
+# nests three levels. Each vector round-trips: an encoder writes each tag's part of a
+# split nested object under that tag (PS-527).
+name: probe_tlv_nested_merge
+endian: big
+ports:
+  1:
+    fields:
+    - tlv:
+        tag_size: 1
+        on_repeat: merge
+        cases:
+          0x10:
+          - name: settings
+            type: object
+            fields:
+            - name: heating_control
+              type: object
+              fields:
+              - name: mode
+                type: u8
+          0x11:
+          - name: settings
+            type: object
+            fields:
+            - name: heating_control
+              type: object
+              fields:
+              - name: setpoint
+                type: u8
+                div: 2
+              - name: offset
+                type: s16
+                div: 10
+  2:
+    fields:
+    - tlv:
+        tag_size: 1
+        on_repeat: merge
+        cases:
+          0x01:
+          - name: a
+            type: object
+            fields:
+            - name: b
+              type: object
+              fields:
+              - name: c
+                type: object
+                fields:
+                - name: x
+                  type: u8
+          0x02:
+          - name: a
+            type: object
+            fields:
+            - name: b
+              type: object
+              fields:
+              - name: c
+                type: object
+                fields:
+                - name: y
+                  type: u16
+test_vectors:
+- name: two_tags_fill_one_nested_object
+  source: generated
+  fport: 1
+  payload: "10 01 11 2B FF9C"
+  expected:
+    settings:
+      heating_control:
+        mode: 1
+        setpoint: 21.5
+        offset: -10
+- name: one_tag_fills_its_part
+  source: generated
+  fport: 1
+  payload: "10 03"
+  expected:
+    settings:
+      heating_control:
+        mode: 3
+- name: three_levels
+  source: generated
+  fport: 2
+  payload: "01 07 02 0109"
+  expected:
+    a:
+      b:
+        c:
+          x: 7
+          y: 265

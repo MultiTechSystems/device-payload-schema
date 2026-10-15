@@ -28,7 +28,9 @@ def test_a_bytes_field_with_length_is_fine():
 
 def test_consume_zero_off_a_bit_range_is_warned():
     result = validate_schema({"name": "p", "fields": [
-        {"name": "b", "type": "u8", "consume": 0}, {"name": "c", "type": "u8"}]})
+        # A whole number reads in place since CR-2026-182 (PS-603); a base64 does not.
+        {"name": "b", "type": "base64", "length": 2, "consume": 0},
+        {"name": "c", "type": "u8"}]})
     assert any("PS-453" in w for w in result.schema_warnings), result.schema_warnings
 
 

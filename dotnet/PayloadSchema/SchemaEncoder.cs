@@ -173,7 +173,11 @@ public static class SchemaEncoder
         => f.Type is FieldType.Number or FieldType.String or FieldType.Boolean && f.Value != null;
 
     /// <summary>A computed field: <c>type: number</c> (or integer) with no <c>value</c>.</summary>
-    static bool IsComputed(SchemaField f) => f.Type == FieldType.Number && f.Value == null;
+    static bool IsComputed(SchemaField f) => f.Type == FieldType.Number && f.Value == null || IsTemplate(f);
+
+    /// <summary>A template string (PS-590, CR-2026-176): computed, writing no bytes; an input
+    /// value for it is ignored.</summary>
+    static bool IsTemplate(SchemaField f) => f.Type == FieldType.String && f.Template != null;
 
     /// <summary>
     /// Every name a field list declares, anywhere in it, with whether some declaration
@@ -311,6 +315,7 @@ public static class SchemaEncoder
             // (CR-2026-024), so the whole list is walked at once: a run cannot be found
             // by looking at one field in isolation.
             var frame = EncodeWithBitfieldRuns(_fields, data, topLevel: true);
+            var frameMeta = MetaOf(frame);
             output.AddRange(frame);
             if (_result.Errors.Count == 0)
             {
@@ -336,6 +341,26 @@ public static class SchemaEncoder
                             check.Chosen));
                         break;
                     }
+                }
+            }
+
+            if (_result.Errors.Count == 0)
+            {
+                // PS-587 (CR-2026-174): each checksum over the finished frame. One a construct
+                // encoded apart from the frame - a tlv entry, a repeat element - did not reach
+                // it, since the bytes before it were not written when it was.
+                try
+                {
+                    var filled = (byte[])frame.Clone();
+                    Checksum.Fill(filled, frameMeta?.Checksums ?? new List<ChecksumSlot>(), _checksumOpen);
+                    if (_checksumOpen.Count > 0)
+                        throw new FieldErrorException(Checksum.UnwrittenMessage(_checksumOpen[0].Name));
+                    output.Clear();
+                    output.AddRange(filled);
+                }
+                catch (InvalidOperationException e)
+                {
+                    _result.Errors.Add(e.Message);
                 }
             }
 
@@ -428,14 +453,19 @@ public static class SchemaEncoder
             }
 
             // PS-359: a literal writes no bytes and its key is not required of the input.
-            if (field.Type is FieldType.String or FieldType.Boolean && field.Value != null)
+            if (field.Type is FieldType.String or FieldType.Boolean && field.Value != null
+                || IsTemplate(field))                                   // PS-590: computed
                 return Array.Empty<byte>();
+            // PS-587 (CR-2026-174): a checksum is computed over the bytes written, never
+            // taken from the input; its value is filled in when the frame is finished.
+            if (field.Checksum != null)
+                return ChecksumPlaceholder(field, frame);
             // PS-589 (CR-2026-175): a non-consuming byte string writes nothing and is not
             // required; a value given for it is recorded on the frame and checked where the
             // frame closes.
             if (field.IsEcho)
             {
-                frame?.AddEcho(field, data);
+                frame?.AddEcho(field, data, _endian);
                 return Array.Empty<byte>();
             }
             // PS-360: `value` on a field that reads bytes is the constant to write,
@@ -760,6 +790,32 @@ public static class SchemaEncoder
             return frameBytes;
         }
 
+        /// <summary>PS-587: the checksums placed and not yet computed (the reference's
+        /// _checksum_open). One left at the end never reached the top-level frame.</summary>
+        readonly List<SchemaField> _checksumOpen = new();
+
+        /// <summary>
+        /// PS-587 (CR-2026-174): the checksum's bytes, zero until the frame is finished
+        /// (<see cref="Checksum.Fill"/>). Bits a peek left pending would be ORed into it, so
+        /// its range is not all written: rejected. The reference's _checksum_placeholder.
+        /// </summary>
+        byte[] ChecksumPlaceholder(SchemaField field, FrameBuffer? frame)
+        {
+            if (frame != null && frame.PendingCount > 0)
+                throw new FieldErrorException(Checksum.UnwrittenMessage(field.Name));
+            int size = Checksum.Width(field.RawType)!.Value / 8;
+            var endian = string.IsNullOrEmpty(field.Endian) ? _endian : field.Endian!;
+            _checksumOpen.Add(field);
+            var bytes = new byte[size];
+            var covered = new byte[size];
+            Array.Fill(covered, (byte)0xFF);
+            _frameBytes = bytes;
+            _framePending = 0;
+            _frameMeta = new FrameMeta(covered, new List<Peek>(),
+                new List<ChecksumSlot> { new(0, field, endian == "little") });
+            return bytes;
+        }
+
         // The last field list's bytes and how many at its end are still pending: a
         // construct whose bytes are exactly those carries the tail to the enclosing list
         // (CR-2026-136, the reference's Frame). Matched by reference, so bytes built any
@@ -800,7 +856,7 @@ public static class SchemaEncoder
             foreach (var f in fields)
             {
                 if (IsPeekField(f)) { pending.Add(f); continue; }
-                if (f.Type == FieldType.Number
+                if (f.Type == FieldType.Number || IsTemplate(f)
                     || (f.Type is FieldType.String or FieldType.Boolean && f.Value != null))
                     continue;
                 bool construct = f.MatchInline != null || f.TLVInline != null || f.ByteGroup.Count > 0
@@ -1005,7 +1061,7 @@ public static class SchemaEncoder
         static bool Derivable(SchemaField? source)
         {
             if (source == null || string.IsNullOrEmpty(source.Name)) return false;
-            if (source.Type == FieldType.Number) return false;
+            if (source.Type == FieldType.Number || IsTemplate(source)) return false;
             if (source.Type is FieldType.String or FieldType.Boolean && source.Value != null) return false;
             return source.Value == null && source.NameFrom == null && source.Lookup == null
                 && source.Mult == null && source.Div == null && source.Add == null
@@ -1425,7 +1481,7 @@ public static class SchemaEncoder
             foreach (var member in group.ByteGroup)
             {
                 // A computed or literal member has no bits of its own (PS-359).
-                if (member.Type == FieldType.Number
+                if (member.Type == FieldType.Number || IsTemplate(member)
                     || (member.Type is FieldType.String or FieldType.Boolean && member.Value != null))
                     continue;
                 object? value = string.IsNullOrEmpty(member.Name) ? 0.0
@@ -1615,7 +1671,8 @@ public static class SchemaEncoder
             // in the payload, so they cannot be written back. Only elements that read
             // nothing (computed fields and literals) can be encoded.
             if (field.PresentIf != null && field.Fields.Any(f =>
-                    f.Type != FieldType.Number && !(f.Type is FieldType.String or FieldType.Boolean && f.Value != null)))
+                    f.Type != FieldType.Number && !IsTemplate(f)
+                    && !(f.Type is FieldType.String or FieldType.Boolean && f.Value != null)))
                 throw new InvalidOperationException($"repeat field '{field.Name}' declares present_if "
                     + "and its elements read payload bytes, so the elements it dropped cannot be "
                     + "encoded (PS-387)");
@@ -2149,6 +2206,11 @@ public static class SchemaEncoder
                     sink.Add((f, true));
                     continue;
                 }
+                if (!string.IsNullOrEmpty(f.Name) && !f.Name.StartsWith("_") && f.Checksum != null)
+                {
+                    sink.Add((f, true));        // PS-587: computed, never taken from the input
+                    continue;
+                }
                 if (PayloadName(f) == null) continue;
                 // PS-551 (CR-2026-141): a peek the case's next field writes over is derived
                 // where the input omits it, so the case does not need it given.
@@ -2456,7 +2518,10 @@ public static class SchemaEncoder
             string ModeOf(string n) => modes.TryGetValue(n, out var md) ? md : "collect";
             var entries = new List<(string key, List<SchemaField> fields, List<SchemaField> required,
                 List<SchemaField> optional, int rank)>();
+            // CR-2026-173: a merged object's leaf paths, at every depth, and the paths it
+            // combines as objects.
             var declaredMembers = new Dictionary<string, HashSet<string>>();
+            var mergedObjects = new Dictionary<string, HashSet<string>>();
             foreach (var (caseKey, caseFields) in tlv.TLVCases)
             {
                 if (caseKey == "default") continue;
@@ -2467,25 +2532,29 @@ public static class SchemaEncoder
                     (isOptional ? optional : required).Add(f);
                     var n = f.Name;
                     if (ModeOf(n) != "merge") continue;
-                    foreach (var m in f.Fields)
-                    {
-                        if (string.IsNullOrEmpty(m.Name)) continue;
-                        if (!declaredMembers.TryGetValue(n, out var set)) declaredMembers[n] = set = new();
-                        set.Add(m.Name);
-                    }
+                    if (!declaredMembers.TryGetValue(n, out var set)) declaredMembers[n] = set = new();
+                    if (!mergedObjects.TryGetValue(n, out var objs)) mergedObjects[n] = objs = new();
+                    SchemaParser.TypedMembers(f.Fields, new List<string>(), set, objs);
                 }
                 entries.Add((caseKey, caseFields, required, optional, entries.Count));
             }
             // An object counts its members (CR-2026-129), so a merged {adr, dr} case outranks {dr}.
+            // A merged object counts its leaves, at every depth (CR-2026-173).
             int Width(List<SchemaField> fields) => fields.Sum(f =>
-                f.Type == FieldType.Object ? Math.Max(1, CaseClaims(f.Fields, false).Count) : 1);
+                f.Type == FieldType.Object && ModeOf(f.Name) == "merge"
+                    ? Math.Max(1, SchemaParser.MergedLeaves(f).Count)
+                    : f.Type == FieldType.Object ? Math.Max(1, CaseClaims(f.Fields, false).Count) : 1);
             entries = entries.OrderByDescending(e => Width(e.required)).ThenBy(e => e.rank).ToList();
 
             // A supplied member of a merged object that no case declares has nowhere to go.
+            var givenLeaves = new Dictionary<string, HashSet<string>>();
             foreach (var (n, members) in declaredMembers)
             {
                 if (!data.TryGetValue(n, out var value) || value is not Dictionary<string, object?> whole) continue;
-                var stray = whole.Keys.Where(k => !members.Contains(k)).Select(k => $"'{k}'")
+                var given = new HashSet<string>();
+                SchemaParser.LeafPaths(whole, mergedObjects[n], new List<string>(), given);
+                givenLeaves[n] = given;
+                var stray = given.Where(k => !members.Contains(k)).Select(k => $"'{SchemaParser.Dotted(k)}'")
                     .OrderBy(k => k, StringComparer.Ordinal).ToList();
                 if (stray.Count > 0)
                     throw new InvalidOperationException($"tlv: the merged object '{n}' is given "
@@ -2505,12 +2574,11 @@ public static class SchemaEncoder
                         : new Queue<object?>(new[] { v });
                 }
             var pending = new Dictionary<string, HashSet<string>>();
-            foreach (var n in declaredMembers.Keys)
-                if (data.TryGetValue(n, out var v) && v is Dictionary<string, object?> whole)
-                    pending[n] = whole.Keys.ToHashSet();
+            foreach (var (n, given) in givenLeaves)
+                pending[n] = new HashSet<string>(given);
 
             var written = new List<(string key, List<SchemaField> fields, Dictionary<string, object?> data,
-                int position, int seq)>();
+                int position, int sub, int seq)>();
             // CR-2026-148 (PS-527 amended): a first sweep places only values a case reproduces
             // exactly, a second the rest; the ranking applies within each.
             foreach (var exactOnly in new[] { true, false })
@@ -2536,17 +2604,15 @@ public static class SchemaEncoder
                                         complete = false;
                                         break;
                                     }
-                                    var sub = new Dictionary<string, object?>();
+                                    var leaves = SchemaParser.MergedLeaves(f);
                                     bool fresh = false;
-                                    foreach (var m in f.Fields)
+                                    foreach (var leaf in leaves)
                                     {
-                                        if (string.IsNullOrEmpty(m.Name)) continue;
-                                        if (!whole.TryGetValue(m.Name, out var mv)) { complete = false; break; }
-                                        sub[m.Name] = mv;
-                                        fresh |= pending[n].Contains(m.Name);
+                                        if (!givenLeaves[n].Contains(leaf)) { complete = false; break; }
+                                        fresh |= pending[n].Contains(leaf);
                                     }
                                     if (!complete) break;
-                                    values[n] = sub;
+                                    values[n] = SchemaParser.ValueAt(whole, leaves);
                                     if (fresh) taken++;
                                     continue;
                                 }
@@ -2570,18 +2636,31 @@ public static class SchemaEncoder
                             }
                             if (taken == 0) break;
                             var entryData = new Dictionary<string, object?>(data);
-                            int position = int.MaxValue;
+                            int position = int.MaxValue, sub = 0;
                             foreach (var (n, v) in values)
                             {
                                 entryData[n] = v;
                                 int index = order.ToList().IndexOf(n);
-                                position = Math.Min(position, index < 0 ? int.MaxValue : index);
+                                int at = index < 0 ? int.MaxValue : index, rank = 0;
                                 if (ModeOf(n) == "merge")
-                                    pending[n].ExceptWith(((Dictionary<string, object?>)v!).Keys);
+                                {
+                                    var done = new HashSet<string>();
+                                    SchemaParser.LeafPaths((Dictionary<string, object?>)v!, mergedObjects[n],
+                                        new List<string>(), done);
+                                    pending[n].ExceptWith(done);
+                                    // Parts of one merged object go out in case declaration
+                                    // order (CR-2026-173), as the reference's `position`.
+                                    rank = e.rank;
+                                }
                                 else
                                     queues[n].Dequeue();
+                                if (at < position || (at == position && rank < sub))
+                                {
+                                    position = at;
+                                    sub = rank;
+                                }
                             }
-                            written.Add((e.key, e.fields, entryData, position, written.Count));
+                            written.Add((e.key, e.fields, entryData, position, sub, written.Count));
                             progress = true;
                         }
                     }
@@ -2594,7 +2673,7 @@ public static class SchemaEncoder
             foreach (var (n, left) in pending)
                 if (left.Count > 0)
                     throw new InvalidOperationException("tlv: no case takes the members ["
-                        + string.Join(", ", left.Select(m => $"'{m}'").OrderBy(m => m, StringComparer.Ordinal))
+                        + string.Join(", ", left.Select(m => $"'{SchemaParser.Dotted(m)}'").OrderBy(m => m, StringComparer.Ordinal))
                         + $"] of the merged object '{n}' in full (PS-527)");
             // A `name_from` key no claim can name. Where the template reads a tag component
             // the tag is not in the data, so no case can take the value - and it was dropped
@@ -2621,7 +2700,7 @@ public static class SchemaEncoder
             // Payload order, so a payload round-trips; entries of one name keep the order taken.
             var output = new List<byte>();
             int entryIndex = 0;
-            foreach (var w in written.OrderBy(w => w.position).ThenBy(w => w.seq))
+            foreach (var w in written.OrderBy(w => w.position).ThenBy(w => w.sub).ThenBy(w => w.seq))
             {
                 var tag = EncodeTLVTag(w.key, tlv);
                 // PS-572: the entry's index in payload order, as its decode recorded it.
@@ -3207,25 +3286,26 @@ public static class SchemaEncoder
                     return new byte[field.Length > 0 ? field.Length : 0];
                 case FieldType.Bytes or FieldType.Hex or FieldType.Base64:
                     return Cr181.Encode(field, value);      // CR-2026-181: PS-081, PS-601, PS-602
-                case FieldType.String or FieldType.Boolean when field.Value != null:
-                    // A literal came from no bytes, so it writes none.
+                case FieldType.String or FieldType.Boolean when field.Value != null || IsTemplate(field):
+                    // A literal or a template came from no bytes, so it writes none.
                     return Array.Empty<byte>();
                 case FieldType.Ascii when field.Numeral != null && Helpers.ToFloat64(value).Item1:
                 {
                     // PS-561: digits in the declared base, rounded as PS-552 requires.
+                    int? fixedLen = field.Terminator == null && field.Length > 0 && field.LengthRef == null
+                        ? field.Length : null;                                  // PS-593: no width
                     var text = Numeral.Encode(field.Name, Helpers.ToFloat64(value).Item2,
-                        field.Length > 0 && field.LengthRef == null ? field.Length : null,
-                        field.Numeral);
-                    return Helpers.EncodeAscii(field.Name, text,
-                        field.Length > 0 && field.LengthRef == null ? field.Length : null,
-                        _result.Warnings);
+                        fixedLen, field.Numeral);
+                    return Helpers.EncodeAscii(field.Name, text, fixedLen,
+                        _result.Warnings, field.Nul, field.Terminator);
                 }
                 case FieldType.Ascii or FieldType.String:
                     // PS-537. A fixed `length` pads and bounds the value; `remaining` or a
                     // reference has no fixed count, so the value supplies it.
                     return Helpers.EncodeAscii(field.Name, value?.ToString() ?? "",
                         field.Length > 0 && field.LengthRef == null ? field.Length : null,
-                        _result.Warnings);
+                        _result.Warnings, field.Nul,
+                        field.Type == FieldType.Ascii ? field.Terminator : null);
             }
 
             throw new InvalidOperationException($"Cannot encode type: {field.Type}");
@@ -3283,23 +3363,21 @@ public static class SchemaEncoder
         /// </remarks>
         byte[] EncodeBitfieldString(SchemaField field, string value)
         {
-            var text = value;
-            var prefix = field.Prefix ?? "";
-            if (prefix.Length > 0 && text.StartsWith(prefix))
-                text = text[prefix.Length..];
-            var delimiter = field.Delimiter ?? ".";
-            var segments = text.Split(delimiter);
+            var parts = field.Parts
+                .Where(p => p.Count >= 2 && Helpers.ToInt(p[0]).Item1 && Helpers.ToInt(p[1]).Item1)
+                .ToList();
+            // PS-605, PS-606 (CR-2026-183): the prefix required, the segment count checked, an
+            // empty delimiter split by width.
+            var segments = BitfieldParts.Segments(field.Name, field.Prefix, field.Delimiter, parts, value);
 
             ulong packed = 0;
-            for (int i = 0; i < field.Parts.Count; i++)
+            for (int i = 0; i < parts.Count; i++)
             {
-                var part = field.Parts[i];
-                if (part.Count < 2) continue;
-                var (offOk, bitOff) = Helpers.ToInt(part[0]);
-                var (lenOk, bitLen) = Helpers.ToInt(part[1]);
-                if (!offOk || !lenOk) continue;
+                var part = parts[i];
+                var (_, bitOff) = Helpers.ToInt(part[0]);
+                var (_, bitLen) = Helpers.ToInt(part[1]);
                 object? format = part.Count >= 3 ? part[2] : "decimal";
-                string segment = i < segments.Length ? segments[i] : "0";
+                string segment = segments[i];
                 // PS-096, PS-431, PS-583: parsed by the part's format; a value the width
                 // cannot hold is rejected, never masked.
                 ulong raw = BitfieldParts.ParseSegment(segment, bitLen, format, field.Name);
@@ -3360,7 +3438,7 @@ public static class SchemaEncoder
         static string? PayloadName(SchemaField f)
         {
             if (string.IsNullOrEmpty(f.Name) || f.Name.StartsWith("_")) return null;
-            if (f.Type == FieldType.Number) return null;
+            if (f.Type == FieldType.Number || IsTemplate(f)) return null;
             return f.Name;
         }
 
@@ -3417,6 +3495,7 @@ internal sealed class FrameBuffer
     // and each bit range or bool placed, for the check where the frame closes.
     readonly List<byte> _covered = new();
     readonly List<Peek> _peeks = new();
+    readonly List<ChecksumSlot> _checksums = new();          // PS-587, as FrameMeta
     // CR-2026-175 (PS-589): each non-consuming byte string given a value, checked where
     // the frame closes (FrameMeta.Check).
     readonly List<Echo> _echoes = new();
@@ -3425,12 +3504,13 @@ internal sealed class FrameBuffer
     /// value given for it is recorded at the position a decoder is at - the start of any
     /// bytes still pending - with its length read from the input (null for
     /// <c>remaining</c>).</summary>
-    public void AddEcho(SchemaField field, Dictionary<string, object?> data)
+    public void AddEcho(SchemaField field, Dictionary<string, object?> data, string endian = "big")
     {
         if (string.IsNullOrEmpty(field.Name)
             || !data.TryGetValue(field.Name, out var given) || given == null) return;
         int? length;
-        if (field.LengthRef != null)
+        if (field.IsPeekedNumber) length = SchemaField.WholeNumberSize(field.Type);   // PS-604
+        else if (field.LengthRef != null)
         {
             if (!data.TryGetValue(field.LengthRef, out var n)
                 || Helpers.ToFloat64(n) is not (true, var d) || d < 0 || d != Math.Floor(d))
@@ -3440,7 +3520,7 @@ internal sealed class FrameBuffer
         else if (field.Length < 0) length = null;
         else length = field.Length != 0 || field.LengthDeclared
             ? field.Length : Helpers.InferLengthFromType(field.Type);
-        _echoes.Add(new Echo(_buf.Count, field, given, length));
+        _echoes.Add(new Echo(_buf.Count, field, given, length, endian));
     }
 
     void Cover(int position, byte[] mask)
@@ -3455,7 +3535,8 @@ internal sealed class FrameBuffer
         int size = _buf.Count + _pending.Count;
         var covered = new byte[size];
         for (int i = 0; i < size && i < _covered.Count; i++) covered[i] = _covered[i];
-        return new FrameMeta(covered, new List<Peek>(_peeks), new List<Echo>(_echoes));
+        return new FrameMeta(covered, new List<Peek>(_peeks), new List<ChecksumSlot>(_checksums),
+            new List<Echo>(_echoes));
     }
 
     public IReadOnlyList<byte> Pending => _pending;
@@ -3493,6 +3574,7 @@ internal sealed class FrameBuffer
         if (meta != null)
         {
             foreach (var peek in meta.Peeks) _peeks.Add(peek with { Position = peek.Position + offset });
+            foreach (var slot in meta.Checksums) _checksums.Add(slot with { Position = slot.Position + offset });
             foreach (var echo in meta.Echoes) _echoes.Add(echo with { Position = echo.Position + offset });
         }
         var merged = new byte[data.Length];
@@ -3566,7 +3648,8 @@ internal sealed record Peek(int Position, int Size, bool Little, int Start, int 
 /// <summary>A non-consuming byte string given a value (CR-2026-175, PS-589): where a decoder
 /// reads it, its field, the value given, and its length (null for <c>remaining</c>, the end
 /// of the frame it is checked in).</summary>
-internal sealed record Echo(int Position, SchemaField Field, object? Given, int? Length);
+internal sealed record Echo(int Position, SchemaField Field, object? Given, int? Length,
+    string Endian = "big");
 
 /// <summary>
 /// A frame's PS-551 metadata (CR-2026-141): per byte, the bits some field wrote, and each
@@ -3577,12 +3660,17 @@ internal sealed class FrameMeta
 {
     public byte[] Covered { get; }
     public List<Peek> Peeks { get; }
+    /// <summary>PS-587 (CR-2026-174): each checksum written as a placeholder, computed
+    /// where the whole frame is known (<see cref="Checksum.Fill"/>).</summary>
+    public List<ChecksumSlot> Checksums { get; }
     public List<Echo> Echoes { get; }
 
-    public FrameMeta(byte[] covered, List<Peek> peeks, List<Echo>? echoes = null)
+    public FrameMeta(byte[] covered, List<Peek> peeks, List<ChecksumSlot>? checksums = null,
+        List<Echo>? echoes = null)
     {
         Covered = covered;
         Peeks = peeks;
+        Checksums = checksums ?? new List<ChecksumSlot>();
         Echoes = echoes ?? new List<Echo>();
     }
 
@@ -3598,6 +3686,7 @@ internal sealed class FrameMeta
         for (int i = 0; i < bodyLength; i++) covered[prefix + i] = CoveredAt(body, i);
         return new FrameMeta(covered,
             body.Peeks.Select(p => p with { Position = p.Position + prefix }).ToList(),
+            body.Checksums.Select(c => c with { Position = c.Position + prefix }).ToList(),
             body.Echoes.Select(e => e with { Position = e.Position + prefix }).ToList());
     }
 
@@ -3670,13 +3759,19 @@ internal sealed class FrameMeta
             else
             {
                 object? found;
-                try { found = EchoValue(e.Field, frame.AsSpan(e.Position, length)); }
+                try
+                {
+                    found = e.Field.IsPeekedNumber
+                        ? SchemaDecoder.PeekedNumberValue(e.Field, frame.AsSpan(e.Position, length).ToArray(), e.Endian)
+                        : EchoValue(e.Field, frame.AsSpan(e.Position, length));
+                }
                 catch (Exception) { found = null; }
                 if (found != null && EchoEquals(found, e.Given)) continue;
                 written = found != null ? EchoText(found) : "too few bytes";
             }
             throw new FieldErrorException($"Field '{e.Field.Name}' is given {EchoText(e.Given)}, "
-                + $"but the other fields write {written} over its span (PS-589)");
+                + $"but the other fields write {written} over its span "
+                + (e.Field.IsPeekedNumber ? "(PS-604)" : "(PS-589)"));
         }
     }
 

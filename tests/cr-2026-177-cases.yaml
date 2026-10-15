@@ -1,0 +1,222 @@
+# CR-2026-177 (PS-534, PS-072, PS-593 to PS-595): an `ascii` field's `nul` mode (trailing, stop,
+# drop) and a `terminator` byte in place of `length`.
+#
+# Three lists, read by the reference and the generated codec
+# (tests/test_cr_2026_177_cases.py), Go (go/schema/cr177_test.go), Java (CR2026177Test.java) and
+# C# (CR2026_177Tests.cs). C cannot hold either key (PS-446).
+#
+#   decode: `schema` (YAML text), `payload` (hex) and either `expected` (the whole decoded
+#           data) or `error` (text one of the errors contains; no data is reported).
+#   cases:  `schema`, `input` (JSON text) and either `payload` (hex) or `error`.
+#   load:   `schema` and the `error` its load reports.
+#
+# The errors are the spec prototype's text, with PS-535's naming for a missing terminator.
+
+decode:
+
+- name: stop_ends_at_the_first_nul
+  schema: "name: t\nfields:\n  - {name: v, type: ascii, length: 8, nul: stop}\n"
+  payload: "454D333130005859"
+  expected: {v: EM310}
+
+- name: trailing_is_the_default_and_keeps_the_leftovers
+  schema: "name: t\nfields:\n  - {name: v, type: ascii, length: 8}\n"
+  payload: "454D333130005859"
+  expected: {v: "EM310\0XY"}
+
+- name: trailing_removes_only_padding
+  schema: "name: t\nfields:\n  - {name: v, type: ascii, length: 4, nul: trailing}\n"
+  payload: "41420000"
+  expected: {v: AB}
+
+- name: stop_keeps_whitespace
+  schema: "name: t\nfields:\n  - {name: v, type: ascii, length: 4, nul: stop}\n"
+  payload: "41200042"
+  expected: {v: "A "}
+
+- name: stop_all_nul_is_empty
+  schema: "name: t\nfields:\n  - {name: v, type: ascii, length: 3, nul: stop}\n"
+  payload: "000000"
+  expected: {v: ""}
+
+- name: stop_then_the_next_field_reads_after_the_span
+  schema: "name: t\nfields:\n  - {name: v, type: ascii, length: 4, nul: stop}\n  - {name: b, type: u8}\n"
+  payload: "4100585964"
+  expected: {v: A, b: 100}
+
+- name: drop_removes_every_nul
+  schema: "name: t\nfields:\n  - {name: v, type: ascii, length: 6, nul: drop}\n"
+  payload: "303200313200"
+  expected: {v: "0212"}
+
+- name: drop_keeps_whitespace
+  schema: "name: t\nfields:\n  - {name: v, type: ascii, length: 4, nul: drop}\n"
+  payload: "41002042"
+  expected: {v: "A B"}
+
+- name: terminator_nul_ends_the_text_and_is_consumed
+  schema: "name: t\nfields:\n  - {name: v, type: ascii, terminator: 0}\n  - {name: b, type: u8}\n"
+  payload: "312E320064"
+  expected: {v: "1.2", b: 100}
+
+- name: terminator_other_byte
+  schema: "name: t\nfields:\n  - {name: v, type: ascii, terminator: 0x2C}\n  - {name: b, type: u8}\n"
+  payload: "612C0B"
+  expected: {v: a, b: 11}
+
+- name: terminator_empty_text
+  schema: "name: t\nfields:\n  - {name: v, type: ascii, terminator: 0}\n  - {name: b, type: u8}\n"
+  payload: "0064"
+  expected: {v: "", b: 100}
+
+- name: terminator_with_stop_applies_nul_first
+  schema: "name: t\nfields:\n  - {name: v, type: ascii, terminator: 0x2C, nul: stop}\n  - {name: b, type: u8}\n"
+  payload: "4100422C07"
+  expected: {v: A, b: 7}
+
+- name: terminator_with_drop
+  schema: "name: t\nfields:\n  - {name: v, type: ascii, terminator: 0x2C, nul: drop}\n  - {name: b, type: u8}\n"
+  payload: "4100422C07"
+  expected: {v: AB, b: 7}
+
+- name: terminator_then_numeral
+  schema: "name: t\nfields:\n  - {name: v, type: ascii, terminator: 0x2C, numeral: decimal}\n  - {name: b, type: u8}\n"
+  payload: "2d36352c07"
+  expected: {v: -65, b: 7}
+
+- name: stop_before_numeral
+  schema: "name: t\nfields:\n  - {name: v, type: ascii, length: 4, nul: stop, numeral: decimal}\n"
+  payload: "36350039"
+  expected: {v: 65}
+
+- name: a_missing_terminator_names_the_field
+  schema: "name: t\nfields:\n  - {name: v, type: ascii, terminator: 0}\n"
+  payload: "312E32"
+  error: "Field 'v': no terminator byte 0x00 before the end of the payload (PS-593) (PS-535)"
+
+- name: a_missing_terminator_of_another_byte
+  schema: "name: t\nfields:\n  - {name: ver, type: ascii, terminator: 0x2C}\n"
+  payload: "4142"
+  error: "Field 'ver': no terminator byte 0x2C before the end of the payload (PS-593) (PS-535)"
+
+- name: an_empty_payload_has_no_terminator
+  schema: "name: t\nfields:\n  - {name: v, type: ascii, terminator: 0}\n"
+  payload: ""
+  error: "Field 'v': no terminator byte 0x00 before the end of the payload (PS-593) (PS-535)"
+
+cases:
+
+- name: stop_pads_with_nul
+  schema: "name: t\nfields:\n  - {name: v, type: ascii, length: 4, nul: stop}\n"
+  input: '{"v": "AB"}'
+  payload: "41420000"
+
+- name: stop_rejects_a_value_holding_nul
+  schema: "name: t\nfields:\n  - {name: v, type: ascii, length: 4, nul: stop}\n"
+  input: '{"v": "A\u0000B"}'
+  error: "Field 'v': a nul: stop value holds a 0x00 byte (PS-595)"
+
+- name: stop_still_rejects_a_value_too_long
+  schema: "name: t\nfields:\n  - {name: v, type: ascii, length: 4, nul: stop}\n"
+  input: '{"v": "ABCDE"}'
+  error: "Field 'v': an ascii value of 5 bytes is longer than its length of 4 (PS-537)"
+
+- name: drop_pads_with_nul
+  schema: "name: t\nfields:\n  - {name: v, type: ascii, length: 4, nul: drop}\n"
+  input: '{"v": "AB"}'
+  payload: "41420000"
+
+- name: drop_writes_a_nul_in_the_value_as_given
+  schema: "name: t\nfields:\n  - {name: v, type: ascii, length: 4, nul: drop}\n"
+  input: '{"v": "A\u0000B"}'
+  payload: "41004200"
+
+- name: trailing_pads_with_nul
+  schema: "name: t\nfields:\n  - {name: v, type: ascii, length: 4, nul: trailing}\n"
+  input: '{"v": "AB"}'
+  payload: "41420000"
+
+- name: terminator_nul_follows_the_value
+  schema: "name: t\nfields:\n  - {name: v, type: ascii, terminator: 0}\n  - {name: b, type: u8}\n"
+  input: '{"v": "1.2", "b": 100}'
+  payload: "312e320064"
+
+- name: terminator_other_byte_follows_the_value
+  schema: "name: t\nfields:\n  - {name: v, type: ascii, terminator: 0x2C}\n  - {name: b, type: u8}\n"
+  input: '{"v": "a", "b": 11}'
+  payload: "612c0b"
+
+- name: terminator_empty_value
+  schema: "name: t\nfields:\n  - {name: v, type: ascii, terminator: 0}\n"
+  input: '{"v": ""}'
+  payload: "00"
+
+- name: terminator_rejects_a_value_holding_it
+  schema: "name: t\nfields:\n  - {name: v, type: ascii, terminator: 0x2C}\n"
+  input: '{"v": "1,2"}'
+  error: "Field 'v': the value holds its terminator byte 0x2C (PS-595)"
+
+- name: terminator_nul_rejects_a_nul_in_the_value
+  schema: "name: t\nfields:\n  - {name: v, type: ascii, terminator: 0}\n"
+  input: '{"v": "A\u0000B"}'
+  error: "Field 'v': the value holds its terminator byte 0x00 (PS-595)"
+
+- name: terminated_decimal_numeral_has_no_fill
+  schema: "name: t\nfields:\n  - {name: v, type: ascii, terminator: 0x2C, numeral: decimal}\n  - {name: b, type: u8}\n"
+  input: '{"v": -65, "b": 7}'
+  payload: "2d36352c07"
+
+- name: terminated_hex_numeral_has_no_fill
+  schema: "name: t\nfields:\n  - {name: v, type: ascii, terminator: 0x2C, numeral: hex}\n"
+  input: '{"v": 26}'
+  payload: "31412c"
+
+- name: terminated_numeral_zero
+  schema: "name: t\nfields:\n  - {name: v, type: ascii, terminator: 0, numeral: decimal}\n"
+  input: '{"v": 0}'
+  payload: "3000"
+
+- name: terminated_hex_numeral_negative_rejected
+  schema: "name: t\nfields:\n  - {name: v, type: ascii, terminator: 0, numeral: hex}\n"
+  input: '{"v": -1}'
+  error: "Field 'v': -1 is negative, which a hex numeral cannot write (PS-168)"
+
+# A schema that misplaces or misdeclares `nul` or `terminator` is rejected when it is loaded
+# (PS-534, PS-072, PS-593).
+load:
+
+- name: length_and_terminator
+  schema: "name: t\nfields:\n  - {name: v, type: ascii, length: 2, terminator: 0}\n"
+  error: "Field 'v': an ascii field declares length or terminator, not both (PS-593)"
+
+- name: neither_length_nor_terminator
+  schema: "name: t\nfields:\n  - {name: v, type: ascii}\n"
+  error: "ascii type requires 'length' field, or 'terminator' (PS-072)"
+
+- name: nul_on_an_integer
+  schema: "name: t\nfields:\n  - {name: v, type: u8, nul: stop}\n"
+  error: "Field 'v': nul and terminator are defined only on an ascii field, not on u8 (PS-534, PS-593)"
+
+- name: terminator_on_hex
+  schema: "name: t\nfields:\n  - {name: v, type: hex, length: 2, terminator: 0}\n"
+  error: "Field 'v': nul and terminator are defined only on an ascii field, not on hex (PS-534, PS-593)"
+
+- name: nul_with_another_value
+  schema: "name: t\nfields:\n  - {name: v, type: ascii, length: 2, nul: strip}\n"
+  error: "Field 'v': nul must be trailing, stop or drop, not 'strip' (PS-534)"
+
+- name: terminator_above_a_byte
+  schema: "name: t\nfields:\n  - {name: v, type: ascii, terminator: 256}\n"
+  error: "Field 'v': terminator must be a byte value 0 to 255, not 256 (PS-593)"
+
+- name: terminator_negative
+  schema: "name: t\nfields:\n  - {name: v, type: ascii, terminator: -1}\n"
+  error: "Field 'v': terminator must be a byte value 0 to 255, not -1 (PS-593)"
+
+- name: terminator_a_boolean
+  schema: "name: t\nfields:\n  - {name: v, type: ascii, terminator: true}\n"
+  error: "Field 'v': terminator must be a byte value 0 to 255, not True (PS-593)"
+
+- name: terminator_text
+  schema: "name: t\nfields:\n  - {name: v, type: ascii, terminator: \"0\"}\n"
+  error: "Field 'v': terminator must be a byte value 0 to 255, not '0' (PS-593)"

@@ -493,9 +493,9 @@ class TestSemanticOutputs:
         return {
             'fields': [
                 {'name': 'temperature', 'type': 's16', 'mult': 0.01,
-                 'unit': '°C', 'semantic': {'ipso': 3303}},
+                 'unit': '°C', 'ipso': {'object': 3303}},
                 {'name': 'humidity', 'type': 'u8', 'mult': 0.5,
-                 'unit': '%RH', 'semantic': {'ipso': 3304}},
+                 'unit': '%RH', 'ipso': {'object': 3304}},
             ]
         }
     
@@ -962,7 +962,7 @@ class TestDefinitionsAndRef:
         
         result = interpreter.decode(bytes([0x01]))
         assert not result.success
-        assert 'does not resolve' in result.errors[0] and 'PS-348' in result.errors[0]
+        assert 'does not define' in result.errors[0] and 'PS-348' in result.errors[0]
 
 
 class TestEdgeCases:
@@ -2967,7 +2967,7 @@ class TestSemanticEdgeCases:
         """Unknown format string should return raw decoded data."""
         schema = {
             'fields': [{'name': 'temperature', 'type': 'u8',
-                        'semantic': {'ipso': 3303}}]
+                        'ipso': {'object': 3303}}]
         }
         interpreter = SchemaInterpreter(schema)
         result = interpreter.decode(bytes([42]))
@@ -4540,14 +4540,14 @@ class TestGetFieldMetadata:
                     'resolution': 0.01,
                     'unece': 'CEL',
                     'description': 'Temperature sensor',
-                    'semantic': {'ipso': 3303}
+                    'ipso': {'object': 3303}
                 },
                 {
                     'name': 'humidity',
                     'type': 'u8',
                     'unit': '%RH',
                     'valid_range': [0, 100],
-                    'semantic': {'ipso': 3304, 'senml_unit': '%RH'}
+                    'ipso': {'object': 3304}, 'senml_unit': '%RH'
                 }
             ]
         }
@@ -4562,12 +4562,12 @@ class TestGetFieldMetadata:
         assert temp_meta['valid_range'] == [-40, 85]
         assert temp_meta['resolution'] == 0.01
         assert temp_meta['unece'] == 'CEL'
-        assert temp_meta['ipso'] == 3303
+        assert temp_meta['ipso'] == {'object': 3303}
         assert temp_meta['description'] == 'Temperature sensor'
         
         hum_meta = metadata['humidity']
         assert hum_meta['unit'] == '%RH'
-        assert hum_meta['ipso'] == 3304
+        assert hum_meta['ipso'] == {'object': 3304}
         assert hum_meta['senml_unit'] == '%RH'
     
     def test_get_single_field_metadata(self):

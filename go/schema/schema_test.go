@@ -6341,7 +6341,7 @@ func TestEdgeCaseStringUnderflow(t *testing.T) {
 name: test
 fields:
   - name: s
-    type: string
+    type: ascii
     length: 100
 `
 	schema, err := ParseSchema(schemaYAML)

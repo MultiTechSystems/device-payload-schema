@@ -43,9 +43,9 @@ public class CR2026_045Tests
     [Fact]
     public void LiteralsAndConstantsEncode()
     {
-        var bare = SchemaParser.Parse("name: p\nfields:\n  - {name: s, type: string, length: 2}\n");
+        // CR-2026-176 (PS-361 amended): refused at load, where it was refused at decode.
         Assert.Contains("PS-361", Assert.Throws<InvalidOperationException>(
-            () => SchemaDecoder.Decode(bare, new byte[] { 0x61, 0x62 })).Message);
+            () => SchemaParser.Parse("name: p\nfields:\n  - {name: s, type: string, length: 2}\n")).Message);
         var schema = SchemaParser.Parse("name: p\nfields:\n  - {name: cid, type: u8, value: 16}\n"
             + "  - {name: unit, type: string, value: ppm}\n  - {name: x, type: u8}\n");
         var result = SchemaEncoder.Encode(schema, new Dictionary<string, object?> { ["cid"] = 153.0, ["x"] = 5.0 });

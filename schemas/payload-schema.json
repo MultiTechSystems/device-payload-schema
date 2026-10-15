@@ -28,6 +28,63 @@
           ],
           "description": "On an ascii field: report its digit text as the integer it spells, in base 10 or base 16, strictly (PS-560, PS-561)."
         },
+        "template": {
+          "type": "string",
+          "description": "On a type: string field that declares no value: text joined from values decoded earlier, ${name} (as name_from writes it) or ${name:format} (a part format of PS-430), and $$ for a literal $. Reads and writes no bytes (PS-590 to PS-592)."
+        },
+        "nul": {
+          "enum": [
+            "trailing",
+            "stop",
+            "drop"
+          ],
+          "description": "On an ascii field: trailing (the default) removes trailing 0x00 bytes, stop ends the value at the first 0x00, drop removes every 0x00 (PS-534)."
+        },
+        "terminator": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 255,
+          "description": "On an ascii field, in place of length: the byte that ends the text. It is consumed and not reported (PS-593, PS-595)."
+        },
+        "checksum": {
+          "type": "object",
+          "description": "On an unsigned integer field: the check value over the bytes from `from` to the byte before it, verified on decode and computed on encode (PS-585 to PS-587).",
+          "additionalProperties": false,
+          "required": [
+            "algo"
+          ],
+          "properties": {
+            "algo": {
+              "enum": [
+                "sum8",
+                "xor8",
+                "crc8/smbus",
+                "crc16/kermit"
+              ]
+            },
+            "seed": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 255,
+              "description": "Starting value, sum8 and xor8 only (default 0)."
+            },
+            "from": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Byte offset where the covered range starts (default 0)."
+            },
+            "on_mismatch": {
+              "enum": [
+                "error",
+                "warn"
+              ],
+              "description": "What a decoder does on a mismatch (default error, PS-586)."
+            },
+            "description": {
+              "type": "string"
+            }
+          }
+        },
         "consume": {
           "type": "integer",
           "minimum": 0,
@@ -80,11 +137,12 @@
           "description": "Store decoded value as variable for later match/formula references"
         },
         "lookup": {
-          "type": "array",
-          "items": {
-            "type": "string"
-          },
-          "description": "Lookup table: index -> string value"
+          "anyOf": [
+            {"type": "array"},
+            {"type": "object"},
+            {"type": "string", "pattern": "^#/definitions/[^/]+$"}
+          ],
+          "description": "Lookup table: a sequence (PS-104), a sparse mapping (PS-268), or a pointer #/definitions/<name> to a lookup definition (PS-579)"
         },
         "values": {
           "description": "Enum values: dict {int: string} or list [string]"
@@ -104,18 +162,8 @@
           "description": "The value an encoder writes where the input omits the field (PS-554); an enum's unmapped label (PS-068)"
         },
         "semantic": {
-          "type": "object",
-          "properties": {
-            "ipso": {
-              "type": "integer",
-              "description": "IPSO Smart Object ID"
-            },
-            "senml": {
-              "type": "string",
-              "description": "SenML name"
-            }
-          },
-          "description": "Semantic mapping for output formats"
+          "type": "string",
+          "description": "A TTN normalized measurement path, such as air.temperature (PS-470); carried in _meta (PS-600) and placed by a generated normalizeUplink (PS-598, PS-599)"
         },
         "description": {
           "type": "string",
@@ -593,7 +641,15 @@
     },
     "definitions": {
       "type": "object",
-      "description": "Reusable field group definitions for $ref"
+      "description": "Name to definition, each carrying exactly one of `fields` (a field group), `field` (one field) or `lookup` (a table) (PS-345). A `$ref` to a `field` definition may carry field keys, each replacing the defined key whole (PS-578)",
+      "additionalProperties": {
+        "type": "object",
+        "properties": {
+          "fields": {"type": "array", "items": {"$ref": "#/definitions/field"}},
+          "field": {"$ref": "#/definitions/field"},
+          "lookup": {"anyOf": [{"type": "array"}, {"type": "object"}]}
+        }
+      }
     },
     "test_vectors": {
       "type": "array",

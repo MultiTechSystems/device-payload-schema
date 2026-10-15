@@ -1,0 +1,145 @@
+# CR-2026-173 (PS-525, PS-526, PS-527 amended): `on_repeat: merge` combines nested objects at
+# every depth. Two cases may fill one nested object, but not one leaf without `last`; the
+# encoder writes each case's part of a split nested object. The spec prototype's
+# TestCR2026173DeepMerge, case for case.
+#
+# Three lists, read by the reference and the generated codec
+# (tests/test_cr_2026_173_cases.py), Go (go/schema/cr173_test.go), Java (CR2026173Test.java)
+# and C# (CR2026_173Tests.cs). C has no tlv `on_repeat` (PS-446).
+#
+#   decode: `schema` (YAML text), `payload` (hex) and either `expected` (the whole decoded
+#           data, as JSON text) or `error` (text one of the errors contains).
+#   cases:  `schema`, `input` (JSON text) and either `payload` (hex) or `error`.
+#   load:   `schema` and `error`, the text of the load-time rejection.
+#
+# The errors are the spec prototype's text. A path inside a merged object is written `a.b`.
+
+decode:
+
+- name: two_tags_fill_one_nested_object
+  schema: &nested |
+    name: t
+    endian: big
+    fields:
+      - tlv:
+          tag_size: 1
+          on_repeat: merge
+          cases:
+            16:
+              - {name: settings, type: object, fields: [{name: heating_control, type: object, fields: [{name: mode, type: u8}]}]}
+            17:
+              - {name: settings, type: object, fields: [{name: heating_control, type: object, fields: [{name: setpoint, type: u8, div: 2}]}]}
+  payload: "1001112B"
+  expected: '{"settings": {"heating_control": {"mode": 1, "setpoint": 21.5}}}'
+
+- name: one_level_still_merges
+  schema: &one_level |
+    name: t
+    endian: big
+    fields:
+      - tlv:
+          tag_size: 1
+          on_repeat: merge
+          cases:
+            16:
+              - {name: loramac, type: object, fields: [{name: adr, type: u8}]}
+            17:
+              - {name: loramac, type: object, fields: [{name: dr, type: u8}]}
+  payload: "10011105"
+  expected: '{"loramac": {"adr": 1, "dr": 5}}'
+
+- name: three_levels
+  schema: &three_levels |
+    name: t
+    endian: big
+    fields:
+      - tlv:
+          tag_size: 1
+          on_repeat: merge
+          cases:
+            1:
+              - {name: a, type: object, fields: [{name: b, type: object, fields: [{name: c, type: object, fields: [{name: x, type: u8}]}]}]}
+            2:
+              - {name: a, type: object, fields: [{name: b, type: object, fields: [{name: c, type: object, fields: [{name: y, type: u8}]}]}]}
+  payload: "01070209"
+  expected: '{"a": {"b": {"c": {"x": 7, "y": 9}}}}'
+
+- name: a_shared_leaf_with_last_keeps_the_later
+  schema: &shared_last |
+    name: t
+    endian: big
+    fields:
+      - tlv:
+          tag_size: 1
+          on_repeat: merge
+          cases:
+            16:
+              - {name: settings, type: object, fields: [{name: heating_control, type: object, fields: [{name: mode, type: u8, on_repeat: last}]}]}
+            17:
+              - {name: settings, type: object, fields: [{name: heating_control, type: object, fields: [{name: mode, type: u8, on_repeat: last}]}]}
+  payload: "10011102"
+  expected: '{"settings": {"heating_control": {"mode": 2}}}'
+
+- name: one_tag_twice_reports_a_leaf_twice
+  schema: *nested
+  payload: "10011002"
+  error: "tlv: the merged object 'settings' reports its member 'heating_control.mode' twice (PS-525)"
+
+cases:
+
+- name: the_split_object_encodes_under_each_case
+  schema: *nested
+  input: '{"settings": {"heating_control": {"mode": 1, "setpoint": 21.5}}}'
+  payload: "1001112b"
+
+- name: one_part_of_a_split_object
+  schema: *nested
+  input: '{"settings": {"heating_control": {"mode": 1}}}'
+  payload: "1001"
+
+- name: three_levels_encode
+  schema: *three_levels
+  input: '{"a": {"b": {"c": {"x": 7, "y": 9}}}}'
+  payload: "01070209"
+
+- name: a_shared_last_leaf_is_written_once
+  schema: *shared_last
+  input: '{"settings": {"heating_control": {"mode": 2}}}'
+  payload: "1002"
+
+- name: a_stray_nested_member_is_rejected
+  schema: *nested
+  input: '{"settings": {"heating_control": {"mode": 1, "setpoint": 21.5, "fan": 3}}}'
+  error: "tlv: the merged object 'settings' is given ['heating_control.fan'], which no case declares (PS-527)"
+
+load:
+
+- name: a_shared_leaf_without_last_is_rejected
+  schema: |
+    name: t
+    endian: big
+    fields:
+      - tlv:
+          tag_size: 1
+          on_repeat: merge
+          cases:
+            16:
+              - {name: settings, type: object, fields: [{name: heating_control, type: object, fields: [{name: mode, type: u8}]}]}
+            17:
+              - {name: settings, type: object, fields: [{name: heating_control, type: object, fields: [{name: mode, type: u8}]}]}
+  error: "tlv: cases share the member 'heating_control.mode' of the merged object 'settings' without `on_repeat: last` (PS-526)"
+
+- name: an_object_against_a_leaf_is_rejected
+  schema: |
+    name: t
+    endian: big
+    fields:
+      - tlv:
+          tag_size: 1
+          on_repeat: merge
+          cases:
+            16:
+              - {name: settings, type: object, fields: [{name: heating_control, type: object, fields: [{name: mode, type: u8}]}]}
+            17:
+              - {name: settings, type: object, fields: [{name: heating_control, type: u8}]}
+  error: "tlv: the merged object 'settings' declares 'heating_control' as an object in one case and as a value in another (PS-526)"

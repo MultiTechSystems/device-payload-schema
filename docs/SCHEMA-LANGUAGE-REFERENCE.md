@@ -45,6 +45,32 @@ Each integer type has fixed aliases, and no others (PS-049, PS-326); they are ca
 | `u8`, `u16`, `u24`, `u32`, `u64` | `uint8`, `uint16`, `uint24`, `uint32`, `uint64` |
 | `s8`, `s16`, `s24`, `s32`, `s64` | `i8`, `i16`, `i24`, `i32`, `i64` and `int8`, `int16`, `int24`, `int32`, `int64` |
 
+### Checksum Fields
+
+An unsigned integer field may hold a check value over the bytes before it (PS-585 to
+PS-587). It declares `checksum`, a mapping:
+
+| Key | Meaning |
+|-----|---------|
+| `algo` | `sum8` (sum of the bytes, modulo 256), `xor8` (the bytes XORed), `crc8/smbus` (poly 0x07, init 0, not reflected) or `crc16/kermit` (poly 0x1021 reflected, init 0) |
+| `seed` | starting value of `sum8` or `xor8`, 0 to 255 (default 0); not allowed with a CRC |
+| `from` | byte offset in the frame where the covered range starts (default 0) |
+| `on_mismatch` | `error` (default): the decode fails; `warn`: a warning, and the rest is reported |
+
+The covered range runs from `from` to the byte before the field. A decoder compares the
+value read (in the field's type and byte order) with the checksum of that range; an encoder
+computes it over the bytes it wrote and ignores any input value. A checksum inside a tlv
+entry or a repeat element cannot be encoded (its range is not written when it is reached).
+A type other than `uN`, an unknown `algo`, a `seed` with a CRC, or a type too narrow for
+the result (`u8` for `crc16/kermit`) is rejected at load.
+
+```yaml
+- {name: _counter, type: u8}
+- {name: volume, type: u32, div: 1000}
+- {name: _lrc, type: u8, checksum: {algo: xor8, seed: 0x55}}       # Jooby LRC
+- {name: _crc, type: u16, endian: little, checksum: {algo: crc16/kermit}}   # Seeed E5
+```
+
 ### Word-Ordered 32-Bit Types
 
 Some devices send a 32-bit value as two 16-bit units in an order neither `endian`
@@ -132,6 +158,22 @@ after any sign, and rejects a negative `hex` value or one that does not fit (PS-
 ```yaml
 - {name: major, type: ascii, length: 4, numeral: hex}       # "001A" -> 26
 - {name: rssi,  type: ascii, length: 4, numeral: decimal}   # "-065" -> -65
+```
+
+An `ascii` field may declare `nul` (PS-534): `trailing` (the default) removes trailing 0x00
+bytes, `stop` ends the value before the first 0x00 and leaves the rest of the field unreported,
+`drop` removes every 0x00. Whitespace is never trimmed. Instead of `length`, an `ascii` field may
+declare `terminator`, a byte 0 to 255 (PS-593): the text runs to the first such byte, which is
+consumed and not reported, and a payload that ends first is an error naming the field. Declaring
+both `length` and `terminator`, or neither, is rejected at load. `nul` and `terminator` apply before
+`numeral` (PS-594). An encoder writes `nul: stop` and `nul: drop` values padded to `length` (a value
+holding 0x00 under `stop` is rejected; `drop` does not round-trip a dropped 0x00), and a terminated
+value followed by its terminator, with no padding and no fill for a `numeral`; a value holding the
+terminator is rejected (PS-595).
+
+```yaml
+- {name: model, type: ascii, length: 8, nul: stop}   # 45 4D 33 31 30 00 58 59 -> "EM310"
+- {name: version, type: ascii, terminator: 0x00}     # 31 2E 32 00 -> "1.2"
 ```
 
 A `bytes` field reports a **lowercase** hex string by default (PS-281). Its `format:` is
@@ -232,7 +274,31 @@ field a level may hold (PS-015).
   equal what the field decodes from the bytes the other fields write over its span (its
   `format` and `separator`, or the trailing 0x00 removal, applied first), or the input is
   rejected naming the field (PS-589).
-- On any other type than a bit range or `bool`, `consume: 0` is NOT RECOMMENDED (PS-453).
+- On any other type than a bit range, a `bool`, a byte string or a whole number (below),
+  `consume: 0` is NOT RECOMMENDED (PS-453).
+
+#### Reading a whole number in place (`consume: 0`)
+
+A whole numeric field - an integer `uN`/`sN`, a float `f16`/`bf16`/`f32`/`f64`, a minifloat,
+`udec`/`sdec` or a word-ordered variant - declaring `consume: 0` reads its value from the bytes
+at the read position as it otherwise would, and leaves the position where it was (PS-603). It
+is reported, referenced and matched on like any field, as its full bit range is. A frame's kind
+peeked before the cases that read it again:
+
+```yaml
+- {name: _kind, type: u8, consume: 0}
+- match:
+    field: $_kind
+    cases:
+      1: [{name: kind, type: u8}, {name: temperature, type: s16, div: 10}]
+      2: [{name: kind, type: u8}, {name: battery, type: u8}]
+# 01 00D7 -> {"kind": 1, "temperature": 21.5}
+```
+
+- An encoder writes nothing for it; the fields that consume its bytes write them. Where the
+  input omits it, the bytes fix it, and it is not required. A value given for it must equal
+  what those bytes decode to, through its own type, arithmetic and lookup, or the input is
+  rejected naming the field (PS-604).
 
 ### Special Types
 
@@ -707,7 +773,15 @@ a format carrying `:N`.
 Encoding parses each segment by its format: leading zeros are accepted, hex in either case,
 and a `-` only on `sdecimal` (PS-096, PS-431). A segment the part's width cannot hold - 0 to
 2^w - 1, or -2^(w-1) to 2^(w-1) - 1 for `sdecimal` - is rejected naming the field and the
-segment, never masked (PS-583).
+segment, never masked (PS-583). A value without the declared `prefix`, or with a segment
+count other than the part count, is rejected; a missing part is never filled with 0 and an
+extra segment never ignored (PS-605).
+
+With `delimiter: ""` the parts are joined with nothing between them, and an encoder splits
+the value by each part's `:N` width (PS-606). That needs every part to declare a width that
+holds its largest value (`hex:2` for 8 bits, `decimal:3`) and no part to be `sdecimal`; a
+field that does not meet this still decodes, but is refused for encoding, and a value whose
+length differs from the sum of the widths is rejected.
 
 ## Test Vectors
 
@@ -1091,6 +1165,32 @@ stays available as a variable.
 This is the one construct whose output cannot be round-tripped: encoding looks a field up
 by its schema name, and the decoded output holds the resolved key instead.
 
+## Template Strings (`template`)
+
+A `type: string` field declares either `value`, a literal, or `template`, text joined from
+values decoded earlier (PS-361, PS-590). It reads and writes no bytes, and an encoder ignores
+a value given for it.
+
+```yaml
+- {name: _major, type: u8}
+- {name: _minor, type: u8}
+- {name: _build, type: u16}
+- name: firmware_version            # 01 02 0003 -> "1.02.003"
+  type: string
+  template: "${_major}.${_minor:decimal:2}.${_build:decimal:3}"
+```
+
+- `${name}` writes the value as `name_from` does (PS-532): a number as JavaScript's
+  `String(n)`, a looked-up field's label, a string as it is, a boolean as `true`/`false`.
+- `${name:format}` writes the number the reference binds - a looked-up field's code - in a
+  bitfield_string part format: `decimal`, `sdecimal`, `hex` or `hex:upper`, with an optional
+  `:N` minimum width (zero-filled, never cut; a `-` before the padding).
+- `$$` writes a `$`.
+- A reference with no value makes the field absent (PS-592); a format given a fraction, or
+  `hex` given a negative number, makes it absent with a warning (PS-591).
+- A reference to an undeclared name, an object or a repeat, a format that is not a part
+  format, and `template` beside `value` or off `type: string` are rejected at load.
+
 ## TLV (Type-Length-Value)
 
 Parse tag-based variable content. Supports single and multi-byte tags.
@@ -1250,6 +1350,36 @@ A reference that does not resolve, a cycle, or a pointer not of the form
 (`lib.yaml#/definitions/x`) is resolved only by `tools/schema_preprocessor.py`, which also
 applies `rename:` and `prefix:`; an interpreter given one rejects it (PS-462). The `use:`
 shorthand is withdrawn (CR-2026-045): write `$ref`.
+
+### Field templates and shared lookup tables
+
+A definition carries exactly one of `fields` (a group, as above), `field` (one field) or
+`lookup` (a table) (PS-345, CR-2026-168):
+
+```yaml
+definitions:
+  alarm_codes:
+    lookup: {0: none, 1: low, 2: high, 3: sensor_fault, default: "alarm${value}"}
+  probe:
+    field: {type: s16, div: 10, unit: Cel, valid_range: [-40, 125]}
+
+fields:
+  - {$ref: "#/definitions/probe", name: temp_1}
+  - {$ref: "#/definitions/probe", name: temp_2}
+  - {$ref: "#/definitions/probe", name: temp_ext, div: 100}   # div replaced
+  - {name: alarm_1, type: u8, lookup: "#/definitions/alarm_codes"}
+```
+
+A `$ref` to a `field` definition may carry field keys beside it: each replaces the defined
+key whole, one level deep, so a `lookup` or `transform` given there is not merged with the
+definition's (PS-578). The resolved field must have a `name`, from the definition or the
+reference. A `$ref` to a group carries nothing else, and a `$ref` in a field list never
+names a `lookup` definition (PS-348). A field's `lookup` may be the pointer
+`#/definitions/<name>` to a `lookup` definition, and decodes and encodes exactly as the
+table written in its place (PS-579). A `field` definition may use a pointer, and a group may
+reference `field` definitions; references resolve transitively, and a cycle is invalid
+(PS-580, PS-349). The decoded output and `_meta` are those of the schema written out. An
+`enum`'s `values` cannot point to a table.
 
 ## Port-Based Routing
 
@@ -1464,8 +1594,20 @@ payload as though the block were absent.
   unit: "°C"
   ipso: {object: 3303, instance: 0, resource: 5700}   # IPSO object/instance/resource
   senml: {name: "temperature", unit: "Cel"}           # SenML record name and unit
-  semantic: "air.temperature"                          # Dotted semantic name
+  semantic: "air.temperature"                          # TTN normalized path (PS-470)
 ```
+
+**`semantic` is a TTN normalized measurement path** (CR-2026-179, PS-470): a string from
+the `measurement` definition of TTN's `lib/payload.json` (`air.temperature`,
+`air.relativeHumidity`, `soil.moisture`, `position.latitude`, `battery`, ...). Anything
+else that is not a string is rejected. `_meta.fields` carries it unchanged (PS-600). The
+validator warns of a path TTN does not define, of a unit that is neither the path's nor one
+normalizeUplink converts, and of two fields of one message on one path (PS-597). A
+generated TS013 codec gains `normalizeUplink()`, which places each value at its path in
+TTN's unit (PS-598, PS-599): it converts °F, mV, Pa/kPa/bar/inHg, km/h/mph/knots and a
+fraction (`/`), and otherwise leaves the value out with a warning - a field with no `unit`
+on a path that has one included, and every value on a path two fields declare. So declare
+`unit` beside `semantic`, and do not put a battery in % on `battery`, which is in V.
 
 All three are needed for the semantic points in `tools/score_schema.py`; see
 `schemas/devices/decentlab/dl-5tm.yaml` for the canonical form. A bare `ipso: 3303` is
@@ -1773,7 +1915,7 @@ fields:
     unit: "%"
     ipso: {object: 3304, instance: 0, resource: 5700}
     senml: {name: "humidity", unit: "%RH"}
-    semantic: "air.humidity"
+    semantic: "air.relativeHumidity"
     valid_range: [0, 100]
 
   - name: battery_voltage
@@ -1782,7 +1924,7 @@ fields:
     unit: "V"
     ipso: {object: 3316, instance: 0, resource: 5700}
     senml: {name: "vbat", unit: "V"}
-    semantic: "battery.voltage"
+    semantic: "battery"
 
 # Illustrative: this device is invented, so its vectors are computed by hand from
 # the layout above and declared `source: generated`. A real schema takes them from

@@ -1,0 +1,51 @@
+# A field's `semantic`, a TTN normalized path, is carried unchanged in its _meta entry at
+# every depth: the top level, an object's members and a repeat's elements (CR-2026-179,
+# PS-470, PS-600). Decoding is unaffected.
+name: meta_semantic
+endian: big
+fields:
+  - {name: temperature, type: s16, div: 10, unit: Cel, semantic: air.temperature}
+  - name: probe
+    type: object
+    fields:
+      - {name: moisture, type: u8, unit: "/100", semantic: soil.moisture}
+      - {name: depth, type: u8, unit: cm}
+  - name: history
+    type: repeat
+    count: 2
+    fields:
+      - {name: reading, type: u16, unit: hPa, semantic: air.pressure}
+test_vectors:
+  - name: semantic_at_every_depth
+    source: generated
+    payload: "00E7 2D 0F 03F2 03F7"
+    expected:
+      temperature: 23.1
+      probe: {moisture: 45, depth: 15}
+      history:
+        - {reading: 1010}
+        - {reading: 1015}
+    expected_meta:
+      schema: meta_semantic
+      fields:
+        temperature: {type: s16, reports: number, unit: Cel, display_unit: Cel, semantic: air.temperature}
+        probe:
+          type: object
+          reports: object
+          fields:
+            moisture: {type: u8, reports: integer, unit: "/100", display_unit: "/100", semantic: soil.moisture}
+            depth: {type: u8, reports: integer, unit: cm, display_unit: cm}
+        history:
+          type: repeat
+          reports: array
+          elements:
+            reading: {type: u16, reports: integer, unit: hPa, display_unit: hPa, semantic: air.pressure}
+  - name: negative_reading
+    source: generated
+    payload: "FF9C 01 02 0001 0100"
+    expected:
+      temperature: -10
+      probe: {moisture: 1, depth: 2}
+      history:
+        - {reading: 1}
+        - {reading: 256}

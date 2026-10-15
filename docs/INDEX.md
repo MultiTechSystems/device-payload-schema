@@ -42,7 +42,7 @@ Generated inventory of this repository: what lives where, what each document cov
 | [`LANGUAGE-ANALYSIS.md`](LANGUAGE-ANALYSIS.md) | This document explains the design decisions behind the Payload Schema language. | 390 |
 | [`OUTPUT-FORMATS.md`](OUTPUT-FORMATS.md) | The Payload Schema decoder can output data in multiple formats for different platforms and... | 638 |
 | [`SCHEMA-DEVELOPMENT-GUIDE.md`](SCHEMA-DEVELOPMENT-GUIDE.md) | Best practices for creating complete, validated payload schemas. | 215 |
-| [`SCHEMA-LANGUAGE-REFERENCE.md`](SCHEMA-LANGUAGE-REFERENCE.md) | Complete reference for the LoRa Alliance Payload Schema specification (v0.5.0). | 1883 |
+| [`SCHEMA-LANGUAGE-REFERENCE.md`](SCHEMA-LANGUAGE-REFERENCE.md) | Complete reference for the LoRa Alliance Payload Schema specification (v0.5.0). | 2025 |
 | [`SESSION-NOTES-2026-02-25.md`](SESSION-NOTES-2026-02-25.md) | The prototype tests were using a custom REQ-xxx-yyy numbering scheme that was inconsistent with the... | 78 |
 | [`SPEC-IMPLEMENTATION-STATUS.md`](SPEC-IMPLEMENTATION-STATUS.md) | Feature support matrix across the reference implementations. | 354 |
 | [`TTN-CODEC-CONVERSION-GUIDE.md`](TTN-CODEC-CONVERSION-GUIDE.md) | Complete guide for AI-assisted conversion of The Things Network device repository codecs to Payload... | 575 |
@@ -123,14 +123,14 @@ Generated inventory of this repository: what lives where, what each document cov
 
 ## Device schemas
 
-367 schemas under `schemas/devices/`.
-Mean quality score 82.5% (PLATINUM 43, GOLD 54, SILVER 250, BRONZE 5, REJECTED 15). Tiers follow the specification's Section 10: Platinum 95-100%, Gold 85-94%, Silver 70-84%, Bronze 60-69%, Rejected below 60%. Gold and Platinum also have gates (PS-239) -- see `../AGENTS.md`. A high score shows self-consistency with a schema's own test vectors, not that the vectors are right.
+378 schemas under `schemas/devices/`.
+Mean quality score 82.6% (PLATINUM 43, GOLD 54, SILVER 261, BRONZE 5, REJECTED 15). Tiers follow the specification's Section 10: Platinum 95-100%, Gold 85-94%, Silver 70-84%, Bronze 60-69%, Rejected below 60%. Gold and Platinum also have gates (PS-239) -- see `../AGENTS.md`. A high score shows self-consistency with a schema's own test vectors, not that the vectors are right.
 
 ### By vendor
 
 | Vendor | Schemas | Vectors | Tiers |
 |---|---|---|---|
-| _language-conformance | 155 | 419 | GOLD 1, SILVER 150, BRONZE 4 |
+| _language-conformance | 166 | 475 | GOLD 1, SILVER 161, BRONZE 4 |
 | milesight | 84 | 1427 | PLATINUM 31, GOLD 36, SILVER 14, REJECTED 3 |
 | decentlab | 58 | 204 | PLATINUM 9, GOLD 13, SILVER 31, BRONZE 1, REJECTED 4 |
 | _library-composed | 49 | 57 | SILVER 49 |
@@ -158,8 +158,12 @@ Mean quality score 82.5% (PLATINUM 43, GOLD 54, SILVER 250, BRONZE 5, REJECTED 1
 | `_language-conformance/arithmetic-order-read` | 5 | 2 | fields | 83% | SILVER |
 | `_language-conformance/arithmetic-worked-examples` | 8 | 1 | fields | 81% | SILVER |
 | `_language-conformance/ascii-latin1` | 1 | 4 | fields | 87% | SILVER |
+| `_language-conformance/ascii-nul-drop` | 2 | 4 | fields | 83% | SILVER |
 | `_language-conformance/ascii-nul-padding` | 1 | 3 | fields | 83% | SILVER |
+| `_language-conformance/ascii-nul-stop` | 2 | 5 | fields | 86% | SILVER |
 | `_language-conformance/ascii-numeral` | 4 | 4 | fields | 85% | SILVER |
+| `_language-conformance/ascii-terminator-numeral` | 2 | 3 | fields | 85% | SILVER |
+| `_language-conformance/ascii-terminator` | 2 | 3 | fields | 85% | SILVER |
 | `_language-conformance/bf16` | 2 | 10 | fields | 90% | GOLD |
 | `_language-conformance/bit-range-order` | 6 | 1 | fields | 81% | SILVER |
 | `_language-conformance/bitfield-string-field-endian-reverse` | 1 | 2 | fields | 81% | SILVER |
@@ -167,6 +171,7 @@ Mean quality score 82.5% (PLATINUM 43, GOLD 54, SILVER 250, BRONZE 5, REJECTED 1
 | `_language-conformance/bitfield-string-hex-case` | 2 | 1 | fields | 81% | SILVER |
 | `_language-conformance/bitfield-string-padded-signed` | 5 | 14 | ports | 90% | SILVER |
 | `_language-conformance/bitfield-string-wide` | 3 | 2 | fields | 83% | SILVER |
+| `_language-conformance/bitfield-string-width-split` | 1 | 5 | fields | 90% | SILVER |
 | `_language-conformance/bitfield-string` | 1 | 1 | fields | 81% | SILVER |
 | `_language-conformance/boolean-literal` | 7 | 2 | fields | 83% | SILVER |
 | `_language-conformance/byte-group-bool` | 4 | 3 | fields | 85% | SILVER |
@@ -177,8 +182,10 @@ Mean quality score 82.5% (PLATINUM 43, GOLD 54, SILVER 250, BRONZE 5, REJECTED 1
 | `_language-conformance/bytes-format-forms` | 8 | 10 | ports | 90% | SILVER |
 | `_language-conformance/bytes-format` | 4 | 1 | fields | 81% | SILVER |
 | `_language-conformance/bytes-length-field` | 5 | 2 | fields | 83% | SILVER |
+| `_language-conformance/checksum-fields` | 16 | 8 | ports | 88% | SILVER |
 | `_language-conformance/compute-negative-idiv-mod` | 5 | 8 | fields | 86% | SILVER |
 | `_language-conformance/compute-pow` | 7 | 7 | fields | 88% | SILVER |
+| `_language-conformance/definitions-field-and-lookup` | 3 | 3 | fields | 87% | SILVER |
 | `_language-conformance/digit-leading-name` | 5 | 1 | fields | 81% | SILVER |
 | `_language-conformance/element-case-several-readings` | 9 | 3 | fields | 83% | SILVER |
 | `_language-conformance/element-several-readings` | 7 | 3 | fields | 83% | SILVER |
@@ -225,6 +232,7 @@ Mean quality score 82.5% (PLATINUM 43, GOLD 54, SILVER 250, BRONZE 5, REJECTED 1
 | `_language-conformance/meta-nested` | 9 | 2 | fields | 82% | SILVER |
 | `_language-conformance/meta-port-default` | 2 | 2 | ports | 75% | SILVER |
 | `_language-conformance/meta-producer` | 3 | 2 | fields | 83% | SILVER |
+| `_language-conformance/meta-semantic` | 6 | 2 | fields | 79% | SILVER |
 | `_language-conformance/meta-tlv-channels` | 2 | 1 | fields | 69% | BRONZE |
 | `_language-conformance/metadata-enrichment` | 2 | 3 | fields | 75% | SILVER |
 | `_language-conformance/metadata-epoch-calendar` | 2 | 1 | fields | 81% | SILVER |
@@ -275,6 +283,7 @@ Mean quality score 82.5% (PLATINUM 43, GOLD 54, SILVER 250, BRONZE 5, REJECTED 1
 | `_language-conformance/round-ties-up` | 8 | 1 | fields | 83% | SILVER |
 | `_language-conformance/sentinel` | 2 | 2 | fields | 69% | BRONZE |
 | `_language-conformance/skip-type` | 3 | 1 | fields | 81% | SILVER |
+| `_language-conformance/string-template` | 11 | 9 | ports | 88% | SILVER |
 | `_language-conformance/tag-component-ref` | 5 | 2 | fields | 79% | SILVER |
 | `_language-conformance/tag-component-reference-binding` | 12 | 2 | ports | 77% | SILVER |
 | `_language-conformance/tag-entry-constants` | 5 | 4 | fields | 81% | SILVER |
@@ -284,6 +293,7 @@ Mean quality score 82.5% (PLATINUM 43, GOLD 54, SILVER 250, BRONZE 5, REJECTED 1
 | `_language-conformance/tlv-float-reading` | 3 | 3 | fields | 73% | SILVER |
 | `_language-conformance/tlv-name-object-and-scalar` | 7 | 2 | fields | 81% | SILVER |
 | `_language-conformance/tlv-nameless-case` | 2 | 1 | fields | 81% | SILVER |
+| `_language-conformance/tlv-nested-merge` | 15 | 3 | ports | 85% | SILVER |
 | `_language-conformance/tlv-object-with-inner-branch` | 4 | 3 | fields | 81% | SILVER |
 | `_language-conformance/tlv-repeat-collect-first-case` | 2 | 1 | fields | 81% | SILVER |
 | `_language-conformance/tlv-repeat-collect` | 2 | 1 | fields | 81% | SILVER |
@@ -303,6 +313,7 @@ Mean quality score 82.5% (PLATINUM 43, GOLD 54, SILVER 250, BRONZE 5, REJECTED 1
 | `_language-conformance/unknown-tlv-tag-skip-delimited` | 2 | 1 | fields | 83% | SILVER |
 | `_language-conformance/unknown-tlv-tag-skip` | 2 | 2 | fields | 81% | SILVER |
 | `_language-conformance/value-absent` | 4 | 2 | fields | 79% | SILVER |
+| `_language-conformance/whole-number-read-in-place` | 15 | 11 | ports | 78% | SILVER |
 | `_language-conformance/wide-bit-range` | 3 | 2 | fields | 81% | SILVER |
 | `_language-conformance/wide-group` | 2 | 2 | fields | 81% | SILVER |
 | `_language-conformance/wide-peek-selector-u64` | 6 | 2 | fields | 83% | SILVER |

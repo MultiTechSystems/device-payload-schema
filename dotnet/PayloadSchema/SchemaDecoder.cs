@@ -448,6 +448,14 @@ public static class SchemaDecoder
         ctx.Produced(field);
         try
         {
+            if (field.IsPeekedNumber)
+            {
+                // PS-603 (CR-2026-182): a whole number declaring `consume: 0` reads in place.
+                int start = ctx.Offset;
+                var value = DecodeFieldBody(field, ctx, schema);
+                ctx.Offset = start;
+                return value;
+            }
             if (field.Type is not (FieldType.Object or FieldType.Repeat))
                 return DecodeFieldBody(field, ctx, schema);
             ctx.MetaDepth++;
@@ -472,6 +480,16 @@ public static class SchemaDecoder
         field.LengthDeclared && field.Length == 0
         && field.Type is FieldType.Skip or FieldType.Bytes or FieldType.Ascii
             or FieldType.String or FieldType.Hex or FieldType.Base64;
+
+    /// <summary>What a whole number that does not consume decodes from <paramref name="span"/>
+    /// (PS-604, CR-2026-182): its type, arithmetic and lookup, as a decoder applies them;
+    /// null where it has no value.</summary>
+    internal static object? PeekedNumberValue(SchemaField field, byte[] span, string endian)
+    {
+        var value = DecodeFieldBody(field, new DecodeContext(span, endian), null);
+        if (value is double d && d == 0) return 0.0;                // PS-566
+        return value is string or bool || Helpers.ToFloat64(value).Item1 ? value : null;
+    }
 
     static object? DecodeFieldBody(SchemaField field, DecodeContext ctx, PayloadSchemaDefinition? schema)
     {
@@ -519,9 +537,14 @@ public static class SchemaDecoder
             case FieldType.U32:
             case FieldType.U64:
             {
+                int position = ctx.Offset;
                 var data = ctx.Read(length);
                 var unsigned = Helpers.DecodeUint(data, endian);
                 read = unsigned;
+                // PS-586 (CR-2026-174): the check value against the bytes it covers, as read
+                // and before any encoding or modifier.
+                if (field.Checksum != null)
+                    Checksum.Verify(field, ctx.Data, position, unsigned, ctx.Warnings);
                 // PS-427: compared before the code is decoded, so a sentinel that is no
                 // valid codeword (0xFF under bcd) is absent rather than an error.
                 if (field.Encoding != null && field.Sentinel is { Count: > 0 } && SentinelHit(field, read))
@@ -604,9 +627,15 @@ public static class SchemaDecoder
                 // everything after it.
                 // `string` is only ever a literal: a string read from the payload is
                 // `ascii` (PS-361), and a literal reads no bytes (PS-357).
+                if (field.Template != null)
+                {
+                    // PS-590 to PS-592 (CR-2026-176): text joined from earlier values,
+                    // reading no bytes; omitted where a reference has no value.
+                    value = TemplateStrings.Render(field, ctx);
+                    break;
+                }
                 if (field.Value == null)
-                    throw new InvalidOperationException($"field '{field.Name}': type string declares "
-                        + "no value; a string read from the payload is type ascii (PS-361)");
+                    throw new InvalidOperationException(TemplateStrings.NeitherMessage(field.Name));
                 value = field.Value;
                 break;
             }
@@ -623,10 +652,12 @@ public static class SchemaDecoder
 
             case FieldType.Ascii:
             {
+                if (field.Terminator != null) length = AsciiText.TerminatedSpan(field, ctx);   // PS-593
                 int start = ctx.Offset;
                 var data = ctx.Read(length);
                 if (field.IsEcho) ctx.Offset = start;              // PS-588 (CR-2026-175)
-                value = Helpers.DecodeAscii(field.Name, data, ctx.Warnings);
+                else if (field.Terminator != null) ctx.Offset++;   // consumed, not reported
+                value = Helpers.DecodeAscii(field.Name, data, ctx.Warnings, field.Nul);
                 if (field.Numeral != null)
                     value = Numeral.Decode(field.Name, (string)value, field.Numeral);   // PS-560
                 break;
@@ -1031,6 +1062,7 @@ public static class SchemaDecoder
         int total = 0;
         foreach (var f in fields)
         {
+            if (f.IsPeekedNumber) continue;                         // PS-603: reads in place
             switch (f.Type)
             {
                 case FieldType.Number:
@@ -1800,17 +1832,28 @@ public static class SchemaDecoder
     /// member reported twice is an error unless it declares `on_repeat: last` (PS-525).
     /// </summary>
     static object? CombineRepeated(string name, object? earlier, object? value, string mode,
-        HashSet<string>? lastMembers)
+        HashSet<string>? lastMembers, List<string>? path = null)
     {
+        // CR-2026-173: recursing where both reports carry an object; `lastMembers` holds
+        // leaf paths.
         if (mode == "last" || earlier is not Dictionary<string, object?> before
             || value is not Dictionary<string, object?> after)
             return value;
+        path ??= new List<string>();
         var combined = new Dictionary<string, object?>(before);
         foreach (var kv in after)
         {
-            if (combined.ContainsKey(kv.Key) && (lastMembers == null || !lastMembers.Contains(kv.Key)))
+            var here = new List<string>(path) { kv.Key };
+            bool twice = combined.TryGetValue(kv.Key, out var prior)
+                && (lastMembers == null || !lastMembers.Contains(SchemaParser.PathKey(here)));
+            if (twice && prior is Dictionary<string, object?> && kv.Value is Dictionary<string, object?>)
+            {
+                combined[kv.Key] = CombineRepeated(name, prior, kv.Value, mode, lastMembers, here);
+                continue;
+            }
+            if (twice)
                 throw new InvalidOperationException(
-                    $"tlv: the merged object '{name}' reports its member '{kv.Key}' twice (PS-525)");
+                    $"tlv: the merged object '{name}' reports its member '{string.Join(".", here)}' twice (PS-525)");
             combined[kv.Key] = kv.Value;
         }
         return combined;

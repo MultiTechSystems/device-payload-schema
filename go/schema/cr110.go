@@ -123,6 +123,7 @@ func tlvRepeatModes(tlv map[string]any, order keyOrder) (tlvRepeatInfo, error) {
 		return info, nil
 	}
 	shared := map[string][]map[string]any{}
+	objects := map[string]map[string]bool{} // the paths a merged object combines as objects
 	var sharedOrder []string
 	var firstErr error
 	fail := func(format string, args ...any) {
@@ -183,42 +184,56 @@ func tlvRepeatModes(tlv map[string]any, order keyOrder) (tlvRepeatInfo, error) {
 			if info.modes[name] != "merge" {
 				continue
 			}
-			members, _ := found[name]["fields"].([]any)
-			for _, m := range members {
-				mm := asStringMap(m)
-				if mm == nil {
+			// CR-2026-173: a member that is an object is combined member by member too.
+			// PS-526 concerns two cases declaring a leaf; one case naming a member twice
+			// counts once.
+			inCase := map[string]bool{}
+			for _, m := range mergedMembers(found[name]["fields"], nil) {
+				pk := pathKey(m.path)
+				if m.isObject {
+					if objects[name] == nil {
+						objects[name] = map[string]bool{}
+					}
+					objects[name][pk] = true
 					continue
 				}
-				member, _ := mm["name"].(string)
-				if member == "" {
+				if inCase[pk] {
 					continue
 				}
-				key := name + "\x00" + member
+				inCase[pk] = true
+				key := name + "\x01" + pk
 				if _, seen := shared[key]; !seen {
 					sharedOrder = append(sharedOrder, key)
 				}
-				shared[key] = append(shared[key], mm)
-				if mm["on_repeat"] != "last" {
+				shared[key] = append(shared[key], m.decl)
+				if m.decl["on_repeat"] != "last" {
 					continue
 				}
 				if info.lastMembers[name] == nil {
 					info.lastMembers[name] = map[string]bool{}
 				}
-				info.lastMembers[name][member] = true
+				info.lastMembers[name][pk] = true
 			}
 		}
 	}
-	// CR-2026-128: merged cases share a member only where it declares `last` (PS-526).
 	for _, key := range sharedOrder {
 		decls := shared[key]
+		parts := strings.SplitN(key, "\x01", 2)
+		dotted := strings.ReplaceAll(parts[1], "\x00", ".")
+		if objects[parts[0]][parts[1]] {
+			fail("tlv: the merged object '%s' declares '%s' as an object in one case and as a value in another (PS-526)",
+				parts[0], dotted)
+			continue
+		}
+		// CR-2026-128: merged cases share a leaf only where it declares `last`, at any
+		// depth (CR-2026-173, PS-526).
 		if len(decls) < 2 {
 			continue
 		}
 		for _, d := range decls {
 			if d["on_repeat"] != "last" {
-				parts := strings.SplitN(key, "\x00", 2)
 				fail("tlv: cases share the member '%s' of the merged object '%s' without `on_repeat: last` (PS-526)",
-					parts[1], parts[0])
+					dotted, parts[0])
 				break
 			}
 		}
@@ -262,10 +277,11 @@ func checkOnRepeat(raw map[string]any, order keyOrder) error {
 							if info.modes[name] != "merge" {
 								continue
 							}
-							members, _ := found[name]["fields"].([]any)
-							for _, member := range members {
-								if mm := asStringMap(member); mm != nil && mm["on_repeat"] == "last" {
-									allowedSet[identity(mm)] = true
+							// A merged object's leaf may declare `last` at any depth
+							// (PS-525, CR-2026-173).
+							for _, m := range mergedMembers(found[name]["fields"], nil) {
+								if m.decl["on_repeat"] == "last" {
+									allowedSet[identity(m.decl)] = true
 								}
 							}
 						}
@@ -314,12 +330,17 @@ func checkOnRepeat(raw map[string]any, order keyOrder) error {
 }
 
 // combineRepeated is PS-525: `last` keeps the later value; `merge` combines two
-// objects member by member, and a member reported twice is an error unless it declares
-// `on_repeat: last`.
+// objects member by member, recursing where both carry an object (CR-2026-173), and a
+// leaf reported twice is an error unless it declares `on_repeat: last`. `last` holds
+// leaf paths (pathKey).
 func combineRepeated(name string, earlier, value any, mode string, last map[string]bool) (any, error) {
 	if mode == "last" {
 		return value, nil
 	}
+	return mergeObjects(name, earlier, value, last, nil)
+}
+
+func mergeObjects(name string, earlier, value any, last map[string]bool, path []string) (any, error) {
 	before, okA := earlier.(map[string]any)
 	after, okB := value.(map[string]any)
 	if !okA || !okB {
@@ -329,13 +350,110 @@ func combineRepeated(name string, earlier, value any, mode string, last map[stri
 	for k, v := range before {
 		combined[k] = v
 	}
-	for k, v := range after {
-		if _, twice := combined[k]; twice && !last[k] {
-			return nil, fmt.Errorf("tlv: the merged object '%s' reports its member '%s' twice (PS-525)", name, k)
+	keys := make([]string, 0, len(after))
+	for k := range after {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		v := after[k]
+		here := append(append([]string{}, path...), k)
+		prior, twice := combined[k]
+		if twice && !last[pathKey(here)] {
+			_, priorMap := prior.(map[string]any)
+			_, valueMap := v.(map[string]any)
+			if priorMap && valueMap {
+				merged, err := mergeObjects(name, prior, v, last, here)
+				if err != nil {
+					return nil, err
+				}
+				combined[k] = merged
+				continue
+			}
+			return nil, fmt.Errorf("tlv: the merged object '%s' reports its member '%s' twice (PS-525)",
+				name, strings.Join(here, "."))
 		}
 		combined[k] = v
 	}
 	return combined, nil
+}
+
+// mergedMember is one named member of a merged object, at any depth (CR-2026-173).
+type mergedMember struct {
+	path     []string
+	decl     map[string]any
+	isObject bool
+}
+
+// mergedMembers is merged_members: each named member of a merged object with its path,
+// where a member of `type: object` not declaring `on_repeat: last` is combined member by
+// member and anything else is a leaf.
+func mergedMembers(fields any, path []string) []mergedMember {
+	var out []mergedMember
+	list, _ := fields.([]any)
+	for _, item := range list {
+		m := asStringMap(item)
+		if m == nil {
+			continue
+		}
+		name, _ := m["name"].(string)
+		if name == "" {
+			continue
+		}
+		here := append(append([]string{}, path...), name)
+		isObject := m["type"] == "object" && m["on_repeat"] != "last"
+		out = append(out, mergedMember{here, m, isObject})
+		if isObject {
+			out = append(out, mergedMembers(m["fields"], here)...)
+		}
+	}
+	return out
+}
+
+// pathKey joins a member path into one map key; a name may hold a dot.
+func pathKey(path []string) string { return strings.Join(path, "\x00") }
+
+// leafPaths is leaf_paths: a merged object's value's leaf paths (pathKey), descending only
+// into the members the schema declares as objects to be combined.
+func leafPaths(value map[string]any, objects map[string]bool, path []string, out map[string]bool) {
+	for k, v := range value {
+		here := append(append([]string{}, path...), k)
+		if sub, ok := v.(map[string]any); ok && objects[pathKey(here)] {
+			leafPaths(sub, objects, here, out)
+			continue
+		}
+		out[pathKey(here)] = true
+	}
+}
+
+// valueAt is value_at: the part of a nested value holding exactly the given leaf paths.
+func valueAt(value map[string]any, paths map[string]bool) map[string]any {
+	out := map[string]any{}
+	for pk := range paths {
+		path := strings.Split(pk, "\x00")
+		src, dst := value, out
+		for _, k := range path[:len(path)-1] {
+			src, _ = src[k].(map[string]any)
+			next, ok := dst[k].(map[string]any)
+			if !ok {
+				next = map[string]any{}
+				dst[k] = next
+			}
+			dst = next
+		}
+		dst[path[len(path)-1]] = src[path[len(path)-1]]
+	}
+	return out
+}
+
+// dottedPaths is a set of path keys as `a.b`, quoted and sorted, for a message.
+func dottedPaths(paths map[string]bool) []string {
+	out := make([]string, 0, len(paths))
+	for pk := range paths {
+		out = append(out, "'"+strings.ReplaceAll(pk, "\x00", ".")+"'")
+	}
+	sort.Strings(out)
+	return out
 }
 
 // reportsList is _reports_list: whether a field's own value is a list - a repeat, or
@@ -356,14 +474,27 @@ func identity(m map[string]any) uintptr {
 	return id
 }
 
-// tlvEncodePlan is tlv_encode_plan: for each merged object, every member some case
-// declares; a supplied member outside it is an error (PS-527).
+// tlvEncodePlan is tlv_encode_plan: for each merged object, every leaf path some case
+// declares, at any depth (CR-2026-173) - a supplied leaf outside it is an error (PS-527) -
+// and the paths it combines as objects.
 type encodePlan struct {
 	members map[string]map[string]bool
+	objects map[string]map[string]bool
+}
+
+// givenLeaves is a merged object's input as leaf paths, or nil where it is no mapping.
+func (p encodePlan) givenLeaves(name string, data map[string]any) map[string]bool {
+	obj, ok := data[name].(map[string]any)
+	if !ok {
+		return nil
+	}
+	out := map[string]bool{}
+	leafPaths(obj, p.objects[name], nil, out)
+	return out
 }
 
 func tlvEncodePlan(tlv map[string]any, order keyOrder, info tlvRepeatInfo) encodePlan {
-	plan := encodePlan{members: map[string]map[string]bool{}}
+	plan := encodePlan{members: map[string]map[string]bool{}, objects: map[string]map[string]bool{}}
 	view := asStringMap(tlv["cases"])
 	if view == nil {
 		return plan
@@ -378,14 +509,15 @@ func tlvEncodePlan(tlv map[string]any, order keyOrder, info tlvRepeatInfo) encod
 			if info.mode(name) != "merge" {
 				continue
 			}
-			members, _ := found[name]["fields"].([]any)
-			for _, member := range members {
-				mm := asStringMap(member)
-				if m, _ := mm["name"].(string); mm != nil && m != "" {
-					if plan.members[name] == nil {
-						plan.members[name] = map[string]bool{}
-					}
-					plan.members[name][m] = true
+			if plan.members[name] == nil {
+				plan.members[name] = map[string]bool{}
+				plan.objects[name] = map[string]bool{}
+			}
+			for _, m := range mergedMembers(found[name]["fields"], nil) {
+				if m.isObject {
+					plan.objects[name][pathKey(m.path)] = true
+				} else {
+					plan.members[name][pathKey(m.path)] = true
 				}
 			}
 		}
@@ -402,18 +534,14 @@ func (p encodePlan) strayMember(data map[string]any) error {
 	}
 	sort.Strings(names)
 	for _, name := range names {
-		obj, ok := data[name].(map[string]any)
-		if !ok {
-			continue
-		}
-		stray := []string{}
-		for m := range obj {
-			if !p.members[name][m] {
-				stray = append(stray, "'"+m+"'")
+		given := p.givenLeaves(name, data)
+		strayPaths := map[string]bool{}
+		for pk := range given {
+			if !p.members[name][pk] {
+				strayPaths[pk] = true
 			}
 		}
-		if len(stray) > 0 {
-			sort.Strings(stray)
+		if stray := dottedPaths(strayPaths); len(stray) > 0 {
 			return fmt.Errorf("tlv: the merged object '%s' is given [%s], which no case declares (PS-527)",
 				name, strings.Join(stray, ", "))
 		}
@@ -447,6 +575,11 @@ func caseClaims(fields []Field, optional bool, out []caseClaim) []caseClaim {
 			continue
 		}
 		if f.Name == "" || strings.HasPrefix(f.Name, "_") {
+			continue
+		}
+		if checksumOf(f) != nil {
+			// PS-587 (CR-2026-174): computed, never taken from the input, so never required.
+			out = append(out, caseClaim{f, true})
 			continue
 		}
 		if isLiteralField(f) || isComputedField(f) || isEcho(f) {
@@ -707,4 +840,42 @@ func f16Round(x float64) float64 {
 		return -r
 	}
 	return r
+}
+
+// mergedLeafKeys is a merged object field's leaf paths (pathKey), at every depth, read
+// from its typed members (CR-2026-173).
+func mergedLeafKeys(f Field) map[string]bool {
+	out := map[string]bool{}
+	var walk func(fields []Field, path []string)
+	walk = func(fields []Field, path []string) {
+		for _, m := range fields {
+			if m.Name == "" {
+				continue
+			}
+			here := append(append([]string{}, path...), m.Name)
+			if (m.Type == TypeObject || m.Type == "object") && m.decl["on_repeat"] != "last" {
+				walk(m.Fields, here)
+				continue
+			}
+			out[pathKey(here)] = true
+		}
+	}
+	walk(f.Fields, nil)
+	return out
+}
+
+// mergedClaimWidth is claimWidth with a merged object counting its leaves, at every
+// depth (PS-527 as CR-2026-173 amends it).
+func mergedClaimWidth(fields []Field, repeat tlvRepeatInfo) int {
+	n := 0
+	for _, f := range fields {
+		if (f.Type == TypeObject || f.Type == "object") && repeat.mode(f.Name) == "merge" {
+			if leaves := len(mergedLeafKeys(f)); leaves > 0 {
+				n += leaves
+				continue
+			}
+		}
+		n += claimWidth([]Field{f})
+	}
+	return n
 }

@@ -62,7 +62,7 @@ READERS: Dict[str, List[str]] = {
         "bindings/java/src/test/java/org/lora/schema/CorpusConformanceTest.java",
     ],
     "verdicts": ["tools/vector-verdicts.py"],
-    # The binary schema encoders, which read the `semantic: {ipso: N}` form.
+    # The binary schema encoders.
     "binary": ["tools/schema_binary.py", "tools/binary_schema.py"],
     # Documentation, for an annotation no code reads: the key must be described there.
     "doc:reference": ["docs/SCHEMA-LANGUAGE-REFERENCE.md"],
@@ -101,6 +101,8 @@ VOCABULARY: Dict[str, Dict[str, Tuple[Tuple[str, ...], str]]] = {
         "name": (("py",), "label of a definition; documentation"),
         "description": (("py", "outschema"), "documentation"),
         "fields": (_DECODERS, "spliced in place of the `$ref`"),
+        "field": (_DECODERS, "one field, a `$ref` may rename it and replace keys (PS-345, PS-578)"),
+        "lookup": (_DECODERS, "a table a field's `lookup` points to (PS-345, PS-579)"),
     },
     "field": {
         "name": (_DECODERS, "output key"),
@@ -112,7 +114,7 @@ VOCABULARY: Dict[str, Dict[str, Tuple[Tuple[str, ...], str]]] = {
         "add": (_DECODERS, "bare modifier (PS-101)"),
         "mult": (_DECODERS, "bare modifier (PS-101)"),
         "div": (_DECODERS, "bare modifier (PS-101)"),
-        "lookup": (_DECODERS, "sequence or sparse mapping (PS-104/PS-268)"),
+        "lookup": (_DECODERS, "sequence, sparse mapping (PS-104/PS-268) or `#/definitions/<name>` (PS-579)"),
         "transform": (_DECODERS, "ordered modifier stages"),
         "polynomial": (_DECODERS, "fitted curve"),
         "compute": (_DECODERS, "two-operand computed field"),
@@ -163,13 +165,20 @@ VOCABULARY: Dict[str, Dict[str, Tuple[Tuple[str, ...], str]]] = {
         "prefix": (_DECODERS, "bitfield_string prefix"),
         "encoding": (_DECODERS, "sign_magnitude | bcd | gray on a uN (PS-422)"),
         "numeral": (_DECODERS, "decimal | hex: an ascii field reported as the integer its digits give (PS-560)"),
+        "nul": (_DECODERS, "trailing | stop | drop: how an ascii field treats its 0x00 bytes (PS-534)"),
+        "terminator": (_DECODERS, "a byte 0 to 255 that ends a variable-length ascii field, in place of length (PS-593)"),
+        "checksum": (_DECODERS, "a check value over earlier bytes, verified on decode and computed on encode (PS-585)"),
+        "template": (_DECODERS, "text joined from earlier values on a type: string field, ${name} or ${name:format} (PS-590)"),
         "valid_range": (("py", "go", "cs", "outschema"), "quality flag (_quality)"),
         "resolution": (("py", "go", "cs"), "measurement resolution annotation"),
         "unece": (("py", "go", "cs"), "UN/ECE unit code annotation"),
         "unit": (("py", "score", "outschema"), "annotation"),
         "ipso": (("py", "score"), "annotation"),
         "senml": (("py", "score"), "annotation"),
-        "semantic": (("py", "score"), "annotation"),
+        "semantic": (
+            ("py", "go", "java", "cs", "score"),
+            "a TTN normalized path: _meta (PS-600), normalizeUplink (PS-598, PS-599)",
+        ),
     },
     "match": {
         "field": (_DECODERS, "discriminator reference"),
@@ -203,12 +212,6 @@ VOCABULARY: Dict[str, Dict[str, Tuple[Tuple[str, ...], str]]] = {
         "endian": (_DECODERS, "the group's byte order; members declare none (PS-364)"),
         "fields": (_DECODERS, "members"),
         "size": (_DECODERS, "shared byte count"),
-    },
-    "semantic": {
-        "ipso": (
-            ("binary",),
-            "the `semantic: {ipso: N}` form the binary encoders read",
-        ),
     },
     "transform": {
         "add": (_DECODERS, "stage"),
@@ -255,6 +258,12 @@ VOCABULARY: Dict[str, Dict[str, Tuple[Tuple[str, ...], str]]] = {
             ("doc:reference",),
             "documented in the language reference; no tool reads it",
         ),
+    },
+    "checksum": {
+        "algo": (_DECODERS, "sum8 | xor8 | crc8/smbus | crc16/kermit (PS-585)"),
+        "seed": (_DECODERS, "starting value of sum8 or xor8, a byte (PS-585)"),
+        "from": (_DECODERS, "byte offset where the covered range starts (PS-585)"),
+        "on_mismatch": (_DECODERS, "error | warn (PS-586)"),
     },
     "sampled": {
         "interval": (("py", "go", "java", "cs"), "seconds, a $ reference or {configured: name} (PS-567)"),
@@ -498,7 +507,7 @@ def iter_keys(schema: Any) -> Iterator[Tuple[str, str, str]]:
                 for i, cond in enumerate(value.get("when") or []):
                     if isinstance(cond, dict):
                         yield from rec("guard_when", cond, "%s.when[%d]" % (kpath, i))
-            elif key in ("compute", "ipso", "senml", "semantic", "sampled") and isinstance(
+            elif key in ("compute", "ipso", "senml", "semantic", "sampled", "checksum") and isinstance(
                 value, dict
             ):
                 yield from rec(key, value, kpath)
@@ -525,8 +534,15 @@ def iter_keys(schema: Any) -> Iterator[Tuple[str, str, str]]:
         for dk, entry in definitions.items():
             # A definition without fields or a type is a table of named constants
             # (lorawan `mtype_values`): its keys are data.
+            dpath = "definitions.%s" % dk
             if isinstance(entry, dict) and ("fields" in entry or "type" in entry):
-                yield from field(entry, "definitions.%s" % dk, "definition")
+                yield from field(entry, dpath, "definition")
+            elif isinstance(entry, dict) and isinstance(entry.get("field"), dict):
+                # One field (PS-345, CR-2026-168): the definition's keys, then the field's.
+                yield from rec("definition", entry, dpath)
+                yield from field(entry["field"], _p(dpath, "field"))
+            elif isinstance(entry, dict) and "lookup" in entry:
+                yield from rec("definition", entry, dpath)   # the table's keys are data
     for i, vector in enumerate(schema.get("test_vectors") or []):
         if isinstance(vector, dict):
             # Values are data; not descended into.
@@ -564,7 +580,8 @@ def referenced_definitions(schema: Any) -> set:
     def refs(node: Any) -> Iterator[str]:
         if isinstance(node, dict):
             for key, value in node.items():
-                if key == "$ref" and isinstance(value, str):
+                # a field's `lookup` may be a pointer too (PS-579)
+                if key in ("$ref", "lookup") and isinstance(value, str):
                     if value.startswith("#/definitions/"):
                         yield value[len("#/definitions/") :]
                 elif key != "definitions":

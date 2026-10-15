@@ -111,6 +111,7 @@ final class Encoder {
         // (CR-2026-024), so the whole list is walked at once: a run cannot be found by
         // looking at one field in isolation.
         byte[] frame = encodeWithBitfieldRuns(fields, input, true);
+        FrameMeta topMeta = frameMeta.get(frame);
         if (errors.isEmpty()) {
             try {
                 checkPeeks(frame);                              // PS-551 (CR-2026-141)
@@ -128,6 +129,17 @@ final class Encoder {
                 }
             }
         }
+        if (errors.isEmpty()) {
+            // PS-587 (CR-2026-174): each checksum over the finished frame, earliest first,
+            // so an outer checksum covers an inner one's value. One a construct encoded
+            // apart from the frame - a tlv entry, a repeat element - did not reach it, since
+            // the bytes before it were not written when it was.
+            try {
+                frame = fillChecksums(frame, topMeta);
+            } catch (RuntimeException e) {
+                errors.add(e.getMessage());
+            }
+        }
         if (errors.isEmpty() && frame.length == 0) {
             // PS-442: the last line against a construct that wrote nothing and said so to
             // no one - a match with no case chosen, a tlv entry no case claimed.
@@ -139,6 +151,25 @@ final class Encoder {
         // A rejected input produces no payload: the bytes written before the error are a
         // frame short of the rest, as Go has always returned nothing.
         return new EncodeResult(errors.isEmpty() ? out.toArray() : EMPTY, warnings, errors);
+    }
+
+    /** {@code fill_checksums}: the frame with every checksum placeholder computed. */
+    private byte[] fillChecksums(byte[] frame, FrameMeta meta) {
+        if (placedChecksums.isEmpty()) return frame;
+        List<Placed> placed = new ArrayList<>(meta == null ? List.of() : meta.checksums());
+        placed.sort(java.util.Comparator.comparingInt(Placed::pos));
+        byte[] out = frame.clone();
+        Set<Field> filled = java.util.Collections.newSetFromMap(new java.util.IdentityHashMap<>());
+        for (Placed c : placed) {
+            Checksum.fill(out, c.pos(), c.field(), c.little());
+            filled.add(c.field());
+        }
+        for (Field f : placedChecksums) {
+            if (!filled.contains(f)) {
+                throw new SchemaException.FieldEncodeException(Checksum.unwritten(f.getName()));
+            }
+        }
+        return out;
     }
 
     /** PS-551: what every encoder says for a required value the input omits. */
@@ -254,7 +285,8 @@ final class Encoder {
     }
 
     private static boolean isComputed(Field f) {
-        return f.getType() == FieldType.NUMBER || f.getType() == FieldType.INTEGER;
+        return f.getType() == FieldType.NUMBER || f.getType() == FieldType.INTEGER
+                || f.isTemplate();          // PS-590: written from what it joins, no bytes
     }
 
     private static boolean isLiteral(Field f) {
@@ -619,6 +651,21 @@ final class Encoder {
                 byte[] savedPeek = peeked;
                 peeked = out.pending();
                 try {
+                    if (field.getChecksum() != null) {
+                        // PS-587 (CR-2026-174): computed over the bytes written, never taken
+                        // from the input; zero until the frame is finished. Bits a peek left
+                        // pending would be ORed into it, so its range is not all written.
+                        if (out.pendingLength() > 0) {
+                            throw new SchemaException.FieldEncodeException(
+                                    Checksum.unwritten(field.getName()));
+                        }
+                        String endian = field.getEndian();
+                        boolean le = endian != null ? "little".equalsIgnoreCase(endian) : little;
+                        placedChecksums.add(field);
+                        out.extend(new byte[Checksum.size(field.getChecksumType())], 0,
+                                new FrameMeta(null, List.of(), List.of(new Placed(0, field, le)), List.of()));
+                        continue;
+                    }
                     if (isDerivableAbsentBool(field, data)) {
                         // PS-551 (CR-2026-141): an absent bool that does not consume is
                         // fixed by the fields that write its bit, so it writes none.
@@ -765,10 +812,26 @@ final class Encoder {
         }
     }
 
-    /** Per byte, the bits some field wrote (null: all), and the peeks placed. */
-    private record FrameMeta(byte[] covered, List<Peek> peeks, List<Echo> echoes) {
-        FrameMeta(byte[] covered, List<Peek> peeks) { this(covered, peeks, List.of()); }
+    /**
+     * Per byte, the bits some field wrote (null: all), the peeks placed, and the checksums
+     * written as placeholders, to be computed where the whole frame is known (PS-587),
+     * and the non-consuming byte strings given a value (PS-589).
+     */
+    private record FrameMeta(byte[] covered, List<Peek> peeks, List<Placed> checksums,
+                             List<Echo> echoes) {
+        FrameMeta(byte[] covered, List<Peek> peeks) { this(covered, peeks, List.of(), List.of()); }
     }
+
+    /** PS-587 (CR-2026-174): a checksum's placeholder, at {@code pos} in its frame. */
+    private record Placed(int pos, Field field, boolean little) {
+        Placed shifted(int by) {
+            return new Placed(pos + by, field, little);
+        }
+    }
+
+    /** Every checksum field given a placeholder, by identity: one never filled did not
+     *  reach the top-level frame - a tlv entry's or a repeat element's (PS-587). */
+    private final List<Field> placedChecksums = new ArrayList<>();
 
     /**
      * CR-2026-175 (PS-589): a non-consuming byte string given a value - where a decoder
@@ -780,6 +843,7 @@ final class Encoder {
 
     /** The byte count of a non-consuming byte string, read from the input. */
     private static Integer echoLength(Field field, Map<String, Object> data) {
+        if (field.isPeekedNumber()) return Field.wholeNumberSize(field.getType());   // PS-604
         if (field.getLengthRef() != null) {
             String ref = field.getLengthRef();
             if (ref.startsWith("$")) ref = ref.substring(1);
@@ -839,8 +903,9 @@ final class Encoder {
             } else {
                 Object found;
                 try {
-                    found = schema.echoValue(e.field(),
-                            java.util.Arrays.copyOfRange(frame, e.pos(), e.pos() + length));
+                    byte[] span = java.util.Arrays.copyOfRange(frame, e.pos(), e.pos() + length);
+                    found = e.field().isPeekedNumber() ? schema.peekedNumberValue(e.field(), span)
+                            : schema.echoValue(e.field(), span);
                 } catch (RuntimeException x) {
                     found = null;
                 }
@@ -849,7 +914,8 @@ final class Encoder {
             }
             throw new SchemaException.EncodeException("Field '" + e.field().getName()
                     + "' is given " + echoText(e.given()) + ", but the other fields write "
-                    + written + " over its span (PS-589)");
+                    + written + " over its span ("
+                    + (e.field().isPeekedNumber() ? "PS-604" : "PS-589") + ")");
         }
     }
 
@@ -913,9 +979,11 @@ final class Encoder {
         }
         List<Peek> peeks = new ArrayList<>();
         for (Peek p : meta.peeks()) peeks.add(p.shifted(prefix));
-        List<Echo> echoes = new ArrayList<>();
+        List<Placed> checksums = new ArrayList<>();
+        for (Placed c : meta.checksums()) checksums.add(c.shifted(prefix));
+                List<Echo> echoes = new ArrayList<>();
         for (Echo e : meta.echoes()) echoes.add(e.shifted(prefix));
-        frameMeta.put(result, new FrameMeta(covered, peeks, echoes));
+        frameMeta.put(result, new FrameMeta(covered, peeks, checksums, echoes));
         return result;
     }
 
@@ -1223,7 +1291,8 @@ final class Encoder {
             for (Field member : field.getFields()) {
                 boolean readsNothing = member.getType() == FieldType.NUMBER
                         || member.getType() == FieldType.BOOLEAN
-                        || (member.getType() == FieldType.STRING && member.getValue() != null);
+                        || (member.getType() == FieldType.STRING && member.getValue() != null)
+                        || member.isTemplate();
                 if (!readsNothing) {
                     throw new SchemaException.EncodeException("repeat field '" + name
                             + "' declares present_if and its elements read payload bytes, so the "
@@ -2406,6 +2475,10 @@ final class Encoder {
                 matchClaims(f.getMatchInline(), out);
                 continue;
             }
+            if (claimName(f) != null && f.getChecksum() != null) {
+                out.add(new Claim(f, true));        // PS-587: computed, never required
+                continue;
+            }
             if (claimName(f) != null && (isLiteral(f) || isComputed(f) || f.isEcho())) {
                 // A literal or computed field writes no bytes, but only this case reports
                 // it, so it claims its name, never required: a literal where the input gives
@@ -2490,10 +2563,12 @@ final class Encoder {
      * states it): an object counts its members, so a merged {adr, dr} case outranks a
      * {dr} one, and anything else counts one.
      */
-    private static int claimWidth(List<Field> fields) {
+    private static int claimWidth(List<Field> fields, OnRepeat.Modes modes) {
         int n = 0;
         for (Field f : fields) {
-            if (f.getType() == FieldType.OBJECT) {
+            if (f.getType() == FieldType.OBJECT && "merge".equals(modes.mode(f.getName()))) {
+                n += Math.max(1, OnRepeat.leaves(f).size());   // its leaves (CR-2026-173)
+            } else if (f.getType() == FieldType.OBJECT) {
                 List<Claim> members = new ArrayList<>();
                 collectClaims(f.getFields(), false, members);
                 n += Math.max(1, members.size());
@@ -2508,7 +2583,7 @@ final class Encoder {
                             List<Field> optional, int rank) {}
 
     private record Written(String key, List<Field> fields, Map<String, Object> data,
-                           int position, int seq) {}
+                           int position, int sub, int seq) {}
 
     /**
      * Rebuild a TLV payload from decoded output.
@@ -2544,7 +2619,10 @@ final class Encoder {
         OnRepeat.Modes modes = tlv.getRepeatModes();
 
         List<TlvEntry> entries = new ArrayList<>();
+        // CR-2026-173: a merged object's leaf paths, at every depth, and the paths it
+        // combines as objects.
         Map<String, Set<String>> declaredMembers = new LinkedHashMap<>();
+        Map<String, Set<String>> mergedObjects = new LinkedHashMap<>();
         for (Map.Entry<String, List<Field>> e : cases.entrySet()) {
             if ("default".equals(e.getKey()) || e.getValue() == null) continue;
             List<Claim> claims = new ArrayList<>();
@@ -2554,23 +2632,25 @@ final class Encoder {
                 (c.optional() ? optional : required).add(c.field());
                 String name = claimName(c.field());
                 if ("merge".equals(modes.mode(name)) && c.field().getFields() != null) {
-                    for (Field m : c.field().getFields()) {
-                        if (m.getName() != null && !m.getName().isEmpty()) {
-                            declaredMembers.computeIfAbsent(name, k -> new LinkedHashSet<>()).add(m.getName());
-                        }
-                    }
+                    OnRepeat.typedMembers(c.field().getFields(), List.of(),
+                            declaredMembers.computeIfAbsent(name, k -> new LinkedHashSet<>()),
+                            mergedObjects.computeIfAbsent(name, k -> new LinkedHashSet<>()));
                 }
             }
             entries.add(new TlvEntry(e.getKey(), e.getValue(), required, optional, entries.size()));
         }
-        entries.sort((x, y) -> Integer.compare(claimWidth(y.required()), claimWidth(x.required())));
+        entries.sort((x, y) -> Integer.compare(claimWidth(y.required(), modes), claimWidth(x.required(), modes)));
 
         // A supplied member of a merged object that no case declares has nowhere to go.
+        Map<String, Set<String>> givenLeaves = new LinkedHashMap<>();
         for (Map.Entry<String, Set<String>> e : declaredMembers.entrySet()) {
             if (!(data.get(e.getKey()) instanceof Map<?, ?> object)) continue;
+            Set<String> given = new LinkedHashSet<>();
+            OnRepeat.leafPaths(object, mergedObjects.getOrDefault(e.getKey(), Set.of()), List.of(), given);
+            givenLeaves.put(e.getKey(), given);
             List<String> stray = new ArrayList<>();
-            for (Object k : object.keySet()) {
-                if (!e.getValue().contains(String.valueOf(k))) stray.add("'" + k + "'");
+            for (String k : given) {
+                if (!e.getValue().contains(k)) stray.add("'" + OnRepeat.dotted(k) + "'");
             }
             if (!stray.isEmpty()) {
                 java.util.Collections.sort(stray);
@@ -2597,12 +2677,8 @@ final class Encoder {
             }
         }
         Map<String, Set<String>> pending = new LinkedHashMap<>();
-        for (String n : declaredMembers.keySet()) {
-            if (data.get(n) instanceof Map<?, ?> object) {
-                Set<String> keys = new LinkedHashSet<>();
-                for (Object k : object.keySet()) keys.add(String.valueOf(k));
-                pending.put(n, keys);
-            }
+        for (Map.Entry<String, Set<String>> g : givenLeaves.entrySet()) {
+            pending.put(g.getKey(), new LinkedHashSet<>(g.getValue()));
         }
 
         List<Written> written = new ArrayList<>();
@@ -2624,19 +2700,17 @@ final class Encoder {
                                     complete = false;
                                     break;
                                 }
-                                Map<String, Object> sub = new LinkedHashMap<>();
+                                Set<String> leaves = OnRepeat.leaves(f);
                                 boolean fresh = false;
-                                for (Field m : f.getFields() == null ? List.<Field>of() : f.getFields()) {
-                                    if (m.getName() == null || m.getName().isEmpty()) continue;
-                                    if (!object.containsKey(m.getName())) {
+                                for (String leaf : leaves) {
+                                    if (!givenLeaves.get(n).contains(leaf)) {
                                         complete = false;
                                         break;
                                     }
-                                    sub.put(m.getName(), object.get(m.getName()));
-                                    fresh |= pending.get(n).contains(m.getName());
+                                    fresh |= pending.get(n).contains(leaf);
                                 }
                                 if (!complete) break;
-                                values.put(n, sub);
+                                values.put(n, OnRepeat.valueAt(object, leaves));
                                 if (fresh) taken++;
                                 continue;
                             }
@@ -2658,18 +2732,28 @@ final class Encoder {
                         }
                         if (taken == 0) break;
                         Map<String, Object> entryData = new LinkedHashMap<>(data);
-                        int position = Integer.MAX_VALUE;
+                        int position = Integer.MAX_VALUE, sub = 0;
                         for (Map.Entry<String, Object> v : values.entrySet()) {
                             String n = v.getKey();
                             entryData.put(n, v.getValue());
-                            position = Math.min(position, order.indexOf(n));
+                            int at = order.indexOf(n), rank = 0;
                             if ("merge".equals(modes.mode(n))) {
-                                pending.get(n).removeAll(((Map<?, ?>) v.getValue()).keySet());
+                                Set<String> done = new LinkedHashSet<>();
+                                OnRepeat.leafPaths((Map<?, ?>) v.getValue(),
+                                        mergedObjects.getOrDefault(n, Set.of()), List.of(), done);
+                                pending.get(n).removeAll(done);
+                                // Parts of one merged object go out in case declaration
+                                // order (CR-2026-173), as the reference's `position`.
+                                rank = e.rank();
                             } else {
                                 queues.get(n).pollFirst();
                             }
+                            if (at < position || (at == position && rank < sub)) {
+                                position = at;
+                                sub = rank;
+                            }
                         }
-                        written.add(new Written(e.key(), e.fields(), entryData, position, written.size()));
+                        written.add(new Written(e.key(), e.fields(), entryData, position, sub, written.size()));
                         progress = true;
                     }
                 }
@@ -2684,7 +2768,7 @@ final class Encoder {
         for (Map.Entry<String, Set<String>> p : pending.entrySet()) {
             if (!p.getValue().isEmpty()) {
                 List<String> left = new ArrayList<>();
-                for (String m : p.getValue()) left.add("'" + m + "'");
+                for (String m : p.getValue()) left.add("'" + OnRepeat.dotted(m) + "'");
                 java.util.Collections.sort(left);
                 throw new SchemaException.EncodeException("tlv: no case takes the members ["
                         + String.join(", ", left) + "] of the merged object '" + p.getKey() + "' in full (PS-527)");
@@ -2723,7 +2807,8 @@ final class Encoder {
 
         // Payload order, so a payload round-trips; entries of one name keep the order taken.
         written.sort((x, y) -> x.position() != y.position()
-                ? Integer.compare(x.position(), y.position()) : Integer.compare(x.seq(), y.seq()));
+                ? Integer.compare(x.position(), y.position())
+                : x.sub() != y.sub() ? Integer.compare(x.sub(), y.sub()) : Integer.compare(x.seq(), y.seq()));
         ByteBuf out = new ByteBuf();
         for (int entryIndex = 0; entryIndex < written.size(); entryIndex++) {
             Written w = written.get(entryIndex);
@@ -3261,8 +3346,9 @@ final class Encoder {
             return Cr181.encode(field, value);       // CR-2026-181: PS-081, PS-601, PS-602
         }
 
-        if ((type == FieldType.STRING || type == FieldType.BOOLEAN) && field.getValue() != null) {
-            // A literal came from no bytes, so it writes none. This wrote its text:
+        if (((type == FieldType.STRING || type == FieldType.BOOLEAN) && field.getValue() != null)
+                || field.isTemplate()) {
+            // A literal came from no bytes, so it writes none, nor does a template (PS-590). This wrote its text:
             // `{type: string, value: "ppm"}` re-encoded 07 as 70706d07.
             return new byte[0];
         }
@@ -3271,6 +3357,7 @@ final class Encoder {
                 // PS-561: digits in the declared base, rounded as PS-552 requires.
                 Object declared = field.getRaw() != null ? field.getRaw().get("length") : null;
                 Integer fixed = declared instanceof Integer n && n >= 0 ? n : null;
+                if (field.getTerminator() != null) fixed = null;   // PS-593: no width
                 return encodeAscii(field, Numeral.encode(field.getName(),
                         (long) Math.rint(asDouble(value)), fixed, field.getNumeral()));
             }
@@ -3335,31 +3422,31 @@ final class Encoder {
      * The hex parts are lowercase on output (PS-074), and parsing is case-insensitive.
      */
     private byte[] encodeBitfieldString(Field field, String value) {
-        String text = value;
-        String prefix = field.getPrefix() == null ? "" : field.getPrefix();
-        if (!prefix.isEmpty() && text.startsWith(prefix)) {
-            text = text.substring(prefix.length());
+        List<List<Object>> parts = new ArrayList<>();
+        if (field.getParts() != null) {
+            for (List<Object> part : field.getParts()) {
+                if (part.size() >= 2 && asLong(part.get(0)) != null && asLong(part.get(1)) != null) {
+                    parts.add(part);
+                }
+            }
         }
-        String delimiter = field.getDelimiter() == null ? "." : field.getDelimiter();
-        String[] segments = text.split(java.util.regex.Pattern.quote(delimiter), -1);
+        // PS-605, PS-606 (CR-2026-183): the prefix required, the segment count checked, an
+        // empty delimiter split by width.
+        List<String> segments = BitfieldParts.segments(field.getName(), field.getPrefix(),
+                field.getDelimiter(), parts, value);
 
         long packed = 0;
-        List<List<Object>> parts = field.getParts();
-        if (parts != null) {
-            for (int i = 0; i < parts.size(); i++) {
-                List<Object> part = parts.get(i);
-                if (part.size() < 2) continue;
-                Long bitOff = asLong(part.get(0));
-                Long bitLen = asLong(part.get(1));
-                if (bitOff == null || bitLen == null) continue;
-                Object format = part.size() >= 3 ? part.get(2) : "decimal";
-                String segment = i < segments.length ? segments[i] : "0";
-                // PS-096, PS-431, PS-583: parsed by the part's format; a value the width
-                // cannot hold is rejected, never masked.
-                long raw = BitfieldParts.parseSegment(segment, bitLen.intValue(), format, field.getName());
-                long mask = bitLen >= 64 ? -1L : (1L << bitLen) - 1;
-                packed |= (raw & mask) << bitOff;
-            }
+        for (int i = 0; i < parts.size(); i++) {
+            List<Object> part = parts.get(i);
+            Long bitOff = asLong(part.get(0));
+            Long bitLen = asLong(part.get(1));
+            Object format = part.size() >= 3 ? part.get(2) : "decimal";
+            String segment = segments.get(i);
+            // PS-096, PS-431, PS-583: parsed by the part's format; a value the width
+            // cannot hold is rejected, never masked.
+            long raw = BitfieldParts.parseSegment(segment, bitLen.intValue(), format, field.getName());
+            long mask = bitLen >= 64 ? -1L : (1L << bitLen) - 1;
+            packed |= (raw & mask) << bitOff;
         }
         int length = field.getLength() > 0 ? field.getLength() : 2;
         // PS-050a: the field's own byte order, as it is decoded; this wrote the schema's.
@@ -3391,6 +3478,25 @@ final class Encoder {
         byte[] raw = text.getBytes(StandardCharsets.ISO_8859_1);
         Object declared = field.getRaw() != null ? field.getRaw().get("length") : null;
         Integer fixed = declared instanceof Integer n && n >= 0 ? n : null;
+        Integer terminator = field.getType() == FieldType.ASCII ? field.getTerminator() : null;
+        if (terminator != null) {                                   // PS-595
+            fixed = null;
+            for (byte b : raw) {
+                if ((b & 0xFF) == terminator) {
+                    throw new SchemaException.FieldEncodeException(String.format(
+                            "Field '%s': the value holds its terminator byte 0x%02X (PS-595)",
+                            name, terminator));
+                }
+            }
+        }
+        if ("stop".equals(field.getNul())) {                        // PS-595
+            for (byte b : raw) {
+                if (b == 0) {
+                    throw new SchemaException.FieldEncodeException("Field '" + name
+                            + "': a nul: stop value holds a 0x00 byte (PS-595)");
+                }
+            }
+        }
         if (fixed != null && raw.length > fixed) {
             throw new SchemaException.FieldEncodeException(String.format(
                     "Field '%s': an ascii value of %d bytes is longer than its length of %d (PS-537)",
@@ -3401,6 +3507,11 @@ final class Encoder {
                 warnings.add("Field '" + name + "': a character above U+007F in an ascii value (PS-537)");
                 break;
             }
+        }
+        if (terminator != null) {                                   // PS-595
+            byte[] out = java.util.Arrays.copyOf(raw, raw.length + 1);
+            out[raw.length] = (byte) (int) terminator;
+            return out;
         }
         return fixed == null ? raw : pad(raw, fixed);
     }
@@ -3667,6 +3778,7 @@ final class Encoder {
         // each bit range or bool placed.
         private byte[] covered = new byte[0];
         private final List<Peek> peeks = new ArrayList<>();
+        private final List<Placed> checksums = new ArrayList<>();     // PS-587
         private final List<Echo> echoes = new ArrayList<>();      // PS-589
 
         /**
@@ -3690,7 +3802,7 @@ final class Encoder {
         FrameMeta meta() {
             int total = buf.size + pending.length;
             return new FrameMeta(java.util.Arrays.copyOf(covered, total), new ArrayList<>(peeks),
-                    new ArrayList<>(echoes));
+                    new ArrayList<>(checksums), new ArrayList<>(echoes));
         }
 
         byte[] pending() {
@@ -3740,6 +3852,7 @@ final class Encoder {
                 cover(offset + i, dataCovered == null ? 0xFF : dataCovered[i] & 0xFF);
             }
             if (meta != null) for (Peek p : meta.peeks()) peeks.add(p.shifted(offset));
+            if (meta != null) for (Placed c : meta.checksums()) checksums.add(c.shifted(offset));
             if (pending.length > 0) {
                 data = data.clone();
                 int shared = Math.min(pending.length, data.length);

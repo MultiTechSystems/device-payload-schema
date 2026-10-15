@@ -285,6 +285,9 @@ function encNumeral(f, value, fixed) {
   var digits = f.numeral === "hex" ? Math.abs(n).toString(16).toUpperCase() : String(Math.abs(n));
   var sign = n < 0 ? "-" : "";
   var width = fixed !== null ? fixed : sign.length + digits.length;
+  if (fixed === null && n < 0 && f.numeral === "hex") {
+    encFail("Field '" + f.name + "': " + String(value) + " is negative, which a hex numeral cannot write (PS-168)");
+  }
   if ((n < 0 && f.numeral === "hex") || sign.length + digits.length > width) {
     encFail("Field '" + f.name + "': " + String(value) + " does not fit " + (fixed !== null ? fixed : digits.length) + " " + f.numeral + " digits (PS-168)");
   }
@@ -509,6 +512,8 @@ function encFieldInner(out, f, value, endian, ctx) {  // _encode_field_inner
   if (encIsLiteral(f)) return;                       // PS-359: a literal writes nothing
   if (type === "string" || type === "ascii") {        // encode_ascii (PS-537)
     var fixed = typeof f.length === "number" && f.length >= 0 ? f.length : null;
+    var term = type === "ascii" && f.terminator !== undefined && f.terminator !== null ? f.terminator : null;
+    if (term !== null) fixed = null;                  // PS-593: a terminated field has no width
     if (f.numeral && type === "ascii") value = encNumeral(f, value, fixed);   // encode_numeral (PS-561)
     var text = String(value), u = [], high = false;
     for (var c = 0; c < text.length; c++) {
@@ -519,10 +524,17 @@ function encFieldInner(out, f, value, endian, ctx) {  // _encode_field_inner
       if (code > 0x7F) high = true;
       u.push(code);                                  // PS-538: the byte of the same number
     }
+    if (term !== null && u.indexOf(term) >= 0) {      // PS-595
+      encFail("Field '" + f.name + "': the value holds its terminator byte 0x" + ("0" + term.toString(16).toUpperCase()).slice(-2) + " (PS-595)");
+    }
+    if (f.nul === "stop" && u.indexOf(0) >= 0) {       // PS-595
+      encFail("Field '" + f.name + "': a nul: stop value holds a 0x00 byte (PS-595)");
+    }
     if (fixed !== null && u.length > fixed) {
       encFail("Field '" + f.name + "': an ascii value of " + u.length + " bytes is longer than its length of " + fixed + " (PS-537)");
     }
     if (high) ctx.wa.push("Field '" + f.name + "': a character above U+007F in an ascii value (PS-537)");
+    if (term !== null) { for (var t = 0; t < u.length; t++) out.push(u[t]); out.push(term); return; }   // PS-595
     encPad(out, u, fixed !== null ? fixed : u.length);
     return;
   }
@@ -594,6 +606,9 @@ function encEmptyPayloadError(fields, data) {
   return null;
 }
 
+function encComputed(f) {                             // COMPUTED_TYPES, or a template (PS-590)
+  return ENC_COMPUTED.indexOf(f.type) >= 0 || (f.type === "string" && "template" in f);
+}
 function encIsLiteral(f) {                            // is_literal
   return (f.type === "string" || f.type === "number" || f.type === "boolean") && "value" in f;
 }
@@ -812,7 +827,7 @@ function encByteGroup(out, f, data, ctx) {            // _encode_byte_group
     var g = members[i];
     if (!g || typeof g !== "object") continue;
     if ("endian" in g) encFail("byte_group member '" + (g.name || "?") + "' declares endian; the group's byte order is declared on the group (PS-364)");
-    if (ENC_COMPUTED.indexOf(g.type) >= 0 || encIsLiteral(g)) continue;   // no bits of its own
+    if (encComputed(g) || encIsLiteral(g)) continue;   // no bits of its own
     var name = g.name || "", v;
     if (!name) v = g["default"] === undefined ? 0 : g["default"];
     else if ("value" in g || name.charAt(0) === "_") v = encInternalValue(g, data);
@@ -900,17 +915,45 @@ function encSegmentBits(segment, width, fmt, name) {  // parse_bitfield_segment
   return out;
 }
 
+function encSplitByWidth(text, parts, name, value) {  // split_by_width
+  // PS-606 (CR-2026-183): an empty delimiter splits by each part's `:N` width. A part with
+  // no width holding its largest value, or an sdecimal part, makes the field unencodable.
+  var widths = [], total = 0, i;
+  for (i = 0; i < parts.length; i++) {
+    var bits = Number(parts[i][1]), pf = partFormat(parts[i].length > 2 ? parts[i][2] : "decimal");
+    var largest = pf.base.indexOf("hex") === 0 ? Math.max(1, Math.ceil(bits / 4)) : encPow2Text(bits, true).length;
+    if (pf.base === "sdecimal" || !pf.width || largest > pf.width)
+      encFail("Field '" + name + "': with an empty delimiter every part needs a :N width that holds its largest value, and none may be sdecimal, so this field cannot be encoded (PS-606)");
+    widths.push(pf.width);
+    total += pf.width;
+  }
+  if (text.length !== total)
+    encFail("Field '" + name + "': " + encPyRepr(value) + " has " + text.length + " characters for parts of widths [" + widths.join(", ") + "] (PS-606)");
+  var segs = [], at = 0;
+  for (i = 0; i < widths.length; i++) { segs.push(text.slice(at, at + widths[i])); at += widths[i]; }
+  return segs;
+}
+
 function encBitfieldString(out, f, value, ctx) {      // _encode_bitfield_string
-  var parts = f.parts || [], delim = f.delimiter === undefined ? "." : f.delimiter;
+  var parts = (f.parts || []).filter(function (p) { return p.length >= 2; });
+  var delim = f.delimiter === undefined ? "." : f.delimiter;
   var prefix = f.prefix || "", length = f.length === undefined ? 2 : f.length;
   value = String(value);
-  if (prefix && value.indexOf(prefix) === 0) value = value.slice(prefix.length);
-  var segs = value.split(delim), packed = {};
+  var text = value;
+  // PS-605 (CR-2026-183): a value without the declared prefix is rejected, and a segment
+  // count other than the part count is never filled or cut.
+  if (prefix) {
+    if (text.indexOf(prefix) !== 0)
+      encFail("Field '" + f.name + "': " + encPyRepr(value) + " does not begin with its prefix " + encPyRepr(prefix) + " (PS-605)");
+    text = text.slice(prefix.length);
+  }
+  var segs = delim === "" ? encSplitByWidth(text, parts, f.name, value) : text.split(delim), packed = {};
+  if (segs.length !== parts.length)
+    encFail("Field '" + f.name + "': " + encPyRepr(value) + " has " + segs.length + " segment(s) for " + parts.length + " part(s) (PS-605)");
   for (var i = 0; i < parts.length; i++) {
     var p = parts[i];
-    if (p.length < 2) continue;
     var fmt = p.length > 2 ? p[2] : "decimal";
-    var seg = i < segs.length ? segs[i] : "0";
+    var seg = segs[i];
     var start = Number(p[0]), width = Number(p[1]);
     var bits = encSegmentBits(seg, width, fmt, f.name);
     for (var b = 0; b < width; b++) if (bits[b]) packed[start + b] = 1;
@@ -1011,7 +1054,7 @@ function encBodyScore(body, data) {
       Object.keys(names).forEach(function (n) { if (has.call(data, n)) score++; });
       continue;
     }
-    if (!f.name || String(f.name).charAt(0) === "_" || (ENC_COMPUTED.indexOf(f.type) >= 0 && !encIsLiteral(f))) continue;
+    if (!f.name || String(f.name).charAt(0) === "_" || (encComputed(f) && !encIsLiteral(f))) continue;
     var key = f.name;
     if (f.name_from) { try { key = encResolveName(f, f.name, data); } catch (e) { key = null; } }
     if (key === null || !has.call(data, key)) continue;
@@ -1207,7 +1250,7 @@ function encNestedDiscriminator(m, data, label) {
   if (fb) branches.push(["default", fb]);
   function namesOf(fields) {
     return fields.filter(function (f) {
-      return f && f.name && String(f.name).charAt(0) !== "_" && ENC_COMPUTED.indexOf(f.type) < 0;
+      return f && f.name && String(f.name).charAt(0) !== "_" && !encComputed(f);
     }).map(function (f) { return f.name; });
   }
   var filled = [];
@@ -1309,7 +1352,7 @@ function encRepeatElementsBody(out, f, data, records, count, ctx) {
     // PS-542: the records do not say which element they came from.
     encFail("Repeat '" + name + "' has elements that yield several records, which cannot be encoded (PS-542)");
   }
-  if (f.present_if && rf.some(function (r) { return r && ENC_COMPUTED.indexOf(r.type) < 0 && !encIsLiteral(r); })) {
+  if (f.present_if && rf.some(function (r) { return r && !encComputed(r) && !encIsLiteral(r); })) {
     encFail("repeat field " + JSON.stringify(name) + " declares present_if and its elements read payload bytes, so the elements it dropped cannot be encoded (PS-387)");
   }
   if (count !== null && records.length !== count) {
@@ -1397,7 +1440,7 @@ function encClaimable(fields) {                       // _claimable_fields
       (f.flagged.groups || []).forEach(function (grp) { out = out.concat(encClaimable(grp.fields || [])); });
       return;
     }
-    if (!f.name || String(f.name).charAt(0) === "_" || ENC_COMPUTED.indexOf(f.type) >= 0) return;
+    if (!f.name || String(f.name).charAt(0) === "_" || encComputed(f)) return;
     out.push(f);
   });
   return out;
@@ -1545,7 +1588,7 @@ function encCoveredPeeks(fields) {
   (fields || []).forEach(function (f) {
     if (!f || typeof f !== "object") return;
     if (encIsPeekField(f)) { pending.push(f); return; }
-    if (ENC_COMPUTED.indexOf(f.type) >= 0 || encIsLiteral(f)) return;
+    if (encComputed(f) || encIsLiteral(f)) return;
     var construct = ["match", "tlv", "byte_group", "flagged", "$ref"].some(function (k) { return k in f; });
     var bits = typeof f.type === "string" && /[\[:<]/.test(f.type);
     if (!construct && !bits && ["skip", "object", "repeat", "bool"].indexOf(f.type) < 0) out = out.concat(pending);
@@ -1569,8 +1612,9 @@ function encCaseClaims(fields, optional) {             // _case_claims
     }
     if ("match" in f && !f.type) { out = out.concat(encMatchClaims(f.match)); return; }
     if (!f.name || String(f.name).charAt(0) === "_") return;
-    // A literal or computed field claims its name, never required (no-silent-empty).
-    if (encIsLiteral(f) || ENC_COMPUTED.indexOf(f.type) >= 0 || encIsEcho(f)) { out.push([f, true]); return; }
+    // A literal or computed field claims its name, never required (no-silent-empty), and a
+    // checksum is never taken from the input (PS-587).
+    if (encIsLiteral(f) || encComputed(f) || encIsEcho(f) || f.checksum) { out.push([f, true]); return; }
     // PS-551 (CR-2026-141): a peek the fields after it fix need not be given.
     out.push([f, !!optional || f.optional === true || covered.indexOf(f) >= 0]);
   });
@@ -1615,13 +1659,23 @@ function encTlvBody(out, f, data, ctx) {
   // tlv_encode_plan, resolved at generation time, with the cases' declaration order: an
   // object's integer-like keys iterate in ascending order, not the order written.
   var rep = tlv.__on_repeat || {};
-  var modes = rep.modes || {}, members = rep.members || {};
+  var modes = rep.modes || {}, members = rep.members || {}, mobjects = rep.objects || {};
   var keys = rep.order || Object.keys(cases);
-  // A supplied member of a merged object that no case declares has nowhere to go.
+  // CR-2026-173: a merged object is handled by leaf path, at every depth; a path is its
+  // names joined by "\u0001" here, and by "." in a message.
+  function pkey(p) { return p.join("\u0001"); }
+  function pdot(k) { return k.split("\u0001").join("."); }
+  var leafSet = {}, objSet = {}, givenLeaves = {};
   Object.keys(members).forEach(function (n) {
+    leafSet[n] = {}; objSet[n] = {};
+    members[n].forEach(function (p) { leafSet[n][pkey(p)] = true; });
+    (mobjects[n] || []).forEach(function (p) { objSet[n][pkey(p)] = true; });
     var v = data[n];
-    if (v === null || typeof v !== "object" || Array.isArray(v)) return;
-    var stray = Object.keys(v).filter(function (m) { return members[n].indexOf(m) < 0; }).sort();
+    if (v !== null && typeof v === "object" && !Array.isArray(v)) givenLeaves[n] = encLeafPaths(v, objSet[n], []);
+  });
+  // A supplied member of a merged object that no case declares has nowhere to go.
+  Object.keys(givenLeaves).forEach(function (n) {
+    var stray = givenLeaves[n].filter(function (k) { return !leafSet[n][k]; }).map(pdot).sort();
     if (stray.length) encFail("tlv: the merged object '" + n + "' is given [" + stray.map(function (m) { return "'" + m + "'"; }).join(", ") + "], which no case declares (PS-527)");
   });
   // Each value goes under the first case whose declared fields it supplies in full;
@@ -1634,8 +1688,9 @@ function encTlvBody(out, f, data, ctx) {
     entries.push({ key: key, body: cases[key], req: req, opt: opt, seq: entries.length });
   });
   // An object counts its members (CR-2026-129), so a merged {adr, dr} case outranks {dr}.
-  function width(list) {
+  function width(list) {             // a merged object counts its leaves (CR-2026-173)
     return list.reduce(function (n, c) {
+      if (c.type === "object" && modes[c.name] === "merge") return n + encMergedLeaves(c).length;
       return n + (c.type === "object" ? Math.max(1, encCaseClaims(c.fields || []).length) : 1);
     }, 0);
   }
@@ -1651,11 +1706,7 @@ function encTlvBody(out, f, data, ctx) {
       queues[n] = collected ? v.slice() : [v];
     });
   });
-  Object.keys(members).forEach(function (n) {
-    var v = data[n];
-    if (v !== null && typeof v === "object" && !Array.isArray(v)) pending[n] = Object.keys(v);
-  });
-  function membersOf(c) { return (c.fields || []).filter(function (m) { return m && m.name; }).map(function (m) { return m.name; }); }
+  Object.keys(givenLeaves).forEach(function (n) { pending[n] = givenLeaves[n].slice(); });
   function fits(c, v) {                              // fits, exact_only (CR-2026-148)
     if (c.type === "object" && v !== null && typeof v === "object" && !Array.isArray(v) && modes[c.name] !== "merge") {
       var claims = encCaseClaims(c.fields || []), every = {}, ok = true;
@@ -1669,7 +1720,7 @@ function encTlvBody(out, f, data, ctx) {
     if (isMap && c.type && c.type !== "object" && c.type !== "repeat") return false;
     if (c.type === "object" && !isMap && modes[c.name] !== "merge") return false;
     if (encIsLiteral(c)) return c.value === v;        // PS-359, PS-513
-    if (ENC_COMPUTED.indexOf(c.type) >= 0) return true;   // asks for its source (PS-434)
+    if (encComputed(c)) return true;   // asks for its source (PS-434)
     var took = encCaseTakes(c, v);
     return took[0] && (took[1] || !exactOnly);
   }
@@ -1687,11 +1738,10 @@ function encTlvBody(out, f, data, ctx) {
         for (var i = 0; i < e.req.length; i++) {
           var c = e.req[i], n = c.name;
           if (modes[n] === "merge") {
-            var ms = membersOf(c);
-            if (!has.call(pending, n) || ms.some(function (m) { return !has.call(data[n], m); })) { complete = false; break; }
-            var sub = {};
-            ms.forEach(function (m) { sub[m] = data[n][m]; });
-            values[n] = sub;
+            var ms = encMergedLeaves(c).map(pkey);
+            if (!has.call(pending, n) || ms.some(function (m) { return givenLeaves[n].indexOf(m) < 0; })) { complete = false; break; }
+            values[n] = encValueAt(data[n], ms);
+            values[n].__leaves = ms;
             if (ms.some(function (m) { return pending[n].indexOf(m) >= 0; })) taken++;
           } else {
             var q = queues[n];
@@ -1705,15 +1755,22 @@ function encTlvBody(out, f, data, ctx) {
           if (q && q.length && fits(c, q[0])) { values[c.name] = q[0]; taken++; }
         });
         if (!taken) break;
-        var entry = {}, pos = Infinity;
+        var entry = {}, pos = Infinity, sub = 0;
         for (var k in data) entry[k] = data[k];
         Object.keys(values).forEach(function (n) {
+          // Parts of one merged object go out in case declaration order (CR-2026-173),
+          // as the reference's `position`.
+          var at = order.indexOf(n), rank = 0;
+          if (modes[n] === "merge") {
+            var done = values[n].__leaves;
+            delete values[n].__leaves;
+            pending[n] = pending[n].filter(function (m) { return done.indexOf(m) < 0; });
+            rank = e.seq;
+          } else queues[n].shift();
+          if (at < pos || (at === pos && rank < sub)) { pos = at; sub = rank; }
           entry[n] = values[n];
-          pos = Math.min(pos, order.indexOf(n));
-          if (modes[n] === "merge") pending[n] = pending[n].filter(function (m) { return !has.call(values[n], m); });
-          else queues[n].shift();
         });
-        written.push({ key: e.key, body: e.body, data: entry, p: pos, seq: written.length });
+        written.push({ key: e.key, body: e.body, data: entry, p: pos, q: sub, seq: written.length });
         progress = true;
       }
     });
@@ -1723,7 +1780,7 @@ function encTlvBody(out, f, data, ctx) {
     if (queues[n].length) encFail("tlv: no case takes the value of '" + n + "' " + JSON.stringify(queues[n][0]) + " in full (PS-502, PS-527)");
   });
   Object.keys(pending).forEach(function (n) {
-    if (pending[n].length) encFail("tlv: no case takes the members [" + pending[n].slice().sort().map(function (m) { return "'" + m + "'"; }).join(", ") + "] of the merged object '" + n + "' in full (PS-527)");
+    if (pending[n].length) encFail("tlv: no case takes the members [" + pending[n].map(pdot).sort().map(function (m) { return "'" + m + "'"; }).join(", ") + "] of the merged object '" + n + "' in full (PS-527)");
   });
   // A `name_from` key no claim can name: where no field declares it by name, no case
   // takes it, and it was dropped with nothing reported.
@@ -1745,7 +1802,7 @@ function encTlvBody(out, f, data, ctx) {
     });
   });
   // Payload order, so a payload round-trips; entries of one name keep the order taken.
-  written.sort(function (a, b) { return a.p - b.p || a.seq - b.seq; });
+  written.sort(function (a, b) { return a.p - b.p || a.q - b.q || a.seq - b.seq; });
   written.forEach(function (w, entryIndex) {
     encTlvTag(out, w.key, tlv, ctx);
     var value = [];
@@ -1755,6 +1812,45 @@ function encTlvBody(out, f, data, ctx) {
     if (lsize > 0) encWriteInt(out, value.length, lsize, false, ctx.endian);
     for (var i = 0; i < value.length; i++) out.push(value[i]);
   });
+}
+
+// A merged object's leaves at every depth (merged_members, CR-2026-173): an object member
+// not declaring `last` is combined member by member; anything else is a leaf.
+function encMergedLeaves(c) {
+  var out = [];
+  (function walk(fields, path) {
+    (Array.isArray(fields) ? fields : []).forEach(function (m) {
+      if (!m || typeof m !== "object" || !m.name) return;
+      var here = path.concat([m.name]);
+      if (m.type === "object" && m.on_repeat !== "last") walk(m.fields, here);
+      else out.push(here);
+    });
+  })(c.fields, []);
+  return out;
+}
+/* leaf_paths: a value's leaf paths (joined by \u0001), descending only into declared objects. */
+function encLeafPaths(v, objects, path) {
+  var out = [];
+  Object.keys(v).forEach(function (k) {
+    var here = path.concat([k]), m = v[k];
+    if (objects[here.join("\u0001")] && m !== null && typeof m === "object" && !Array.isArray(m)) out = out.concat(encLeafPaths(m, objects, here));
+    else out.push(here.join("\u0001"));
+  });
+  return out;
+}
+/* value_at: the part of a nested value holding exactly the given leaf paths. */
+function encValueAt(v, keys) {
+  var out = {};
+  keys.forEach(function (k) {
+    var p = k.split("\u0001"), src = v, dst = out;
+    for (var i = 0; i < p.length - 1; i++) {
+      src = src[p[i]];
+      if (!Object.prototype.hasOwnProperty.call(dst, p[i])) dst[p[i]] = {};
+      dst = dst[p[i]];
+    }
+    dst[p[p.length - 1]] = src[p[p.length - 1]];
+  });
+  return out;
 }
 
 /* Group a field list so bit ranges sharing a span are packed together (_bitfield_runs). */
@@ -1787,6 +1883,7 @@ function encEmit(fr, bytes, carried) {
   }
   for (var c = 0; c < bytes.length; c++) encCover(fr, offset + c, encCov(bytes, c));
   (bytes.pk || []).forEach(function (pk) { fr.pk.push(encShifted(pk, offset)); });
+  (bytes.ck || []).forEach(function (c) { fr.ck.push({ p: c.p + offset, f: c.f, endian: c.endian }); });
   (bytes.ec || []).forEach(function (ec) { fr.ec.push(encEchoShifted(ec, offset)); });
   var merged = [];
   for (var i = 0; i < bytes.length; i++) merged.push(i < shared ? (bytes[i] | fr.pend[i]) : bytes[i]);
@@ -1839,6 +1936,40 @@ function encShifted(pk, by) {
   return { p: pk.p + by, size: pk.size, endian: pk.endian, start: pk.start, width: pk.width, raw: pk.raw, name: pk.name };
 }
 
+/* PS-587 (CR-2026-174): a checksum is written as zeros and computed once the frame is
+ * finished (fill_checksums). An array's `ck` lists each placeholder: {p, f, endian}. */
+var ENC_CK_SIZE = { u8: 1, u16: 2, u24: 3, u32: 4, u64: 8, uint8: 1, uint16: 2, uint24: 3, uint32: 4, uint64: 8 };
+
+function encChecksumUnwritten(name) {                  // checksum_unwritten_message
+  return "Field '" + name + "': the bytes its checksum covers are not all written when it is reached (PS-587)";
+}
+
+function encChecksumPlaceholder(out, f, fr, ctx) {    // _checksum_placeholder
+  // A tlv entry or a repeat element or trailer is encoded apart from the frame.
+  if (fr.pend.length || ctx.d564) encFail(encChecksumUnwritten(f.name));
+  var endian = (f.endian === "little" || f.endian === "big") ? f.endian : ctx.endian;
+  out.ck = out.ck || [];
+  out.ck.push({ p: out.length, f: f, endian: endian });
+  (ctx.ckOpen = ctx.ckOpen || []).push(f);
+  for (var i = 0; i < ENC_CK_SIZE[f.type]; i++) out.push(0);
+}
+
+function encFillChecksums(out, ctx) {                 // fill_checksums
+  (out.ck || []).slice().sort(function (a, b) { return a.p - b.p; }).forEach(function (c) {
+    var spec = c.f.checksum, from = spec["from"] || 0, size = ENC_CK_SIZE[c.f.type];
+    if (from > c.p) encFail(encChecksumUnwritten(c.f.name));
+    var v = checksumOf(spec["algo"], out, from, c.p, spec["seed"] || 0);
+    for (var i = 0; i < size; i++) {
+      var shift = c.endian === "little" ? i : size - 1 - i;
+      out[c.p + i] = shift < 4 ? (v >>> (8 * shift)) & 0xFF : 0;
+    }
+    var k = ctx.ckOpen.indexOf(c.f);
+    if (k >= 0) ctx.ckOpen.splice(k, 1);
+  });
+  // One encoded apart from the frame - a tlv entry, a repeat element - never reached it.
+  if (ctx.ckOpen && ctx.ckOpen.length) encFail(encChecksumUnwritten(ctx.ckOpen[0].name));
+}
+
 function encPeekBytes(value, start, width, size, endian) {
   var b = [];
   encPacked(b, encPlace({}, value, start, width), size, endian);
@@ -1870,16 +2001,63 @@ function encPeekDisagreement(peeks, frame) {          // peek_disagreement
   return "A field writes bits a peek before it set otherwise (PS-551)";
 }
 
-/* PS-588 (CR-2026-175): a bytes, hex or ascii field declaring `consume: 0` (is_echo). */
+/* PS-588 (CR-2026-175): a bytes, hex or ascii field declaring `consume: 0`, or a whole
+ * numeric one (PS-603, CR-2026-182) (is_echo). */
 function encIsEcho(f) {
-  return (f.type === "bytes" || f.type === "hex" || f.type === "ascii") && f.consume === 0;
+  return (f.type === "bytes" || f.type === "hex" || f.type === "ascii" || encIsPeekedNumber(f))
+    && f.consume === 0;
+}
+
+var ENC_WHOLE_SIZES = { f16: 2, bf16: 2, f32: 4, f64: 8, uflt16: 2, sflt16: 2, sflt24: 3, udec: 1, sdec: 1 };
+
+function encWholeSize(t) {                             // whole_number_size
+  if (has_(ENC_WORD_ORDERED, t)) return 4;
+  if (has_(ENC_TYPES, t)) return ENC_TYPES[t][0];
+  return has_(ENC_WHOLE_SIZES, t) ? ENC_WHOLE_SIZES[t] : null;
+}
+
+function encIsPeekedNumber(f) {                        // is_peeked_number
+  return f.consume === 0 && encWholeSize(String(f.type)) !== null;
+}
+
+/* PS-604 (CR-2026-182): what a whole number decodes from `span` - its type, arithmetic and
+ * lookup, as a decoder applies them; null where it has no value. */
+function encWholeValue(f, span, endian) {
+  var t = String(f.type), v;
+  if (f.endian === "big" || f.endian === "little") endian = f.endian;
+  try {
+    if (has_(ENC_WORD_ORDERED, t)) v = readWordOrdered(span, 0, ENC_WORD_ORDERED[t][0], ENC_WORD_ORDERED[t][1]);
+    else if (has_(ENC_TYPES, t)) {
+      v = ENC_TYPES[t][1] ? readS(span, 0, ENC_TYPES[t][0], endian) : readU(span, 0, ENC_TYPES[t][0], endian);
+      if (f.encoding) v = decodeEncoding(v, f.encoding, ENC_TYPES[t][0]);
+    }
+    else if (t === "f16") v = readF16(span, 0, endian);
+    else if (t === "bf16") v = readBf16(span, 0, endian);
+    else if (t === "f32") v = readF32(span, 0, endian);
+    else if (t === "f64") v = readF64(span, 0, endian);
+    else if (t === "udec" || t === "sdec") {
+      var hi = span[0] >> 4;
+      if (t === "sdec" && hi >= 8) hi -= 16;
+      v = hi + (span[0] & 0x0F) * 0.1;
+    } else v = decodeMinifloat(t, readU(span, 0, ENC_WHOLE_SIZES[t], endian));
+  } catch (e) { return null; }
+  if (typeof v !== "number" || !isFinite(v)) return null;
+  v = encForward(v, f);
+  if (typeof v !== "number" || !isFinite(v)) return null;
+  var lk = f.lookup;
+  if (lk === undefined || lk === null) return v + 0;
+  if (Array.isArray(lk)) return v >= 0 && v < lk.length && v === Math.floor(v) ? lk[v] : null;
+  if (has_(lk, String(v))) return lk[String(v)];
+  if (has_(f, "default") && typeof f["default"] === "string") return lookupTemplate(f["default"], v);
+  return null;
 }
 
 /* PS-589: each one given a value is listed in `ec` as {p, f, given, n} (Frame.echoes): n
  * its byte count from the input, null for `remaining`, which reaches the frame's end. */
-function encEchoShifted(ec, by) { return { p: ec.p + by, f: ec.f, given: ec.given, n: ec.n }; }
+function encEchoShifted(ec, by) { return { p: ec.p + by, f: ec.f, given: ec.given, n: ec.n, endian: ec.endian }; }
 
 function encEchoLength(f, data) {                     // echo_length
+  if (encIsPeekedNumber(f)) return encWholeSize(String(f.type));   // PS-604
   var raw = f.length === undefined ? 1 : f.length;
   if (typeof raw === "string") {
     var text = raw.trim();
@@ -1929,11 +2107,13 @@ function encCheckEchoes(arr) {                        // check_echoes
     var n = ec.n === null ? Math.max(0, arr.length - ec.p) : ec.n, written;
     if (ec.p + n > arr.length) written = "too few bytes";
     else {
-      var found = encEchoValue(ec.f, Array.prototype.slice.call(arr, ec.p, ec.p + n));
+      var span = Array.prototype.slice.call(arr, ec.p, ec.p + n);
+      var found = encIsPeekedNumber(ec.f) ? encWholeValue(ec.f, span, ec.endian) : encEchoValue(ec.f, span);
       if (found !== null && JSON.stringify(found) === JSON.stringify(ec.given)) return;
       written = found === null ? "too few bytes" : encEchoText(found);
     }
-    encFail("Field '" + ec.f.name + "' is given " + encEchoText(ec.given) + ", but the other fields write " + written + " over its span (PS-589)");
+    encFail("Field '" + ec.f.name + "' is given " + encEchoText(ec.given) + ", but the other fields write " + written +
+            " over its span (" + (encIsPeekedNumber(ec.f) ? "PS-604" : "PS-589") + ")");
   });
 }
 
@@ -1970,7 +2150,7 @@ function encSizeSource(fields, ref) {                 // _size_source
 
 function encDerivable(src) {                          // _derivable
   if (!src || !src.name) return false;
-  if (ENC_COMPUTED.indexOf(src.type) >= 0 || encIsLiteral(src)) return false;
+  if (encComputed(src) || encIsLiteral(src)) return false;
   var keys = ["value", "name_from", "lookup", "mult", "div", "add", "transform", "polynomial", "encoding", "compute", "ref", "guard"];
   return !keys.some(function (k) { return k in src; });
 }
@@ -2050,7 +2230,7 @@ function encSame(a, b) {
 function encRecordedInputs(fields, data, d, ctx) {    // _recorded_inputs
   function internal(f) {
     var name = f.name;
-    if (typeof name !== "string" || name.charAt(0) !== "_" || ENC_COMPUTED.indexOf(f.type) >= 0 ||
+    if (typeof name !== "string" || name.charAt(0) !== "_" || encComputed(f) ||
         encIsLiteral(f) || "value" in f) return;
     var rec = encRecorded(ctx, "internal", f);
     if (rec === undefined) return;
@@ -2245,7 +2425,7 @@ function encListIn(out, fields, data, ctx, top, entry) {
   data = encDerive(fields, data, ctx);
   // CR-2026-136: a frame laid out as a decoder reads it (FrameBuffer). A bit range or
   // bool that does not consume leaves its bytes pending, and the next field's are ORed in.
-  var fr = { out: [], pend: [], cov: {}, pk: [], ec: [] };
+  var fr = { out: [], pend: [], cov: {}, pk: [], ck: [], ec: [] };
   // PS-564 (TailLevel): bytes an item adds go to the checks earlier items registered.
   var tl = { checks: [], size: null, mark: 0 };
   function tlClose() {
@@ -2276,6 +2456,10 @@ function encListIn(out, fields, data, ctx, top, entry) {
     out.pk = out.pk || [];
     fr.pk.forEach(function (pk) { out.pk.push(encShifted(pk, base)); });
   }
+  if (fr.ck.length) {
+    out.ck = out.ck || [];
+    fr.ck.forEach(function (c) { out.ck.push({ p: c.p + base, f: c.f, endian: c.endian }); });
+  }
   if (fr.ec.length) {
     out.ec = out.ec || [];
     fr.ec.forEach(function (ec) { out.ec.push(encEchoShifted(ec, base)); });
@@ -2303,7 +2487,7 @@ function encListIn(out, fields, data, ctx, top, entry) {
       if (nested === null || typeof nested !== "object" || Array.isArray(nested)) encFail(encMissing(objKey));   // PS-551
       return encObject(out, f.fields || [], nested, ctx);
     }
-    if (ENC_COMPUTED.indexOf(type) >= 0) return;
+    if (encComputed(f)) return;
     if (type === "skip") {
       var n = typeof f.length === "string" ? 0 : Math.max(0, parseInt(f.length === undefined ? 1 : f.length, 10));
       // CR-2026-141 (padding): a skip's zeros fix no peek's bits and contradict none.
@@ -2313,10 +2497,11 @@ function encListIn(out, fields, data, ctx, top, entry) {
     if (encIsEcho(f)) {
       // PS-589 (CR-2026-175): it re-reads bytes the other fields write, so it writes none
       // and is not required; a value given for it is checked where the frame closes.
-      if (name && encHas(data, name)) fr.ec.push({ p: fr.out.length, f: f, given: data[name], n: encEchoLength(f, data) });
+      if (name && encHas(data, name)) fr.ec.push({ p: fr.out.length, f: f, given: data[name], n: encEchoLength(f, data), endian: ctx.endian });
       return;
     }
     if (encIsLiteral(f)) return;
+    if (f.checksum) { encChecksumPlaceholder(out, f, fr, ctx); return; }   // PS-587
     if ("value" in f) { encField(out, f, f.value, ctx); return; }
     var value;
     // A nameless field other than a skip is refused at load (PS-553); it was written
@@ -2356,7 +2541,7 @@ function encListIn(out, fields, data, ctx, top, entry) {
 
 function encodeRoot(fields, data, endian) {
   // wa: PS-537's warnings, reported after the others as the reference reports them.
-  var ctx = { endian: endian, w: [], wa: [], t564: [], d564: 0 }, out = [];
+  var ctx = { endian: endian, w: [], wa: [], t564: [], d564: 0, ckOpen: [] }, out = [];
   ENC_SCOPE = fields;
   if (data && typeof data === "object" && ("_decode" in data || "_meta" in data)) {
     // PS-573: a decode record given in the input as `_decode`; `_meta` is not input.
@@ -2375,6 +2560,7 @@ function encodeRoot(fields, data, endian) {
     var selected = encRemainingSelection(c.m, c.tail);
     if (selected !== c.chosen) encFail(encRemainingMismatch(c.m, c.tail, selected, c.chosen));
   });
+  encFillChecksums(out, ctx);                            // PS-587 (CR-2026-174)
   if (!out.length) {
     var empty = encEmptyPayloadError(fields, data || {});   // PS-442
     if (empty) encFail(empty);
@@ -2515,7 +2701,8 @@ def _annotate_on_repeat(node):
         plan = tlv_encode_plan(tlv, modes, last_members)
         out['tlv'] = dict(out['tlv'], __on_repeat={
             'modes': {k: v for k, v in modes.items() if v != 'collect'},
-            'members': {k: sorted(v) for k, v in plan['members'].items()},
+            'members': {k: [list(p) for p in sorted(v)] for k, v in plan['members'].items()},
+            'objects': {k: [list(p) for p in sorted(v)] for k, v in plan['objects'].items()},
             'order': [str(key) for key in tlv['cases']],
         })
     return out
@@ -3045,6 +3232,102 @@ def ref_to_js(ref: str) -> str:
     return str(ref)
 
 
+NORMALIZE_RUNTIME_JS = r'''
+// normalizeUplink (CR-2026-179, PS-598, PS-599): places each field that declares a
+// `semantic` at its TTN normalized path, in TTN's unit. A port of the reference's
+// run_normalize_plan(); NORMALIZE_PLAN is its normalize_plan() of this schema.
+var NORMALIZE_CONVERSIONS = {
+  'degF': function (x) { return (x - 32) * 5 / 9; },
+  'mV': function (x) { return x / 1000; },
+  'Pa': function (x) { return x / 100; },
+  'kPa': function (x) { return x * 10; },
+  'bar': function (x) { return x * 1000; },
+  'inHg': function (x) { return x * 33.86388640341; },
+  'km/h': function (x) { return x / 3.6; },
+  'mph': function (x) { return x * 0.44704; },
+  'knots': function (x) { return x * 1852 / 3600; },
+  'fraction': function (x) { return x * 100; }
+};
+function normAt(node, at) {
+  for (var i = 0; i < at.length; i++) {
+    node = (node !== null && typeof node === 'object' && !Array.isArray(node)) ? node[at[i]] : undefined;
+  }
+  return node;
+}
+function normMeasurement(plan, data, warnings) {
+  var out = {};
+  for (var s = 0; s < plan.length; s++) {
+    var step = plan[s], path = step.path, present = [];
+    for (var f = 0; f < step.fields.length; f++) {
+      var v = normAt(data, step.fields[f].at);
+      if (v !== undefined && v !== null) present.push([step.fields[f], v]);
+    }
+    if (!present.length) continue;
+    if (step.fields.length > 1) {
+      warnings.push(path + ': declared by ' + step.fields.map(function (e) {
+        return "'" + e.at.join('.') + "'"; }).join(', ') + '; every value on it is left out (PS-598)');
+      continue;
+    }
+    var entry = present[0][0], value = present[0][1], where = entry.at.join('.');
+    if (entry.rule === 'none') {
+      warnings.push(path + ": field '" + where + "' " + entry.how + '; left out (PS-599)');
+      continue;
+    }
+    if (entry.rule === 'convert') {
+      if (typeof value !== 'number') {
+        warnings.push(path + ": field '" + where + "' is not a number; left out (PS-599)");
+        continue;
+      }
+      value = NORMALIZE_CONVERSIONS[entry.how](value);
+    }
+    var parts = path.split('.'), node = out;
+    for (var p = 0; p < parts.length - 1; p++) {
+      if (node[parts[p]] === undefined) node[parts[p]] = {};
+      node = node[parts[p]];
+    }
+    node[parts[parts.length - 1]] = value;
+  }
+  return out;
+}
+function normEmpty(o) { for (var k in o) { return false; } return true; }
+function normalizeUplink(input) {
+  var d = (input && input.data) || {}, warnings = [], msgs = NORMALIZE_PLAN.messages, chosen = null;
+  var fPort = input ? input.fPort : undefined;
+  if (!NORMALIZE_PLAN.ports) {
+    chosen = msgs.length ? msgs[0] : null;
+  } else if (fPort !== undefined && fPort !== null) {
+    for (var i = 0; i < msgs.length && !chosen; i++) if (msgs[i].port === String(fPort)) chosen = msgs[i];
+    for (var j = 0; j < msgs.length && !chosen; j++) if (msgs[j].port === 'default') chosen = msgs[j];
+  } else {
+    var declared = {};
+    msgs.forEach(function (m) { m.names.forEach(function (n) { declared[n] = true; }); });
+    var fits = msgs.filter(function (m) {
+      if (m.open) return true;
+      for (var k in d) {
+        if (Object.prototype.hasOwnProperty.call(declared, k) && m.names.indexOf(k) < 0) return false;
+      }
+      return true;
+    });
+    var shapes = {};
+    fits.forEach(function (m) { shapes[m.shape] = true; });
+    if (Object.keys(shapes).length === 1) chosen = fits[0];
+    else if (fits.length) warnings.push('normalizeUplink cannot tell which port entry decoded this data; nothing is placed (PS-598)');
+  }
+  if (!chosen) return { data: {}, warnings: warnings };
+  var base = normMeasurement(chosen.plan, d, warnings), measurements = [];
+  chosen.repeats.forEach(function (r) {
+    var list = normAt(d, r.at);
+    if (!Array.isArray(list)) return;
+    list.forEach(function (item) {
+      var m = normMeasurement(r.plan, r.element ? { value: item } : item, warnings);
+      if (!normEmpty(m)) measurements.push(m);
+    });
+  });
+  if (measurements.length) return { data: (normEmpty(base) ? [] : [base]).concat(measurements), warnings: warnings };
+  return { data: base, warnings: warnings };
+}
+'''
+
 class TS013Generator:
     def __init__(self, schema: Dict[str, Any], source: str = '', slim: bool = False):
         # `slim` builds a decode-only codec: no encoder, and no commentary. A generated
@@ -3232,16 +3515,7 @@ function tlvFold(outer, entry, modes, lastMembers, collected) {
     } else if (mode === "last") {
       outer[k] = v;
     } else if (mode === "merge") {
-      var combined = {}, before = outer[k];
-      for (var a in before) if (Object.prototype.hasOwnProperty.call(before, a)) combined[a] = before[a];
-      for (var m in v) {
-        if (!Object.prototype.hasOwnProperty.call(v, m)) continue;
-        if (Object.prototype.hasOwnProperty.call(combined, m) && !(lastMembers[k] && lastMembers[k][m])) {
-          throw new Error("tlv: the merged object '" + k + "' reports its member '" + m + "' twice (PS-525)");
-        }
-        combined[m] = v[m];
-      }
-      outer[k] = combined;
+      outer[k] = tlvMerge(k, outer[k], v, lastMembers[k] || {}, "");
     } else if (collected[k]) {
       outer[k].push(v);
     } else {
@@ -3249,6 +3523,28 @@ function tlvFold(outer, entry, modes, lastMembers, collected) {
       collected[k] = true;
     }
   }
+}
+
+// combine_repeated's merge: member by member, recursing where both reports carry an
+// object (CR-2026-173), and a leaf reported twice is an error unless its path declares
+// `last` (PS-525).
+function tlvMerge(k, before, v, last, path) {
+  var has = Object.prototype.hasOwnProperty, combined = {};
+  function isMap(x) { return x !== null && typeof x === "object" && !Array.isArray(x); }
+  for (var a in before) if (has.call(before, a)) combined[a] = before[a];
+  for (var m in v) {
+    if (!has.call(v, m)) continue;
+    var here = path ? path + "." + m : m;
+    if (has.call(combined, m) && !last[here] && isMap(combined[m]) && isMap(v[m])) {
+      combined[m] = tlvMerge(k, combined[m], v[m], last, here);
+      continue;
+    }
+    if (has.call(combined, m) && !last[here]) {
+      throw new Error("tlv: the merged object '" + k + "' reports its member '" + here + "' twice (PS-525)");
+    }
+    combined[m] = v[m];
+  }
+  return combined;
 }
 
 // --- Absent values ---
@@ -3439,6 +3735,41 @@ function partText(neg, mag, base, width) {
   return (neg ? '-' : '') + digits;
 }
 
+/* A template string field's text (PS-590 to PS-592, CR-2026-176), or undefined where a
+ * reference has no value. `parts` holds literal text and {js, name, fmt} references:
+ * `${name}` writes what a key template writes (PS-532) - a looked-up field's label from
+ * `lbl`, else the value bound, by String(); `${name:format}` writes the number bound
+ * (PS-523) through partText. A format given a value that is not an integer, or hex given a
+ * negative one, makes the field absent with a warning naming it (PS-591). */
+function tmplString(parts, field, vars, lbl, wn) {
+  var out = "", absent = false;
+  for (var k = 0; k < parts.length; k++) {
+    var p = parts[k];
+    if (typeof p === "string") { out += p; continue; }
+    var number = vars[p.js];
+    if (number === undefined || number === null) { absent = true; continue; }
+    if (p.fmt === null) {
+      var v = (p.js in lbl) ? lbl[p.js] : number;
+      if (v === undefined || v === null) { absent = true; continue; }
+      out += String(v);
+      continue;
+    }
+    var f = partFormat(p.fmt);
+    if (typeof number !== "number" || !isFinite(number) || Math.floor(number) !== number ||
+        (f.base.charAt(0) === "h" && number < 0)) {
+      var given = typeof number === "number" || typeof number === "boolean" ? String(number) : "'" + String(number) + "'";
+      wn.push("Field '" + field + "': ${" + p.name + ":" + p.fmt + "} is given " + given +
+              ", which the format cannot write, so the field is absent (PS-591)");
+      absent = true;
+      continue;
+    }
+    var mag = [], n = Math.abs(number);
+    do { mag.unshift(n % 256); n = Math.floor(n / 256); } while (n > 0);
+    out += partText(number < 0, mag, f.base, f.width);
+  }
+  return absent ? undefined : out;
+}
+
 /* One part of a bitfield_string, rendered in `fmt` (PS-430); `sdecimal` reads its bits as
  * two's complement of the part's width (PS-582). */
 function bitfieldPart(bytes, off, width, fmt) {
@@ -3468,6 +3799,36 @@ function bitRange(bytes, off, width, signed) {
   var text = decimalOf(out), v = Number(text);
   if (v <= SAFE_INTEGER) return neg ? -v : v;
   return neg ? '-' + text : text;
+}
+
+/* PS-585 (CR-2026-174): sum8, xor8, crc8/smbus and crc16/kermit over buf[from:to]. */
+function checksumOf(algo, buf, from, to, seed) {
+  var v = algo === "sum8" || algo === "xor8" ? (seed || 0) : 0, k, b;
+  for (var i = from; i < to; i++) {
+    b = buf[i];
+    if (algo === "sum8") v = (v + b) & 0xFF;
+    else if (algo === "xor8") v ^= b;
+    else if (algo === "crc8/smbus") {
+      v ^= b;
+      for (k = 0; k < 8; k++) v = v & 0x80 ? ((v << 1) ^ 0x07) & 0xFF : (v << 1) & 0xFF;
+    } else {
+      v ^= b;
+      for (k = 0; k < 8; k++) v = v & 1 ? (v >>> 1) ^ 0x8408 : v >>> 1;
+    }
+  }
+  return v;
+}
+
+/* PS-586: the check value read at `at` against the bytes it covers; an error, or with
+ * on_mismatch: warn a warning. */
+function checkChecksum(buf, at, carried, spec, name, wn) {
+  var from = spec["from"] || 0;
+  if (from > at) throw new Error("Field '" + name + "': the checksum range starts at byte " + from + ", after the field at byte " + at + " (PS-585)");
+  var v = checksumOf(spec["algo"], buf, from, at, spec["seed"] || 0), got = Number(carried);
+  if (v === got) return;
+  var msg = "Field '" + name + "': " + spec["algo"] + " over bytes " + from + " to " + (at - 1) + " is 0x" +
+    v.toString(16).toUpperCase() + ", but the frame carries 0x" + got.toString(16).toUpperCase() + " (PS-586)";
+  if (spec["on_mismatch"] === "warn") wn.push(msg); else throw new Error(msg);
 }
 
 function readU(buf, pos, size, endian) {
@@ -3951,6 +4312,15 @@ function writeS(buf, pos, size, value, endian) {
             self.indent -= 1
             lines.append(f'{i}  }}')
             return lines
+        from schema_interpreter import is_peeked_number
+        if is_peeked_number(field):
+            # PS-603 (CR-2026-182): a whole number declaring `consume: 0` is read as it
+            # would be, and the position put back, so the fields after it read it again.
+            uid = f'_pk{self._next_uid()}'
+            inner = dict(field)
+            del inner['consume']
+            return ([f'{self._i()}  var {uid} = pos;'] + self._gen_decode_field(inner)
+                    + [f'{self._i()}  pos = {uid};'])
         lines = []
         i = self._i()
         # PS-422, PS-426: `encoding` only on uN and only a named code; no `match_value`.
@@ -4434,9 +4804,35 @@ function writeS(buf, pos, size, value, endian) {
         # A string literal (spec "Literal Types"): a constant, read from no bytes.
         # `string` fell through to the integer path, which emitted a TODO and nothing,
         # so the key was silently missing from every generated codec.
+        if ftype == 'string' and 'template' in field and 'value' not in field:
+            # PS-590 to PS-592 (CR-2026-176): text joined from values decoded earlier,
+            # rendered by the runtime's tmplString; undefined where a reference has no value.
+            from schema_interpreter import STRING_TEMPLATE_RE
+            parts: List[Any] = []
+            template, last = str(field['template']), 0
+            for match in STRING_TEMPLATE_RE.finditer(template):
+                parts.append(template[last:match.start()])
+                if match.group(1) is None:
+                    parts.append('$')
+                else:
+                    parts.append({'js': to_js_name(match.group(1)), 'name': match.group(1),
+                                  'fmt': match.group(2)})
+                last = match.end()
+            parts.append(template[last:])
+            parts = [p for p in parts if p != '']
+            lines.append(f'{i}  var {js_name}_out = tmplString({json.dumps(parts)}, '
+                         f'{json.dumps(str(name))}, vars, lbl, wn);')
+            body = self._bind_js({k: v for k, v in field.items() if k != 'lookup'},
+                                 js_name, f'{js_name}_out')
+            if not name.startswith('_'):
+                guards, target = name_from_to_js(field, js_name)
+                body.extend(guards)
+                body.append(f'{target} = {js_name}_out;')
+            lines.append(f'{i}  if ({js_name}_out !== undefined) {{ ' + ' '.join(body) + ' }')
+            return lines
         if ftype == 'string' and 'value' not in field:
-            raise ValueError(f"Field '{name}': type string declares no value; a string read "
-                             f"from the payload is type ascii (PS-361)")
+            from schema_interpreter import string_neither_message
+            raise ValueError(string_neither_message(name))
         # A boolean literal likewise (PS-357, PS-519); its value is checked at load.
         if (ftype == 'string' and 'value' in field and not field.get('length')) or (
                 ftype == 'boolean' and 'value' in field):
@@ -4579,7 +4975,16 @@ function writeS(buf, pos, size, value, endian) {
             # `length: remaining` consumes to the end of the payload (PS-014); a name is a
             # preceding field (PS-464).
             lines.append(f'{i}  var {js_name} = "";')
-            lines.append(f'{i}  var {js_name}_n = {length_to_js(field)};')
+            if ftype == 'ascii' and field.get('terminator') is not None:
+                # PS-593 (CR-2026-177): the text runs to the first terminator byte; a
+                # payload that ends first is an underflow naming the field.
+                term = int(field['terminator'])
+                lines.append(
+                    f'{i}  var {js_name}_n = (function () {{ var _e = buf.indexOf({term}, pos); '
+                    f'if (_e < 0) throw underflow("no terminator byte 0x{term:02X} before the '
+                    f'end of the payload (PS-593)"); return _e - pos; }})();')
+            else:
+                lines.append(f'{i}  var {js_name}_n = {length_to_js(field)};')
             # A declared length the payload cannot supply is an error, as in every
             # interpreter; the loops below stopped at the end and reported what was left.
             lines.append(f'{i}  need(buf, pos, {js_name}_n);')
@@ -4599,9 +5004,17 @@ function writeS(buf, pos, size, value, endian) {
                 from schema_interpreter import ASCII_HIGH_BYTE_WARNING
                 warning = json.dumps(ASCII_HIGH_BYTE_WARNING.format(field.get('name')))
                 lines.append(f'{i}  if (/[\\u0080-\\u00ff]/.test({js_name})) wn.push({warning});')
-                lines.append(f'{i}  {js_name} = {js_name}.replace(/\\u0000+$/, "");')
+                nul = field.get('nul', 'trailing')              # PS-534 (CR-2026-177)
+                if nul == 'stop':
+                    lines.append(f'{i}  {js_name} = {js_name}.split("\\u0000")[0];')
+                elif nul == 'drop':
+                    lines.append(f'{i}  {js_name} = {js_name}.replace(/\\u0000/g, "");')
+                else:
+                    lines.append(f'{i}  {js_name} = {js_name}.replace(/\\u0000+$/, "");')
                 if echo:
                     lines.append(f'{i}  pos = {js_name}_p0;')
+                elif field.get('terminator') is not None:
+                    lines.append(f'{i}  pos += 1;')              # PS-593: consumed, not reported
                 if field.get('numeral'):
                     # PS-560: the whole text is a numeral of the declared base, or an error
                     # naming the field; parseInt alone would take a prefix.
@@ -4737,6 +5150,10 @@ function writeS(buf, pos, size, value, endian) {
             lines.append(f'{i}  pos += 4;')
         else:
             lines.append(f'{i}  var {js_name} = {read_fn}(buf, pos, {sz}, {endian_arg});')
+            if isinstance(field.get('checksum'), dict):
+                # PS-586 (CR-2026-174): verified against the bytes before it.
+                lines.append(f'{i}  checkChecksum(buf, pos, {js_name}, '
+                             f'{json.dumps(field["checksum"])}, {json.dumps(str(name))}, wn);')
             lines.append(f'{i}  pos += {sz};')
             if field.get('sentinel'):
                 # PS-427: the sentinel is the bit pattern, before any encoding.
@@ -5050,7 +5467,9 @@ function writeS(buf, pos, size, value, endian) {
         repeat_modes, repeat_last, _ = _tlv_repeat_modes(tlv)
         fold_modes = json.dumps({to_js_name(k): v for k, v in repeat_modes.items()
                                  if v != 'collect'}, sort_keys=True)
-        fold_last = json.dumps({to_js_name(k): {to_js_name(m): True for m in sorted(ms)}
+        # A `last` leaf's path, at any depth (CR-2026-173), as staged names joined by `.`.
+        fold_last = json.dumps({to_js_name(k): {'.'.join(to_js_name(m) for m in path): True
+                                                for path in sorted(ms)}
                                 for k, ms in repeat_last.items() if ms}, sort_keys=True)
         fold_id = self._tlv_fold_seq = getattr(self, '_tlv_fold_seq', 0) + 1
         if not separate:
@@ -5727,6 +6146,14 @@ function writeS(buf, pos, size, value, endian) {
                 lines.append('  }')
                 lines.append('}')
 
+        from schema_interpreter import has_semantic, normalize_plan
+        if has_semantic(self.schema):
+            # PS-598: a schema declaring `semantic` gets normalizeUplink(), which runs the
+            # reference's normalize_plan() over decodeUplink's data.
+            lines.append('')
+            lines.append('var NORMALIZE_PLAN = %s;' % json.dumps(normalize_plan(self.schema),
+                                                                ensure_ascii=False))
+            lines.append(NORMALIZE_RUNTIME_JS.strip('\n'))
         return self._restore_output_keys('\n'.join(lines))
 
     def _field_names(self) -> Set[str]:
