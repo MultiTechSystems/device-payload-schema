@@ -235,6 +235,14 @@ public class SchemaField
     /// <summary>The number <see cref="Index"/> counts from (PS-530), 0 by default.</summary>
     public int IndexBase { get; set; }
     /// <summary>
+    /// A packed repeat's element width in bits, 0 where it is not packed, and its element
+    /// type's width and signedness; BitOffset is where its first element starts (PS-621,
+    /// CR-2026-189).
+    /// </summary>
+    public int PackedBits { get; set; }
+    internal int PackedWidth { get; set; }
+    internal bool PackedSigned { get; set; }
+    /// <summary>
     /// A `records` entry (PS-541): field lists, each yielding one record that the enclosing
     /// repeat reports in place of its element. Null where the entry is not one.
     /// </summary>

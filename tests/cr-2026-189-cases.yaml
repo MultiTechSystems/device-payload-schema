@@ -1,0 +1,104 @@
+# CR-2026-189 (PS-621 to PS-623; PS-544 amended): a repeat of single values may pack its
+# elements end to end in `packed_bits` bits each, most significant bit first, starting
+# `bit_offset` bits into the byte at the read position. Each element is the element type's
+# integer, sign-extended where the type is signed, so its sentinel, modifiers and lookup
+# apply. With `byte_length`, the elements are as many as fit whole in
+# `byte_length * 8 - bit_offset` bits; afterwards the read position moves to the next byte,
+# or to the end of `byte_length` where that is further (PS-621, PS-622). An encoder inverts
+# each element's modifiers, rejects a value that does not fit, ORs the first byte into the
+# bits the fields before it left pending and pads the last with 0 (PS-623). A null element
+# is the first sentinel written as the raw integer, without inverting any modifier (PS-544).
+#
+# The cases are the spec prototype's TestCR2026189PackedRepeat (twelve: five tests and seven
+# load rejections), plus a `bool` with `bit_offset` (the prototype's "did you mean `bit`?"
+# hint) and the PS-544 sentinel through `mult` and inside a packed repeat. They are read by
+# the reference and the generated codec (tests/test_cr_2026_189_cases.py), Go
+# (go/schema/cr189_test.go), Java (CR2026189Test.java) and C# (CR2026_189Tests.cs). C has no
+# repeat; tools/schema_binary.py refuses both keys by name (PS-446).
+#
+#   decode: `schema` (YAML text), `payload` (hex) and `expected` (JSON text, the whole data).
+#   cases:  `schema`, `input` (JSON text) and either `payload` (hex) or `error`.
+#   load:   `schema` and `error`, the prototype's text.
+
+decode:
+
+- name: the_nexelec_history
+  schema: "name: t\nversion: 1\nfields:\n  - {name: _hdr, type: u16}\n  - {name: _count, type: 'u8[2:7]'}\n  - {name: _repetition, type: 'u24[4:9]', consume: 2}\n  - {name: co2_history, type: repeat, count: $_count, packed_bits: 10, bit_offset: 4, element: {type: u16, sentinel: [0x3FF], mult: 5}}\n"
+  payload: "00000c005143ff0040"
+  expected: '{"co2_history": [400, null, 5]}'
+
+- name: signed_elements_and_byte_length
+  schema: "name: t\nversion: 1\nfields:\n  - {name: v, type: repeat, byte_length: 2, packed_bits: 5, element: {type: s8}}\n"
+  payload: "f840"
+  expected: '{"v": [-1, 1, 0]}'
+
+- name: the_read_position_moves_to_the_next_byte
+  schema: "name: t\nversion: 1\nfields:\n  - {name: v, type: repeat, count: 3, packed_bits: 3, element: {type: u8}}\n  - {name: after, type: u8}\n"
+  payload: "29c007"
+  expected: '{"v": [1, 2, 3], "after": 7}'
+
+cases:
+
+- name: the_nexelec_history
+  schema: "name: t\nversion: 1\nfields:\n  - {name: _hdr, type: u16}\n  - {name: _count, type: 'u8[2:7]'}\n  - {name: _repetition, type: 'u24[4:9]', consume: 2}\n  - {name: co2_history, type: repeat, count: $_count, packed_bits: 10, bit_offset: 4, element: {type: u16, sentinel: [0x3FF], mult: 5}}\n"
+  input: '{"_hdr": 0, "_count": 3, "_repetition": 5, "co2_history": [400, null, 5]}'
+  payload: "00000c005143ff0040"
+
+- name: signed_elements_and_byte_length
+  schema: "name: t\nversion: 1\nfields:\n  - {name: v, type: repeat, byte_length: 2, packed_bits: 5, element: {type: s8}}\n"
+  input: '{"v": [-1, 1, 0]}'
+  payload: "f840"
+
+- name: a_value_that_does_not_fit_is_rejected
+  schema: "name: t\nversion: 1\nfields:\n  - {name: n, type: u8}\n  - {name: v, type: repeat, count: $n, packed_bits: 4, element: {type: u8}}\n"
+  input: '{"n": 1, "v": [16]}'
+  error: "Repeat 'v': element 0 is 16, which does not fit in 4 bits (PS-623)"
+
+- name: a_null_element_writes_the_raw_sentinel
+  schema: "name: t\nversion: 1\nfields:\n  - {name: n, type: u8}\n  - {name: v, type: repeat, count: $n, element: {type: u16, sentinel: [0xFFFF], div: 10}}\n"
+  input: '{"n": 2, "v": [1.5, null]}'
+  payload: "02000fffff"
+
+- name: a_null_element_writes_the_raw_sentinel_through_mult
+  schema: "name: t\nversion: 1\nfields:\n  - {name: n, type: u8}\n  - {name: v, type: repeat, count: $n, element: {type: u16, sentinel: [0x3FF], mult: 5}}\n"
+  input: '{"n": 2, "v": [5, null]}'
+  payload: "02000103ff"
+
+- name: a_null_packed_element_writes_the_raw_sentinel
+  schema: "name: t\nversion: 1\nfields:\n  - {name: v, type: repeat, count: 2, packed_bits: 12, element: {type: u16, sentinel: [0xFFF], div: 10}}\n"
+  input: '{"v": [1.5, null]}'
+  payload: "00ffff"
+
+load:
+
+- name: packed_bits_zero
+  schema: "name: t\nversion: 1\nfields:\n  - {name: v, type: repeat, count: 2, packed_bits: 0, element: {type: u8}}\n"
+  error: "Repeat 'v': packed_bits is an integer from 1 to 32 (PS-621)"
+
+- name: packed_bits_wider_than_the_element
+  schema: "name: t\nversion: 1\nfields:\n  - {name: v, type: repeat, count: 2, packed_bits: 9, element: {type: u8}}\n"
+  error: "Repeat 'v': a packed element is one field of an integer type at least 9 bits wide (PS-621)"
+
+- name: bit_offset_eight
+  schema: "name: t\nversion: 1\nfields:\n  - {name: v, type: repeat, count: 2, packed_bits: 4, bit_offset: 8, element: {type: u8}}\n"
+  error: "Repeat 'v': bit_offset is an integer from 0 to 7 (PS-621)"
+
+- name: no_count_or_byte_length
+  schema: "name: t\nversion: 1\nfields:\n  - {name: v, type: repeat, until: end, packed_bits: 4, element: {type: u8}}\n"
+  error: "Repeat 'v': a packed repeat declares count or byte_length (PS-621)"
+
+- name: fields_in_place_of_element
+  schema: "name: t\nversion: 1\nfields:\n  - {name: v, type: repeat, count: 2, packed_bits: 4, fields: [{name: a, type: u8}]}\n"
+  error: "Repeat 'v': a packed element is one field of an integer type at least 4 bits wide (PS-621)"
+
+- name: a_float_element
+  schema: "name: t\nversion: 1\nfields:\n  - {name: v, type: repeat, count: 2, packed_bits: 4, element: {type: f32}}\n"
+  error: "Repeat 'v': a packed element is one field of an integer type at least 4 bits wide (PS-621)"
+
+- name: bit_offset_on_another_field
+  schema: "name: t\nversion: 1\nfields:\n  - {name: b, type: u8, bit_offset: 2}\n"
+  error: "Field 'b': packed_bits and bit_offset belong to a repeat with `element` (PS-621)"
+
+- name: bit_offset_on_a_bool
+  schema: "name: t\nversion: 1\nfields:\n  - {name: b, type: bool, bit_offset: 2}\n"
+  error: "Field 'b': packed_bits and bit_offset belong to a repeat with `element` (PS-621); did you mean `bit`?"

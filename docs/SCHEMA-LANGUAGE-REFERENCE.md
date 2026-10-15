@@ -922,13 +922,42 @@ leading `_` hides nothing: the value is still reported, and `$_x` still reads it
 The element is one data field: it declares `type` and is not a `match`, `byte_group`,
 `flagged`, `tlv` or `records` entry, which is rejected at load; a `type: object` element
 reports one object per position. An encoder takes the array of values back (PS-529) and
-writes the element's first `sentinel` for a `null` position; with no sentinel it reports
-an error naming the repeat and the position (PS-544).
+writes the element's first `sentinel` for a `null` position, as the raw integer the field
+reads, without inverting any modifier (a `div: 10` element with `sentinel: [0xFFFF]`
+writes `FFFF`); with no sentinel it reports an error naming the repeat and the position
+(PS-544).
 
 ```yaml
 - {name: probes, type: repeat, count: 3, element: {type: u16, sentinel: [0xFFFF]}}
 # 0001 FFFF 0003  ->  {"probes": [1, null, 3]}  ->  encodes back to 0001 FFFF 0003
 ```
+
+### Values packed in bits (`packed_bits`, `bit_offset`)
+
+```yaml
+- {name: _count, type: "u8[2:7]"}
+- {name: _repetition, type: "u24[4:9]", consume: 2}
+- name: co2_history
+  type: repeat
+  count: $_count
+  packed_bits: 10                   # each element is the next 10 bits (PS-621)
+  bit_offset: 4                     # the first starts 4 bits into the byte
+  element: {type: u16, sentinel: [0x3FF], mult: 5}
+# 0000 0C 00 5143FF0040  ->  {"co2_history": [400, null, 5]}
+```
+
+A repeat with `element` may pack its elements end to end: one bit stream, most significant
+bit first, the first element starting `bit_offset` bits (0 to 7, default 0) into the byte at
+the read position. Each element is the next `packed_bits` bits (1 to 32), read unsigned or,
+for a signed element type, sign-extended, and then decoded as the element type's integer, so
+its `sentinel`, modifiers and `lookup` apply. The element is an integer type at least
+`packed_bits` wide, and the repeat declares `count` or `byte_length`; with `byte_length` the
+elements are as many as fit whole in `byte_length x 8 - bit_offset` bits. Afterwards the read
+position moves to the next byte, or to the end of `byte_length` where that is further
+(PS-622). The bits before `bit_offset` belong to the fields before the repeat, read as bit
+ranges that consume nothing. Either key anywhere else is rejected at load. An encoder writes
+each element through its modifiers inverted, rejects one that does not fit in `packed_bits`,
+ORs the first byte into the bits the fields before it left, and pads with 0 bits (PS-623).
 
 ### Several records from one element (`records`)
 

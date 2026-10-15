@@ -223,6 +223,9 @@ C_UNSUPPORTED_KEYS = {
     "index_base": "this format has no repeat record (PS-530)",
     # CR-2026-156: a repeat's sample interval (PS-567).
     "sampled": "this format has no repeat record (PS-567)",
+    # CR-2026-189: a repeat's elements packed in bits (PS-621 to PS-623).
+    "packed_bits": "this format has no repeat record (PS-621)",
+    "bit_offset": "this format has no repeat record (PS-621)",
     # CR-2026-118: several records from one repeat element (PS-541).
     "records": "this format has no repeat record (PS-541)",
     "fields": "this format has no nested object record",
