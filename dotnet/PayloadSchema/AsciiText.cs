@@ -39,12 +39,28 @@ internal static class AsciiText
     }
 
     /// <summary>PS-593: the number of text bytes before the terminator, or an underflow naming the field.</summary>
-    internal static int TerminatedSpan(SchemaField field, DecodeContext ctx)
+    /// <remarks>PS-619 (CR-2026-188): returns the text's length and the terminator bytes
+    /// consumed, 0 with <c>consume_terminator: false</c> or where the end of the data
+    /// (cut at a reserve or a tlv entry's end) ended an <c>end_terminates</c> text.</remarks>
+    internal static (int Span, int Consumed) TerminatedSpan(SchemaField field, DecodeContext ctx)
     {
         for (int i = ctx.Offset; i < ctx.Data.Length; i++)
-            if (ctx.Data[i] == field.Terminator) return i - ctx.Offset;
+            if (ctx.Data[i] == field.Terminator) return (i - ctx.Offset, field.KeepTerminator ? 0 : 1);
+        if (field.EndTerminates) return (Math.Max(ctx.Data.Length - ctx.Offset, 0), 0);
         throw BufferUnderflowException.Text(
             $"no terminator byte 0x{field.Terminator:X2} before the end of the payload (PS-593)");
+    }
+
+    /// <summary>A plain scalar YAML 1.2's core schema reads as a boolean, else null.</summary>
+    internal static bool? BooleanOf(YamlNode node)
+    {
+        if (node is not YamlScalarNode { Style: ScalarStyle.Plain } s) return null;
+        return s.Value switch
+        {
+            "true" or "True" or "TRUE" => true,
+            "false" or "False" or "FALSE" => false,
+            _ => null,
+        };
     }
 
     static string PyRepr(YamlNode node)
@@ -93,6 +109,19 @@ internal static class AsciiText
                     throw new InvalidOperationException($"Field '{name}': an ascii field declares length "
                         + "or terminator, not both (PS-593)");
             }
+        }
+        // PS-619 (CR-2026-188): both keys need a terminator and are true or false.
+        bool hasConsume = fm.Children.TryGetValue(new YamlScalarNode("consume_terminator"), out var consume);
+        bool hasEnd = fm.Children.TryGetValue(new YamlScalarNode("end_terminates"), out var endT);
+        if (hasConsume || hasEnd)
+        {
+            if (!hasTerm)
+                throw new InvalidOperationException($"Field '{name}': consume_terminator and "
+                    + "end_terminates belong to a field with a terminator (PS-619)");
+            if (hasConsume && BooleanOf(consume!) is null)
+                throw new InvalidOperationException($"Field '{name}': consume_terminator is true or false (PS-619)");
+            if (hasEnd && BooleanOf(endT!) is null)
+                throw new InvalidOperationException($"Field '{name}': end_terminates is true or false (PS-619)");
         }
         if (isAscii && !fm.Children.ContainsKey(new YamlScalarNode("length")) && !hasTerm)
             throw new InvalidOperationException($"Field '{name}': ascii type requires 'length' field, "

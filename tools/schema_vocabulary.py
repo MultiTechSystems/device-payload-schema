@@ -133,6 +133,8 @@ VOCABULARY: Dict[str, Dict[str, Tuple[Tuple[str, ...], str]]] = {
         "index": (_DECODERS, "a repeat element's position, from index_base (PS-366)"),
         "index_base": (_DECODERS, "the number a repeat's index starts at (PS-530)"),
         "element": (_DECODERS, "a repeat's one field, reported as an array of values (PS-528)"),
+        "packed_bits": (_DECODERS + ("binary",), "a repeat's elements packed end to end in this many bits each (PS-621)"),
+        "bit_offset": (_DECODERS + ("binary",), "where a packed repeat's first element starts in its first byte (PS-621, PS-622)"),
         "count_as": (_DECODERS, "the number of elements a repeat reports (PS-367)"),
         "present_if": (_DECODERS, "drops an element whose condition is false (PS-386)"),
         "carry": (_DECODERS, "a computed field's value from the previous element (PS-378)"),
@@ -167,7 +169,13 @@ VOCABULARY: Dict[str, Dict[str, Tuple[Tuple[str, ...], str]]] = {
         "numeral": (_DECODERS, "decimal | hex: an ascii field reported as the integer its digits give (PS-560)"),
         "nul": (_DECODERS, "trailing | stop | drop: how an ascii field treats its 0x00 bytes (PS-534)"),
         "terminator": (_DECODERS, "a byte 0 to 255 that ends a variable-length ascii field, in place of length (PS-593)"),
+        "consume_terminator": (_DECODERS, "with terminator: false leaves the terminator unread for the next field (PS-619, PS-620)"),
+        "end_terminates": (_DECODERS, "with terminator: true lets the end of the data end the text too (PS-619)"),
         "checksum": (_DECODERS, "a check value over earlier bytes, verified on decode and computed on encode (PS-585)"),
+        "bit_labels": (_DECODERS, "{bit: label} on an unsigned integer or bit range: the labels of its set bits, a list or joined text (PS-616 to PS-618)"),
+        "join": (_DECODERS, "with bit_labels: the text between labels; the field reports one string (PS-616, PS-617)"),
+        "none": (_DECODERS, "with bit_labels: the label reported where no listed bit is set (PS-616)"),
+        "order": (_DECODERS, "with bit_labels: ascending | descending bit order of the labels (PS-616)"),
         "template": (_DECODERS, "text joined from earlier values on a type: string field, ${name} or ${name:format} (PS-590)"),
         "time": (_DECODERS, "report a numeric field as an instant: unix, iso8601, calendar or pattern (PS-610)"),
         "valid_range": (("py", "go", "cs", "outschema"), "quality flag (_quality)"),
@@ -411,9 +419,6 @@ HINTS: Dict[Tuple[str, str], str] = {
     ("field", "enum_values"): "an enum's labels are `values:`",
     ("field", "labels"): "a label table is `lookup:` (or `values:` on an enum)",
     ("field", "bits"): "a bit range is spelled in the type: `type: u8[5:7]`",
-    ("field", "bit_offset"): (
-        "the bit range is spelled in the type (`u8[5:7]`); `bit_offset:` was never read"
-    ),
     ("field", "signed"): "signedness is in the type: `s16`, not `u16` + `signed:`",
     ("vector", "hex"): "the vector's bytes are `payload:`",
     ("schema", "header"): "declare header fields in `definitions` and use `$ref`",
@@ -423,7 +428,7 @@ HINTS: Dict[Tuple[str, str], str] = {
 
 #: Mappings whose keys are data, not vocabulary: their values are walked, their keys
 #: are not recorded.
-DATA_MAPPINGS = frozenset({"lookup", "enum", "values"})
+DATA_MAPPINGS = frozenset({"lookup", "enum", "values", "bit_labels"})
 #: Lists or scalars-in-lists that carry no keys of their own.
 OPAQUE = frozenset({"parts", "valid_range", "polynomial"})
 

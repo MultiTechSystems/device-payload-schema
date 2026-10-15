@@ -12,7 +12,7 @@ import java.util.Map;
 import java.util.Set;
 
 public class DecodeContext {
-    private final byte[] data;
+    private byte[] data;
     private int offset;
     private String endian;
     private final Map<String, Object> variables;
@@ -112,6 +112,13 @@ public class DecodeContext {
 
     /** The end of the readable region: the payload's length unless a reserve narrows it. */
     public int getLimit() { return limit; }
+
+    /** Decode from {@code data} instead, its whole length readable: a packed repeat's
+     * element, laid out as its type's bytes (CR-2026-189). Restored by the caller. */
+    void setData(byte[] data, int limit) {
+        this.data = data;
+        this.limit = limit;
+    }
     public void setLimit(int limit) { this.limit = limit; }
 
     void setRepeatOnlyNames(Set<String> names) { this.repeatOnlyNames = names == null ? Set.of() : names; }

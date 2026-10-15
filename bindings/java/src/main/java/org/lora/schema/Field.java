@@ -45,6 +45,14 @@ public class Field {
     private Integer terminator;
     public Integer getTerminator() { return terminator; }
     public void setTerminator(Integer terminator) { this.terminator = terminator; }
+    /** {@code consume_terminator: false} leaves the terminator unread and unwritten (PS-619, PS-620). */
+    private boolean keepTerminator;
+    public boolean isKeepTerminator() { return keepTerminator; }
+    public void setKeepTerminator(boolean keep) { this.keepTerminator = keep; }
+    /** {@code end_terminates: true}: the end of the data ends the text too (PS-619). */
+    private boolean endTerminates;
+    public boolean isEndTerminates() { return endTerminates; }
+    public void setEndTerminates(boolean end) { this.endTerminates = end; }
     /** A {@code checksum} declaration and the type it sits on (PS-585, CR-2026-174). */
     private Map<String, Object> checksum;
     private String checksumType;
@@ -330,6 +338,23 @@ public class Field {
 
     public String getElementName() { return elementName; }
     public void setElementName(String elementName) { this.elementName = elementName; }
+
+    /**
+     * A packed repeat's element width in bits, 0 where it is not packed, and its element
+     * type's width and signedness (PS-621, CR-2026-189); its bit offset is getBitOffset().
+     */
+    private int packedBits;
+    private int packedWidth;
+    private boolean packedSigned;
+
+    public int getPackedBits() { return packedBits; }
+    public int getPackedWidth() { return packedWidth; }
+    public boolean isPackedSigned() { return packedSigned; }
+    public void setPacked(int bits, int width, boolean signed) {
+        this.packedBits = bits;
+        this.packedWidth = width;
+        this.packedSigned = signed;
+    }
 
     public long getIndexBase() { return indexBase; }
     public void setIndexBase(long indexBase) { this.indexBase = indexBase; }

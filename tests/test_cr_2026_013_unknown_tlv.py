@@ -58,7 +58,7 @@ def decode_js(mode=None, length_size=0, payload=TAG_ONLY_PAYLOAD):
         + f"\nvar r = decodeUplink({{bytes: {json.dumps(octets)}, fPort: 1}});"
         + "\nconsole.log(JSON.stringify(r));"
     )
-    out = subprocess.run(["node", "-e", driver], capture_output=True, text=True, timeout=60)
+    out = subprocess.run(["node"], input=driver, capture_output=True, text=True, timeout=60)
     assert out.returncode == 0, out.stderr
     return json.loads(out.stdout)
 

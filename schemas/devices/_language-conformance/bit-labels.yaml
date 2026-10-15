@@ -1,0 +1,100 @@
+# PS-616 to PS-618 (CR-2026-187): an unsigned integer or unsigned bit range declaring
+# `bit_labels` reports the labels of its set bits - a list, or one text where `join` is
+# declared - in ascending bit order unless `order: descending`; `none` is the label where no
+# listed bit is set. An encoder writes the bits of the labels it is given, so every vector but
+# the last re-encodes to its payload. The last sets a bit with no label: it is not reported,
+# a warning names it (PS-617), and the bit cannot be written back. One port per case; a byte
+# after the range on port 1 proves the read moved by exactly its two bytes.
+name: probe_bit_labels
+endian: big
+ports:
+  1:
+    fields:
+    - name: alarms
+      type: "u16[4:11]"
+      consume: 2
+      bit_labels: {0: low_battery, 3: tamper, 5: leak}
+    - name: after
+      type: u8
+  2:
+    fields:
+    - name: options
+      type: u8
+      bit_labels: {0: sensor, 2: led, 3: buzzer}
+      none: None
+  3:
+    fields:
+    - name: inputs
+      type: u8
+      bit_labels: {0: a, 1: b, 7: h}
+      order: descending
+  4:
+    fields:
+    - name: sensor_type
+      type: u8
+      bit_labels: {0: T/H, 1: CO2, 2: PMx, 3: Gas1, 4: Gas2, 5: Light, 6: Noise, 7: Pressure}
+      join: ","
+  5:
+    fields:
+    - name: status
+      type: u16
+      bit_labels: {0: "Bit0 ", 3: "Bit3 ", 9: "Bit9 "}
+      join: ""
+      none: "None "
+  6:
+    fields:
+    - name: modes
+      type: u8
+      bit_labels: {0: eco}
+test_vectors:
+- name: list_of_a_range
+  source: generated
+  fPort: 1
+  payload: "0090 07"
+  expected:
+    alarms: [low_battery, tamper]
+    after: 7
+- name: list_ascending
+  source: generated
+  fPort: 2
+  payload: "05"
+  expected:
+    options: [sensor, led]
+- name: none_label
+  source: generated
+  fPort: 2
+  payload: "00"
+  expected:
+    options: [None]
+- name: list_descending
+  source: generated
+  fPort: 3
+  payload: "83"
+  expected:
+    inputs: [h, b, a]
+- name: joined_text
+  source: generated
+  fPort: 4
+  payload: "0F"
+  expected:
+    sensor_type: "T/H,CO2,PMx,Gas1"
+- name: empty_join
+  source: generated
+  fPort: 5
+  payload: "0209"
+  expected:
+    status: "Bit0 Bit3 Bit9 "
+- name: empty_join_none
+  source: generated
+  fPort: 5
+  payload: "0000"
+  expected:
+    status: "None "
+- name: unlabelled_bit_warns
+  source: generated
+  fPort: 6
+  payload: "05"
+  expected:
+    modes: [eco]
+  expected_warnings:
+    - ["Field 'modes'", "bit 2", "PS-617"]

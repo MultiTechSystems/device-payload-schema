@@ -314,7 +314,18 @@ public static class SchemaDecoder
                         ctx.Produced(field, outputName);                      // PS-492
                     // PS-610 (CR-2026-186): reported as an instant in its format; a
                     // reference still binds the number.
-                    result[outputName] = field.Time != null ? TimeFields.Format(field, value) : value;
+                    try
+                    {
+                        result[outputName] = field.Time != null ? TimeFields.Format(field, value) : value;
+                    }
+                    catch (TimeOmittedException outside)
+                    {
+                        // PS-610 (amended 2026-10-15): no instant to report, so the field is
+                        // omitted with a warning; a reference still binds the number.
+                        ctx.Warnings.Add(outside.Message);
+                        ctx.Bind(field, field.Name, value);
+                        continue;
+                    }
                 }
                 // Keyed by the schema-level name in Variables so $references keep
                 // working when name_from is in play (PS-267). A looked-up field binds
@@ -654,11 +665,13 @@ public static class SchemaDecoder
 
             case FieldType.Ascii:
             {
-                if (field.Terminator != null) length = AsciiText.TerminatedSpan(field, ctx);   // PS-593
+                int consumed = 0;
+                if (field.Terminator != null)                                   // PS-593, PS-619
+                    (length, consumed) = AsciiText.TerminatedSpan(field, ctx);
                 int start = ctx.Offset;
                 var data = ctx.Read(length);
                 if (field.IsEcho) ctx.Offset = start;              // PS-588 (CR-2026-175)
-                else if (field.Terminator != null) ctx.Offset++;   // consumed, not reported
+                else ctx.Offset += consumed;                       // consumed, not reported, or left
                 value = Helpers.DecodeAscii(field.Name, data, ctx.Warnings, field.Nul);
                 if (field.Numeral != null)
                     value = Numeral.Decode(field.Name, (string)value, field.Numeral);   // PS-560
@@ -988,6 +1001,14 @@ public static class SchemaDecoder
         // An enum binds its code under its name (CR-2026-132).
         if (field.Type == FieldType.Enum && ctx.EnumCodes.Remove(field, out var code))
             ctx.LookupBinding[field] = DecodeContext.IsNumericLabel(value) ? value : code;
+
+        // PS-616 (CR-2026-187): the labels of the set bits; a reference binds the number
+        // (PS-523), as for a lookup.
+        if (!asDeclared && BitLabels.Declared(field) && BitLabels.Number(value) is System.Numerics.BigInteger bits)
+        {
+            ctx.LookupBinding[field] = value;
+            value = BitLabels.Decode(field, bits, ctx);
+        }
 
         // Store variable: PS-523's binding, keeping the label for templates (PS-532).
         if (field.Var != null)
@@ -1722,7 +1743,14 @@ public static class SchemaDecoder
                 var caseFields = field.TLVCases[caseKey];
                 Dictionary<string, object?> caseResult;
                 var pushed = ctx.Trace?.Push(field.Anchor, "tlv", entryIndex) ?? false;
-                try { caseResult = DecodeFields(caseFields, ctx, null); }
+                // PS-486, PS-619: an entry with a length is decoded within it, so the end of
+                // the entry is the end of the data for its value.
+                try
+                {
+                    caseResult = dataLength >= 0
+                        ? ctx.WithRegion(ctx.Offset + dataLength, () => DecodeFields(caseFields, ctx, null))
+                        : DecodeFields(caseFields, ctx, null);
+                }
                 finally { ctx.Trace?.Pop(pushed); }
 
                 if (merge)
@@ -2070,6 +2098,43 @@ public static class SchemaDecoder
                 result.Add(field.ElementName == null ? element : ElementValue(element));
         }
 
+        // PS-621, PS-622 (CR-2026-189): a packed repeat's elements, each the next
+        // `packed_bits` bits, most significant first from the bit offset, sign-extended where
+        // the element's type is signed (PS-353), laid out as its type's bytes, big-endian, and
+        // decoded from those, so its sentinel, modifiers and lookup apply as to any element.
+        // The read position then moves to the next byte, or to the end of byte_length where
+        // that is further.
+        void Packed(int count, int byteLength)
+        {
+            int bits = field.PackedBits, offset = field.BitOffset;
+            int span = Math.Max((offset + count * bits + 7) / 8, byteLength);
+            int at = ctx.Offset;
+            var data = ctx.Data;
+            if (at + span > data.Length)
+                throw BufferUnderflowException.Need(span, at, data.Length).Name(field.Name, "repeat");
+            int width = field.PackedWidth / 8;
+            try
+            {
+                for (int i = 0; i < count; i++)
+                {
+                    long raw = 0;
+                    for (int b = offset + i * bits; b < offset + (i + 1) * bits; b++)
+                        raw = (raw << 1) | (long)((data[at + (b >> 3)] >> (7 - (b & 7))) & 1);
+                    if (field.PackedSigned && raw >= (1L << (bits - 1))) raw -= 1L << bits;
+                    var element = new byte[width];
+                    for (int k = width - 1; k >= 0; k--) { element[k] = (byte)raw; raw >>= 8; }
+                    ctx.Data = element;
+                    ctx.Offset = 0;
+                    Element();
+                }
+            }
+            finally
+            {
+                ctx.Data = data;
+                ctx.Offset = at + span;
+            }
+        }
+
         if (field.Count != null)
         {
             int count;
@@ -2091,8 +2156,11 @@ public static class SchemaDecoder
             // clamp had discarded.
             if (count > maxIterations)
                 throw RepeatLimitError(field, maxIterations, $"count {count}", ctx.Offset, ctx.Data.Length);
-            for (int i = 0; i < count; i++)
-                Element();
+            if (field.PackedBits > 0)
+                Packed(count, 0);                    // PS-621, PS-622 (CR-2026-189)
+            else
+                for (int i = 0; i < count; i++)
+                    Element();
         }
         else if (field.ByteLength != null)
         {
@@ -2111,6 +2179,15 @@ public static class SchemaDecoder
             else byteLength = 0;
 
             int endOffset = ctx.Offset + byteLength;
+            if (field.PackedBits > 0)
+            {
+                // PS-621: as many elements as fit whole after the bit offset (CR-2026-189).
+                int count = Math.Max(byteLength * 8 - field.BitOffset, 0) / field.PackedBits;
+                if (count > maxIterations)
+                    throw RepeatLimitError(field, maxIterations, $"count {count}", ctx.Offset, ctx.Data.Length);
+                Packed(count, byteLength);
+                endOffset = ctx.Offset;
+            }
             while (ctx.Offset < endOffset && iterations < maxIterations)
                 Element();
 

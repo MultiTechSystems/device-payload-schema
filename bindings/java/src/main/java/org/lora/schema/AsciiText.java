@@ -32,15 +32,21 @@ final class AsciiText {
     }
 
     /**
-     * PS-593: the number of text bytes before the field's terminator. A payload that ends
-     * before one is an underflow, which the field names (PS-535).
+     * PS-593, PS-619: the number of text bytes before the field's terminator, and the number
+     * of terminator bytes the field consumes (0 with {@code consume_terminator: false}, or
+     * where the end of the data ended the text). A payload that ends before one is an
+     * underflow, which the field names (PS-535), unless the field declares
+     * {@code end_terminates: true}; the region ends at a reserve or a tlv entry's end.
      */
-    static int terminatedSpan(Field field, DecodeContext ctx) {
+    static int[] terminatedSpan(Field field, DecodeContext ctx) {
         byte[] data = ctx.getData();
         int end = ctx.getOffset() + ctx.remaining();
         for (int i = ctx.getOffset(); i < end; i++) {
-            if ((data[i] & 0xFF) == field.getTerminator()) return i - ctx.getOffset();
+            if ((data[i] & 0xFF) == field.getTerminator()) {
+                return new int[] {i - ctx.getOffset(), field.isKeepTerminator() ? 0 : 1};
+            }
         }
+        if (field.isEndTerminates()) return new int[] {Math.max(ctx.remaining(), 0), 0};
         throw new SchemaException.BufferUnderflow(String.format(
                 "no terminator byte 0x%02X before the end of the payload (PS-593)", field.getTerminator()));
     }
@@ -82,6 +88,19 @@ final class AsciiText {
                 if (fm.containsKey("length")) {
                     throw new SchemaException("Field '" + shown + "': an ascii field declares "
                             + "length or terminator, not both (PS-593)");
+                }
+            }
+        }
+        // PS-619 (CR-2026-188): both keys need a terminator and are true or false.
+        if (fm.containsKey("consume_terminator") || fm.containsKey("end_terminates")) {
+            if (!hasTerm) {
+                throw new SchemaException("Field '" + shown + "': consume_terminator and "
+                        + "end_terminates belong to a field with a terminator (PS-619)");
+            }
+            for (String key : new String[] {"consume_terminator", "end_terminates"}) {
+                if (fm.containsKey(key) && !(fm.get(key) instanceof Boolean)) {
+                    throw new SchemaException("Field '" + shown + "': " + key
+                            + " is true or false (PS-619)");
                 }
             }
         }

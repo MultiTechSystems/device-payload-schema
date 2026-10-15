@@ -59,7 +59,7 @@ def decode_js(declared, payload_hex, endian="big"):
         + f"\nvar _r = decodeUplink({{ bytes: {json.dumps(octets)}, fPort: 1 }});"
         + "\nconsole.log(JSON.stringify(_r.data));"
     )
-    out = subprocess.run(["node", "-e", driver], capture_output=True, text=True, timeout=60)
+    out = subprocess.run(["node"], input=driver, capture_output=True, text=True, timeout=60)
     assert out.returncode == 0, out.stderr
     return json.loads(out.stdout)
 
@@ -161,7 +161,7 @@ class TestGeneratedCodec:
             + "\nvar d = decodeUplink({bytes: e.bytes, fPort: 1});"
             + "\nconsole.log(JSON.stringify({bytes: e.bytes, back: d.data.v}));"
         )
-        out = subprocess.run(["node", "-e", driver], capture_output=True, text=True, timeout=60)
+        out = subprocess.run(["node"], input=driver, capture_output=True, text=True, timeout=60)
         assert out.returncode == 0, out.stderr
         result = json.loads(out.stdout)
         assert bytes(result["bytes"]).hex().upper() == EXAMPLE_BYTES

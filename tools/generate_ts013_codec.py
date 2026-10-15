@@ -120,8 +120,9 @@ function timeEpoch(spec, key) { return key in spec ? timeParse3339(spec[key], tr
 function pad2(n) { return (n < 10 ? "0" : "") + n; }
 function pad4(n) { var t = String(n); while (t.length < 4) t = "0" + t; return t; }
 /* PS-610 to PS-613: the instant `v` seconds after the field's epoch, in its format. A value
- * that is no number (absent) passes through. */
-function timeOut(spec, v, name) {
+ * that is no number (absent) passes through. An instant outside the years 1 to 9999 is
+ * omitted (undefined) with a warning pushed to `wn` (PS-610, amended 2026-10-15). */
+function timeOut(spec, v, name, wn) {
   if (typeof v !== "number" || !isFinite(v)) return v;
   var t = tdAdd(timeEpoch(spec, "epoch"), tdText(String(v)));
   if (spec.format === "unix") {
@@ -131,7 +132,10 @@ function timeOut(spec, v, name) {
   }
   var days = Math.floor(t.w / 86400), rest = t.w - days * 86400;
   var ymd = timeCivilFromDays(days), y = ymd[0], mo = ymd[1], d = ymd[2];
-  if (y < 1 || y > 9999) throw new Error("Field '" + name + "': the time " + tdText10(t) + " s is outside years 1 to 9999 (PS-610)");
+  if (y < 1 || y > 9999) {
+    wn.push("Field '" + name + "': the time " + tdText10(t) + " s is outside years 1 to 9999; the field is omitted (PS-610)");
+    return undefined;
+  }
   var h = Math.floor(rest / 3600), mi = Math.floor(rest / 60) % 60, s = rest % 60;
   if (spec.format === "iso8601") {
     var text = pad4(y) + "-" + pad2(mo) + "-" + pad2(d) + "T" + pad2(h) + ":" + pad2(mi) + ":" + pad2(s);
@@ -151,21 +155,27 @@ function timeOut(spec, v, name) {
   return spec.pattern.replace(/%([\s\S])/g, function (_, k) { return out[k]; });
 }
 /* PS-614: the seconds since 1970 of the instant the parts name, or undefined where one has
- * no value. `refs` maps each declared part to its variable. */
-function timeParts(refs, vars, name) {
+ * no value. `refs` maps each declared part to its variable. A part that is not whole, or
+ * parts naming no valid date, give undefined with a warning pushed to `wn` (amended
+ * 2026-10-15). */
+function timeParts(refs, vars, name, wn) {
   var got = {}, shown = [];
   for (var k = 0; k < TIME_PARTS.length; k++) {
     var p = TIME_PARTS[k];
     if (!(p in refs)) continue;
     var v = vars[refs[p]];
     if (typeof v !== "number" || !isFinite(v)) return undefined;
-    if (Math.floor(v) !== v) throw new Error("Field '" + name + "': its " + p + " is " + String(v) + ", not a whole number (PS-614)");
+    if (Math.floor(v) !== v) {
+      wn.push("Field '" + name + "': its " + p + " is " + String(v) + ", not a whole number; the field is omitted (PS-614)");
+      return undefined;
+    }
     got[p] = v;
     shown.push("'" + p + "': " + v);
   }
   var a = TIME_PARTS.map(function (p) { return got[p] || 0; });
   if (!timeValidCivil(a[0], a[1], a[2], a[3], a[4], a[5])) {
-    throw new Error("Field '" + name + "': its parts {" + shown.join(", ") + "} do not name a valid UTC date and time (PS-614)");
+    wn.push("Field '" + name + "': its parts {" + shown.join(", ") + "} do not name a valid UTC date and time; the field is omitted (PS-614)");
+    return undefined;
   }
   return timeCivilSeconds(a[0], a[1], a[2], a[3], a[4], a[5]);
 }
@@ -404,10 +414,65 @@ function encFits(raw, bits, signed, f, given, rangeType) {   // check_fits
   return raw;
 }
 
+/* encode_bit_labels (PS-618, CR-2026-187): the number with the bits of the given labels set,
+ * every other bit 0; a list, or the joined text where `join` is declared. */
+function encBitLabels(f, v) {
+  var byLabel = {}, labels = [], items, i, k;
+  for (k in f.bit_labels) {
+    if (Object.prototype.hasOwnProperty.call(f.bit_labels, k)) {
+      byLabel["$" + f.bit_labels[k]] = Number(k);
+      labels.push(f.bit_labels[k]);
+    }
+  }
+  var hasJoin = Object.prototype.hasOwnProperty.call(f, "join");
+  var none = f.none === undefined ? null : f.none;
+  if (typeof v === "string" && hasJoin) {
+    if (v === "" || v === none) items = [];
+    else if (f.join) items = v.split(f.join);
+    else {
+      labels.sort(function (a, b) { return b.length - a.length; });
+      for (i = 0; i < labels.length; i++) {
+        for (k = 0; k < labels.length; k++) {
+          if (labels[i] !== labels[k] && labels[k].indexOf(labels[i]) === 0) {
+            encFail("Field '" + f.name + "': with an empty join, one label is a prefix of another, " +
+                    "so its text cannot be split; the schema decodes but is not encoded (PS-617)");
+          }
+        }
+      }
+      items = [];
+      var rest = v;
+      while (rest) {
+        var found = null;
+        for (i = 0; i < labels.length; i++) {
+          if (rest.indexOf(labels[i]) === 0) { found = labels[i]; break; }
+        }
+        if (found === null) encFail("Field '" + f.name + "': " + encPyRepr(rest) + " does not begin with a label (PS-618)");
+        items.push(found);
+        rest = rest.slice(found.length);
+      }
+    }
+  } else if (Array.isArray(v)) {
+    items = v.filter(function (x) { return !(none !== null && x === none); });
+  } else {
+    encFail("Field '" + f.name + "': " + encPyRepr(v) + " is not a list of labels" +
+            (hasJoin ? " or joined text" : "") + " (PS-618)");
+  }
+  var n = 0;
+  for (i = 0; i < items.length; i++) {
+    if (typeof items[i] !== "string" || !Object.prototype.hasOwnProperty.call(byLabel, "$" + items[i])) {
+      encFail("Field '" + f.name + "': " + encPyRepr(items[i]) + " is not one of its labels (PS-618)");
+    }
+    var bit = byLabel["$" + items[i]];
+    if (Math.floor(n / Math.pow(2, bit)) % 2 === 0) n += Math.pow(2, bit);
+  }
+  return n;
+}
+
 function encReverseModifiers(v, f) {                  // _reverse_modifiers
   // PS-615 (CR-2026-186): the value in its format, as the seconds since the epoch.
   if (f.time && typeof f.time === "object") v = timeInputSeconds(f, v);
   encGivenRec = { f: f, v: v };
+  if (f.bit_labels) return encBitLabels(f, v);         // PS-618 (CR-2026-187)
   v = encReverseLookup(v, f.lookup, f.name);
   if (typeof v === "boolean" && f.lookup) {
     encFail(v + " is not a label with a key of its own in the lookup for " +
@@ -787,7 +852,11 @@ function encFieldInner(out, f, value, endian, ctx) {  // _encode_field_inner
       encFail("Field '" + f.name + "': an ascii value of " + u.length + " bytes is longer than its length of " + fixed + " (PS-537)");
     }
     if (high) ctx.wa.push("Field '" + f.name + "': a character above U+007F in an ascii value (PS-537)");
-    if (term !== null) { for (var t = 0; t < u.length; t++) out.push(u[t]); out.push(term); return; }   // PS-595
+    if (term !== null) {                              // PS-595, PS-620
+      for (var t = 0; t < u.length; t++) out.push(u[t]);
+      if (f.consume_terminator !== false) out.push(term);   // else the next field writes it
+      return;
+    }
     encPad(out, u, fixed !== null ? fixed : u.length);
     return;
   }
@@ -1614,6 +1683,7 @@ function encRepeatElementsBody(out, f, data, records, count, ctx) {
     // PS-551: the count and the list must agree; nothing is padded or cut.
     encFail("Repeat '" + name + "' is given " + records.length + " values for a count of " + count + " (PS-551)");
   }
+  if (f.packed_bits !== undefined) { encPackedElements(out, f, rf, records, ctx); return; }
   for (var i = 0; i < records.length; i++) {
     var rec = records[i];
     if (rec === null || typeof rec !== "object" || Array.isArray(rec)) encFail("repeat field " + JSON.stringify(name) + ": expected each record to be a mapping");
@@ -1624,6 +1694,44 @@ function encRepeatElementsBody(out, f, data, records, count, ctx) {
     encCheckPeeks(element);           // PS-551: an element's bytes close with it
     for (var eb = 0; eb < element.length; eb++) out.push(element[eb]);
   }
+}
+
+function encPackedWidth(el) {                        // packed_element_width
+  var m = /^(u|s|uint|int|i)(8|16|24|32|64)$/.exec(String(el && el.type));
+  return m ? { width: +m[2], signed: m[1] !== "u" && m[1] !== "uint" } : null;
+}
+
+/* PS-623 (CR-2026-189): each element, inverted through its modifiers as any element is, in
+ * `packed_bits` bits, MSB first, from `bit_offset`; the last byte padded with 0 bits. The
+ * bits before `bit_offset` are marked unwritten, so the bits the fields before it left
+ * pending are ORed into them (PS-551, PS-622). A null is the raw sentinel (PS-544). */
+function encPackedElements(out, f, rf, records, ctx) {   // _encode_packed_elements
+  var name = f.name || "", pw = encPackedWidth(f.element), bits = f.packed_bits;
+  var off = f.bit_offset || 0, lo = pw.signed ? -Math.pow(2, bits - 1) : 0;
+  var hi = pw.signed ? Math.pow(2, bits - 1) - 1 : Math.pow(2, bits) - 1;
+  var el = {};
+  for (var k in rf[0]) el[k] = rf[0][k];
+  el.endian = "big";
+  var stream = [];
+  for (var i = 0; i < records.length; i++) {
+    var rec = records[i];
+    if (f.index) { var copy = {}; for (var c in rec) copy[c] = rec[c]; copy[f.index] = i + (f.index_base || 0); rec = copy; }
+    var element = [];
+    var pushed = encPush(ctx, f.__ptr, "repeat", i);
+    try { encObject(element, [el], rec, ctx); } finally { encPop(ctx, pushed); }
+    var n = 0, neg = pw.signed && element.length && element[0] >= 128;
+    for (var b = 0; b < element.length; b++) n = n * 256 + (neg ? 255 - element[b] : element[b]);
+    if (neg) n = -n - 1;
+    if (n < lo || n > hi) encFail("Repeat '" + name + "': element " + i + " is " + n + ", which does not fit in " + bits + " bits (PS-623)");
+    var u = n < 0 ? n + Math.pow(2, bits) : n;
+    for (var bb = bits - 1; bb >= 0; bb--) stream.push(Math.floor(u / Math.pow(2, bb)) % 2);
+  }
+  var span = Math.floor((off + stream.length + 7) / 8);
+  if (typeof f.byte_length === "number" && f.byte_length > span) span = f.byte_length;
+  var base = out.length;
+  for (var s = 0; s < span; s++) out.push(0);
+  for (var t = 0; t < stream.length; t++) if (stream[t]) out[base + ((off + t) >> 3)] |= 1 << (7 - ((off + t) & 7));
+  if (off && span) { out.unc = out.unc || {}; out.unc[base] = 255 >> off; }
 }
 
 function encRepeat(out, f, data, ctx, siblings) {     // _encode_repeat
@@ -1642,6 +1750,15 @@ function encRepeatBody(out, f, data, ctx, siblings) {
   var body = [];
   encRepeatElements(body, f, data, records, count, ctx);
   var bl = encRepeatSize(f, "byte_length", data, siblings);
+  if (f.packed_bits !== undefined) {
+    // PS-623: padded to a byte_length the input gives, as to a literal one.
+    while (bl !== null && body.length < bl) body.push(0);
+    if (bl !== null && body.length !== bl) encFail("Repeat '" + name + "' encodes to " + body.length + " bytes for a byte_length of " + bl + " (PS-551)");
+    var pb = out.length;
+    for (var pi = 0; pi < body.length; pi++) out.push(body[pi]);
+    if (body.unc) { out.unc = out.unc || {}; for (var uk in body.unc) out.unc[pb + (+uk)] = body.unc[uk]; }
+    return;
+  }
   if (bl !== null && body.length !== bl) encFail("Repeat '" + name + "' encodes to " + body.length + " bytes for a byte_length of " + bl + " (PS-551)");
   for (var i = 0; i < body.length; i++) out.push(body[i]);
   if (f.trailer) {
@@ -3429,7 +3546,8 @@ def time_report_js(field: Dict[str, Any], value: str) -> str:
     the value itself. A reference to the field still binds the number."""
     if not isinstance(field.get('time'), dict):
         return value
-    return f'timeOut({json.dumps(field["time"])}, {value}, {json.dumps(str(field.get("name")))})'
+    return (f'timeOut({json.dumps(field["time"])}, {value}, '
+            f'{json.dumps(str(field.get("name")))}, wn)')
 
 
 def name_from_to_js(field: Dict[str, Any], js_name: str) -> Tuple[List[str], str]:
@@ -3746,6 +3864,25 @@ function seqLookup(table, index) {
 // boolean label, or no entry at all, binds the number before the lookup.
 function refValue(label, number) {
   return typeof label === "number" ? label : number;
+}
+
+// --- The labels of a bitmask's set bits (PS-616, PS-617; CR-2026-187) ---
+// `spec.table` is [bit, label] in the declared order. A set bit with no label is not
+// reported and is warned about; no listed bit set reports the `none` label, if any.
+function bitLabels(spec, n, wn) {
+  if (typeof n !== "number") return n;
+  var listed = {}, labels = [], i;
+  for (i = 0; i < spec.table.length; i++) listed[spec.table[i][0]] = true;
+  for (i = 0; Math.pow(2, i) <= n; i++) {
+    if (Math.floor(n / Math.pow(2, i)) % 2 === 1 && !listed[i]) {
+      wn.push("Field '" + spec.name + "': bit " + i + " is set and has no label; it is not reported (PS-617)");
+    }
+  }
+  for (i = 0; i < spec.table.length; i++) {
+    if (Math.floor(n / Math.pow(2, spec.table[i][0])) % 2 === 1) labels.push(spec.table[i][1]);
+  }
+  if (!labels.length && spec.none !== null) labels.push(spec.none);
+  return spec.join !== null ? labels.join(spec.join) : labels;
 }
 
 // --- Lookup default template ---
@@ -4794,6 +4931,14 @@ function writeS(buf, pos, size, value, endian) {
             # Every member, constructs included: a bare `match` or `tlv` inside an
             # element has no name, and filtering on one dropped it from the codec.
             members = [m for m in element_members if isinstance(m, dict)]
+            # PS-621, PS-622 (CR-2026-189): a packed element is read from bits of the
+            # stream into bytes of its own width, big-endian, and decoded from those.
+            packed = 'packed_bits' in field
+            if packed:
+                from schema_interpreter import packed_element_width, underflow_label
+                p_width, p_signed = packed_element_width(field['element'])
+                p_bits, p_off = int(field['packed_bits']), int(field.get('bit_offset', 0))
+                members = [dict(members[0], endian='big')]
             lines.append(f'{i}  var {arr} = [];')
             # Iterations, not reported elements: present_if drops an element and it still
             # advances the index and counts toward `count` and `max` (PS-386).
@@ -4827,7 +4972,27 @@ function writeS(buf, pos, size, value, endian) {
             count = field.get('count')
             byte_length = field.get('byte_length')
             until = field.get('until')
-            if count is not None:
+            if packed:
+                if count is not None:
+                    bound = ref_to_js(count) if isinstance(count, str) else str(int(count))
+                    lines.append(f'{i}  var {arr}_n = {bound};')
+                else:
+                    bound = (ref_to_js(byte_length) if isinstance(byte_length, str)
+                             else str(int(byte_length)))
+                    lines.append(f'{i}  var {arr}_len = {bound};')
+                    lines.append(f'{i}  var {arr}_n = Math.floor(Math.max({arr}_len * 8 - {p_off}, 0)'
+                                 f' / {p_bits});')
+                lines.append(f'{i}  var {arr}_span = Math.floor(({p_off} + {arr}_n * {p_bits} + 7) / 8);')
+                if count is None:
+                    lines.append(f'{i}  if ({arr}_len > {arr}_span) {arr}_span = {arr}_len;')
+                lines.append(f'{i}  if (pos + {arr}_span > buf.length) throw new Error("Field " + '
+                             f'{json.dumps(underflow_label(field.get("name"), "repeat"))} + '
+                             f'": Buffer underflow: need " + {arr}_span + " bytes at offset " + pos'
+                             f' + ", but only " + Math.max(0, buf.length - pos) + " remaining (PS-535)");')
+                lines.append(f'{i}  var {arr}_pbuf = buf, {arr}_ppos = pos;')
+                condition = f'{arr}_i < {arr}_n'
+                count = count if count is not None else f'{arr}_n'
+            elif count is not None:
                 bound = ref_to_js(count) if isinstance(count, str) else str(int(count))
                 lines.append(f'{i}  var {arr}_n = {bound};')
                 condition = f'{arr}_i < {arr}_n'
@@ -4906,10 +5071,25 @@ function writeS(buf, pos, size, value, endian) {
                              else ' + " (PS-343)");'))
                 if size:
                     lines.append(f'{i}    if (buf.length - pos < {size}) {{ {ragged} }}')
+            if packed:
+                # The element's bits, MSB first, sign-extended where its type is signed
+                # (PS-353), then as `p_width` bits of two's complement, big-endian.
+                lines.append(f'{i}    var {arr}_raw = 0;')
+                lines.append(f'{i}    for (var {arr}_b = {p_off} + {arr}_i * {p_bits}, {arr}_e = {arr}_b + {p_bits}; '
+                             f'{arr}_b < {arr}_e; {arr}_b++) {arr}_raw = {arr}_raw * 2 + '
+                             f'(({arr}_pbuf[{arr}_ppos + ({arr}_b >> 3)] >> (7 - ({arr}_b & 7))) & 1);')
+                if p_signed:
+                    lines.append(f'{i}    if ({arr}_raw >= {2 ** (p_bits - 1)}) {arr}_raw -= {2 ** p_bits};')
+                lines.append(f'{i}    buf = []; pos = 0;')
+                lines.append(f'{i}    for (var {arr}_k = {p_width // 8 - 1}; {arr}_k >= 0; {arr}_k--) {{ '
+                             f'var {arr}_m = (({arr}_raw % 256) + 256) % 256; buf[{arr}_k] = {arr}_m; '
+                             f'{arr}_raw = ({arr}_raw - {arr}_m) / 256; }}')
             self.indent += 1
             for member in members:
                 lines.extend(self._gen_decode_field(member))
             self.indent -= 1
+            if packed:
+                lines.append(f'{i}    buf = {arr}_pbuf; pos = {arr}_ppos;')
             lines.append(f'{i}    var {arr}_rec = d; d = {arr}_outer;')
             for member in members:
                 if str(member.get('name', '')).startswith('_'):
@@ -4956,6 +5136,11 @@ function writeS(buf, pos, size, value, endian) {
             # the repeat then came from the wrong offset with nothing reported: a 2-byte
             # member over a 5-byte span produced a third record holding the following
             # field's byte, and the following field read past the payload (CR-2026-022).
+            if packed:
+                # PS-622: the read position moves to the next byte boundary, or to the end
+                # of byte_length where that is further.
+                lines.append(f'{i}  pos = {arr}_ppos + {arr}_span;')
+                byte_length = None
             if until == 'end' and count is None and byte_length is None:
                 lines.append(f'{i}  if ({arr}_i >= {arr}_max && pos < buf.length) {{ '
                              + limit_error.replace('MODE', '"until: end"').replace('END', 'buf.length')
@@ -5066,7 +5251,7 @@ function writeS(buf, pos, size, value, endian) {
                 refs = {part: to_js_name(str(ref)[1:])
                         for part, ref in field['time']['parts'].items()}
                 value_expr = (f'timeParts({json.dumps(refs)}, vars, '
-                              f'{json.dumps(str(field["name"]))})')
+                              f'{json.dumps(str(field["name"]))}, wn)')
                 lines.extend(self._computed_tail(i, field, name, value_expr))
                 return lines
             if 'ref' in field or 'compute' in field:
@@ -5290,11 +5475,20 @@ function writeS(buf, pos, size, value, endian) {
             if ftype == 'ascii' and field.get('terminator') is not None:
                 # PS-593 (CR-2026-177): the text runs to the first terminator byte; a
                 # payload that ends first is an underflow naming the field.
+                # PS-619 (CR-2026-188): with `end_terminates: true` the end of the data
+                # (the buffer, cut at a reserve or a tlv entry's length) ends it too, and
+                # with `consume_terminator: false` the terminator is left for the next field.
                 term = int(field['terminator'])
+                consume = 1 if field.get('consume_terminator') is not False else 0
+                if field.get('end_terminates') is True:
+                    missing = f'{js_name}_t = 0; return Math.max(buf.length - pos, 0);'
+                else:
+                    missing = (f'throw underflow("no terminator byte 0x{term:02X} before the '
+                               f'end of the payload (PS-593)");')
+                lines.append(f'{i}  var {js_name}_t = {consume};')
                 lines.append(
                     f'{i}  var {js_name}_n = (function () {{ var _e = buf.indexOf({term}, pos); '
-                    f'if (_e < 0) throw underflow("no terminator byte 0x{term:02X} before the '
-                    f'end of the payload (PS-593)"); return _e - pos; }})();')
+                    f'if (_e < 0) {{ {missing} }} return _e - pos; }})();')
             else:
                 lines.append(f'{i}  var {js_name}_n = {length_to_js(field)};')
             # A declared length the payload cannot supply is an error, as in every
@@ -5326,7 +5520,7 @@ function writeS(buf, pos, size, value, endian) {
                 if echo:
                     lines.append(f'{i}  pos = {js_name}_p0;')
                 elif field.get('terminator') is not None:
-                    lines.append(f'{i}  pos += 1;')              # PS-593: consumed, not reported
+                    lines.append(f'{i}  pos += {js_name}_t;')    # PS-593, PS-619: consumed
                 if field.get('numeral'):
                     # PS-560: the whole text is a numeral of the declared base, or an error
                     # naming the field; parseInt alone would take a prefix.
@@ -5515,7 +5709,7 @@ function writeS(buf, pos, size, value, endian) {
         names = [js_name]
         if with_var and field.get('var'):
             names.insert(0, to_js_name(field['var']))
-        if number is None and 'lookup' not in field:
+        if number is None and 'lookup' not in field and 'bit_labels' not in field:
             return [f'vars.{n} = {value};' for n in names]
         if number is None:
             number = f'lv[{json.dumps(field.get("name", ""))}]'
@@ -5615,6 +5809,15 @@ function writeS(buf, pos, size, value, endian) {
                 lk = json.dumps(lookup)
                 expr = f'seqLookup({lk}, {expr})'
             expr = f'(lv[{number_key}] = {pre_lookup}, {expr})'
+        if 'bit_labels' in field:
+            # PS-616 (CR-2026-187): the labels of the set bits; a reference binds the
+            # number before them (`lv`), as for a lookup (PS-523).
+            from schema_interpreter import bit_label_table
+            number_key = json.dumps(field.get('name', ''))
+            spec = json.dumps({'name': str(field.get('name')),
+                               'table': [list(t) for t in bit_label_table(field)],
+                               'join': field.get('join'), 'none': field.get('none')})
+            expr = f'(lv[{number_key}] = {expr}, bitLabels({spec}, lv[{number_key}], wn))'
         if stash:
             bounds = field.get('valid_range')
             if field.get('out_of_range') == 'omit' and isinstance(bounds, (list, tuple)) \
@@ -5819,10 +6022,16 @@ function writeS(buf, pos, size, value, endian) {
                 lines.append(f'{i}      var _tlvOuter = d; d = {{ tag: {tag_parts_expr} }};')
             else:
                 lines.append(f'{i}      var _tlvO{fold_id} = d; d = {{}};')
+            if length_size:
+                # PS-486, PS-619: the value is decoded within its entry's length, so the
+                # end of the entry is the end of the data for it.
+                lines.append(f'{i}      var _tlvB{fold_id} = buf; buf = buf.slice(0, pos + _tlvLen);')
             self.indent += 2
             for cf in case_fields:
                 lines.extend(self._gen_decode_field(cf))
             self.indent -= 2
+            if length_size:
+                lines.append(f'{i}      buf = _tlvB{fold_id};')
             if separate:
                 lines.append(f'{i}      if (!_tlvOuter.channels) {{ _tlvOuter.channels = []; }}')
                 lines.append(f'{i}      _tlvOuter.channels.push(d); d = _tlvOuter;')

@@ -2647,15 +2647,20 @@ def decode_ascii(name: Any, raw: bytes, warnings: List[str], nul: str = 'trailin
     return apply_nul_mode(raw.decode('latin-1'), nul)
 
 
-def terminated_span(field_def: Dict[str, Any], buf: bytes, pos: int) -> int:
-    """PS-593: the number of bytes of text before the field's terminator; a payload that
-    ends before one is an underflow, which the field names (PS-535)."""
+def terminated_span(field_def: Dict[str, Any], buf: bytes, pos: int) -> Tuple[int, int]:
+    """PS-593, PS-619: the number of bytes of text before the field's terminator, and the
+    number of terminator bytes the field consumes after it (1, or 0 with
+    `consume_terminator: false` or where the end of the data ended the text). A payload
+    that ends before one is an underflow, which the field names (PS-535), unless the field
+    declares `end_terminates: true`; `buf` ends at any reserve or tlv entry's end."""
     terminator = field_def['terminator']
     end = buf.find(bytes([terminator]), pos)
     if end < 0:
-        raise BufferUnderflow(f"no terminator byte 0x{terminator:02X} before the end of "
-                              f"the payload (PS-593)")
-    return end - pos
+        if field_def.get('end_terminates') is not True:
+            raise BufferUnderflow(f"no terminator byte 0x{terminator:02X} before the end "
+                                  f"of the payload (PS-593)")
+        return max(len(buf) - pos, 0), 0                                # PS-619
+    return end - pos, (0 if field_def.get('consume_terminator') is False else 1)
 
 
 #: PS-560: the whole text of a `numeral` field, by base.
@@ -2684,6 +2689,156 @@ def encode_numeral(name: Any, value: Any, length: Optional[int], numeral: str) -
         raise FieldError(f"Field '{name}': {format_lookup_value(value)} does not fit "
                          f"{length if length is not None else len(digits)} {numeral} digits (PS-168)")
     return sign + digits.rjust(width - len(sign), '0')
+
+
+# --- CR-2026-187 (PS-616 to PS-618): the labels of a bitmask's set bits ------------------
+
+#: The keys PS-616 adds, and the ones it excludes beside `bit_labels`, in the order the spec
+#: prototype names them.
+BIT_LABEL_KEYS = ('bit_labels', 'join', 'none', 'order')
+BIT_LABEL_EXCLUDED = ('lookup', 'add', 'mult', 'div', 'transform', 'polynomial', 'time',
+                      'compute', 'value', 'encoding')
+_BIT_LABEL_WHOLE = {'u8': 8, 'u16': 16, 'u24': 24, 'u32': 32, 'u64': 64,
+                    'uint8': 8, 'uint16': 16, 'uint24': 24, 'uint32': 32, 'uint64': 64}
+
+
+def bit_label_width(field: Dict[str, Any]) -> Optional[int]:
+    """The width in bits of an unsigned integer field or an unsigned bit range, else None."""
+    t = str(field.get('type', '')).strip()
+    if t in _BIT_LABEL_WHOLE:
+        return _BIT_LABEL_WHOLE[t]
+    m = _BIT_RANGE.match(t)
+    if m and t.startswith('u') and int(m.group(3)) >= int(m.group(2)):
+        return int(m.group(3)) - int(m.group(2)) + 1
+    return None
+
+
+def bit_label_number(bit: Any) -> Any:
+    """A bit_labels key as a number: a YAML integer, or a JSON key of digits."""
+    if isinstance(bit, str) and bit.isdigit():
+        return int(bit)
+    return bit
+
+
+def bit_labels_error(node: Dict[str, Any]) -> Optional[str]:
+    """PS-616, PS-617: the first load error of one field mapping, in the spec prototype's
+    order and text (check_bit_labels); None where it is valid or declares none of the keys."""
+    if 'type' not in node or not any(k in node for k in BIT_LABEL_KEYS):
+        return None
+    where = f"Field '{node.get('name')}'"
+    labels = node.get('bit_labels')
+    if labels is None:
+        return f"{where}: join, none and order belong to bit_labels (PS-616)"
+    width = bit_label_width(node)
+    if width is None:
+        return (f"{where}: bit_labels is declared on an unsigned integer or an unsigned bit "
+                f"range, not {node.get('type')!r} (PS-616)")
+    clash = [k for k in BIT_LABEL_EXCLUDED if k in node]
+    if clash:
+        return f"{where}: bit_labels reports labels, so {', '.join(clash)} does not apply (PS-616)"
+    if not isinstance(labels, dict) or not labels:
+        return f"{where}: bit_labels maps bit numbers to labels (PS-616)"
+    seen = set()
+    for bit, label in labels.items():
+        number = bit_label_number(bit)
+        if isinstance(number, bool) or not isinstance(number, int) or not 0 <= number < width:
+            return f"{where}: bit {number!r} is outside its {width} bits (PS-617)"
+        if not isinstance(label, str):
+            return f"{where}: the label of bit {number} is a string (PS-616)"
+        if label in seen:
+            return f"{where}: two bits have the label {label!r} (PS-617)"
+        seen.add(label)
+    join = node.get('join')
+    if join is not None:
+        if not isinstance(join, str):
+            return f"{where}: join is a string (PS-616)"
+        if join and any(join in label for label in seen):
+            return f"{where}: a label contains the join text {join!r} (PS-617)"
+    none = node.get('none')
+    if none is not None and (not isinstance(none, str) or none in seen):
+        return f"{where}: none is a string that no bit has as its label (PS-616)"
+    if node.get('order', 'ascending') not in ('ascending', 'descending'):
+        return f"{where}: order is ascending or descending (PS-616)"
+    return None
+
+
+def bit_labels_errors(node, _top=True):
+    """PS-616, PS-617 over the whole schema, test vectors aside: one error per field."""
+    errors = []
+    if isinstance(node, list):
+        for item in node:
+            errors.extend(bit_labels_errors(item, False))
+    elif isinstance(node, dict):
+        error = bit_labels_error(node)
+        if error:
+            errors.append(error)
+        for key, value in node.items():
+            if (_top and key == 'test_vectors') or key == 'bit_labels':
+                continue
+            errors.extend(bit_labels_errors(value, False))
+    return errors
+
+
+def bit_label_table(field: Dict[str, Any]) -> List[Tuple[int, str]]:
+    """(bit, label) in the field's declared order (PS-616)."""
+    table = sorted((bit_label_number(bit), label)
+                   for bit, label in field['bit_labels'].items())
+    return table[::-1] if field.get('order') == 'descending' else table
+
+
+def decode_bit_labels(field: Dict[str, Any], raw: int, warnings: List[str]) -> Any:
+    """PS-616, PS-617: the labels of the set bits the mapping lists, as a list, or as text
+    joined by `join`; the `none` label where no listed bit is set. A set bit with no label
+    is not reported, and warned about."""
+    table = bit_label_table(field)
+    listed = {bit for bit, _ in table}
+    for bit in range(raw.bit_length()):
+        if raw >> bit & 1 and bit not in listed:
+            warnings.append(f"Field '{field.get('name')}': bit {bit} is set and has no label; "
+                            f"it is not reported (PS-617)")
+    labels = [label for bit, label in table if raw >> bit & 1]
+    if not labels and field.get('none') is not None:
+        labels = [field['none']]
+    return field['join'].join(labels) if 'join' in field else labels
+
+
+def encode_bit_labels(field: Dict[str, Any], value: Any) -> int:
+    """PS-618: the number with the bits of the given labels set, every other bit 0. A list,
+    or the joined text where `join` is declared; an empty one or the `none` label is 0."""
+    name = field.get('name')
+    by_label = {label: bit for bit, label in bit_label_table(field)}
+    if isinstance(value, str) and 'join' in field:
+        join = field['join']
+        if value == '' or value == field.get('none'):
+            items = []
+        elif join:
+            items = value.split(join)
+        else:
+            labels = sorted(by_label, key=len, reverse=True)
+            if any(a != b and b.startswith(a) for a in labels for b in labels):
+                raise FieldError(f"Field '{name}': with an empty join, one label is a prefix "
+                                 f"of another, so its text cannot be split; the schema "
+                                 f"decodes but is not encoded (PS-617)")
+            items, rest = [], value
+            while rest:
+                found = next((label for label in labels if rest.startswith(label)), None)
+                if found is None:
+                    raise FieldError(f"Field '{name}': {rest!r} does not begin with a label "
+                                     f"(PS-618)")
+                items.append(found)
+                rest = rest[len(found):]
+    elif isinstance(value, list):
+        none = field.get('none')
+        items = [v for v in value if not (none is not None and v == none)]
+    else:
+        raise FieldError(f"Field '{name}': {value!r} is not a list of labels"
+                         f"{' or joined text' if 'join' in field else ''} (PS-618)")
+    number = 0
+    for item in items:
+        if not isinstance(item, str) or item not in by_label:
+            raise FieldError(f"Field '{name}': {item!r} is not one of its labels (PS-618)")
+        number |= 1 << by_label[item]
+    return number
 
 
 # PS-430, PS-582, PS-583 (CR-2026-170): a bitfield_string part format is decimal, sdecimal, hex
@@ -2828,7 +2983,8 @@ def bitfield_part_errors(node, _top=True):
 
 def encode_ascii(name: Any, value: Any, length: Optional[int],
                  warnings: List[str], nul: str = 'trailing',
-                 terminator: Optional[int] = None) -> bytes:
+                 terminator: Optional[int] = None,
+                 consume_terminator: bool = True) -> bytes:
     """PS-537: a character above U+00FF, or a value longer than a fixed `length`, is
     rejected naming the field; U+0080..U+00FF is written as the byte of the same number
     with a warning; a short value is padded with 0x00. `length` is None where the field's
@@ -2851,8 +3007,10 @@ def encode_ascii(name: Any, value: Any, length: Optional[int],
     if any(byte > 0x7F for byte in encoded):
         warnings.append(f"Field '{name}': a character above U+007F in an ascii value "
                         f"(PS-537)")
+    if terminator is not None and not consume_terminator:
+        return encoded                    # PS-620: the field after it writes the terminator
     if terminator is not None:
-        return encoded + bytes([terminator])                           # PS-595
+        return encoded + bytes([terminator])                           # PS-595, PS-620
     if length is None:
         return encoded
     return encoded + b'\x00' * (length - len(encoded))
@@ -3853,6 +4011,75 @@ def numeral_errors(node, _top=True):
     return errors
 
 
+# --- CR-2026-189: repeat elements packed in bits (PS-621 to PS-623) ---------------------
+
+_PACKED_ELEMENT_TYPE = re.compile(r'([us])(8|16|24|32|64)')
+
+
+def packed_element_width(element):
+    """(width in bits, signed) of a packed element's integer type, else None (PS-621)."""
+    declared = element.get('type') if isinstance(element, dict) else None
+    if not isinstance(declared, str):
+        return None
+    match = _PACKED_ELEMENT_TYPE.fullmatch(_META_TYPE_ALIASES.get(declared, declared))
+    return (int(match.group(2)), match.group(1) == 's') if match else None
+
+
+def packed_repeat_error(node):
+    """PS-621 for one field declaring `packed_bits` or `bit_offset`, in the spec
+    prototype's text (`check_packed_repeats`), or None. The first rule broken is named."""
+    if 'packed_bits' not in node and 'bit_offset' not in node:
+        return None
+    where = f"Repeat '{node.get('name')}'"
+    bits, offset = node.get('packed_bits'), node.get('bit_offset', 0)
+    if node.get('type') != 'repeat' or 'packed_bits' not in node:
+        hint = "; did you mean `bit`?" if node.get('type') == 'bool' else ""
+        return (f"Field '{node.get('name')}': packed_bits and bit_offset belong to a repeat "
+                f"with `element` (PS-621){hint}")
+    if isinstance(bits, bool) or not isinstance(bits, int) or not 1 <= bits <= 32:
+        return f"{where}: packed_bits is an integer from 1 to 32 (PS-621)"
+    if isinstance(offset, bool) or not isinstance(offset, int) or not 0 <= offset <= 7:
+        return f"{where}: bit_offset is an integer from 0 to 7 (PS-621)"
+    width = packed_element_width(node.get('element')) if 'fields' not in node else None
+    if width is None or width[0] < bits:
+        return (f"{where}: a packed element is one field of an integer type at least "
+                f"{bits} bits wide (PS-621)")
+    if 'count' not in node and 'byte_length' not in node:
+        return f"{where}: a packed repeat declares count or byte_length (PS-621)"
+    return None
+
+
+def packed_repeat_errors(node, _top=True):
+    """PS-621, walked over the whole schema: `packed_bits` and `bit_offset` belong to a
+    repeat with `element` of an integer type at least that wide, which declares `count` or
+    `byte_length`; on any other field they are rejected."""
+    errors = []
+    if isinstance(node, list):
+        for item in node:
+            errors.extend(packed_repeat_errors(item, False))
+    elif isinstance(node, dict):
+        if 'type' in node:
+            error = packed_repeat_error(node)
+            if error:
+                errors.append(error)
+        for key, value in node.items():
+            if _top and key == 'test_vectors':
+                continue
+            errors.extend(packed_repeat_errors(value, False))
+    return errors
+
+
+def packed_layout(field_def, count, byte_length=None):
+    """(bits, offset, span in bytes) of a packed repeat of `count` elements (PS-622): the
+    elements end at the next byte boundary, or at the end of `byte_length` where that is
+    further."""
+    bits, offset = field_def['packed_bits'], field_def.get('bit_offset', 0)
+    span = (offset + count * bits + 7) // 8
+    if byte_length is not None:
+        span = max(span, byte_length)
+    return bits, offset, span
+
+
 def ascii_text_errors(node, _top=True):
     """PS-534, PS-593, PS-072: `nul` and `terminator` are defined on an ascii field only; `nul`
     is trailing, stop or drop; a terminator is a byte 0 to 255 declared in place of `length`.
@@ -3880,6 +4107,14 @@ def ascii_text_errors(node, _top=True):
                     if 'length' in node:
                         errors.append(f"Field '{name}': an ascii field declares length or "
                                       f"terminator, not both (PS-593)")
+        if 'type' in node and ('consume_terminator' in node or 'end_terminates' in node):
+            name = node.get('name')
+            if 'terminator' not in node:                                 # PS-619
+                errors.append(f"Field '{name}': consume_terminator and end_terminates "
+                              f"belong to a field with a terminator (PS-619)")
+            for key in ('consume_terminator', 'end_terminates'):
+                if key in node and not isinstance(node[key], bool):
+                    errors.append(f"Field '{name}': {key} is true or false (PS-619)")
         if (str(node.get('type')).lower() == 'ascii' and 'length' not in node
                 and 'terminator' not in node):
             errors.append(f"Field '{node.get('name')}': ascii type requires 'length' field, "
@@ -4268,8 +4503,15 @@ def _js_number(value: Decimal):
     return int(value) if value == value.to_integral_value() else float(value)
 
 
+class TimeOmitted(FieldError):
+    """PS-610/PS-614 as amended 2026-10-15: a time field with no instant to report (a
+    year outside 1 to 9999, a part that is not whole, parts naming no valid date). The
+    decoder omits the field, reports this message as a warning, and continues."""
+
+
 def format_time(field_def, seconds) -> Any:
-    """PS-610 to PS-613: the instant `seconds` after the field's epoch, in its format."""
+    """PS-610 to PS-613: the instant `seconds` after the field's epoch, in its format.
+    An instant outside the years 1 to 9999 raises TimeOmitted (PS-610)."""
     spec = field_def['time']
     epoch = time_instant(spec['epoch']) if 'epoch' in spec else Decimal(0)
     instant = epoch + _time_decimal(seconds)
@@ -4284,8 +4526,8 @@ def format_time(field_def, seconds) -> Any:
     days, rest = divmod(whole, 86400)
     year, month, day = _civil_from_days(days)
     if not 1 <= year <= 9999:
-        raise FieldError(f"Field '{field_def.get('name')}': the time {instant} s is outside "
-                         f"years 1 to 9999 (PS-610)")
+        raise TimeOmitted(f"Field '{field_def.get('name')}': the time {instant} s is outside "
+                          f"years 1 to 9999; the field is omitted (PS-610)")
     hour, minute, second = rest // 3600, rest // 60 % 60, rest % 60
     if fmt == 'iso8601':
         text = f'{year:04d}-{month:02d}-{day:02d}T{hour:02d}:{minute:02d}:{second:02d}'
@@ -4309,7 +4551,8 @@ def format_time(field_def, seconds) -> Any:
 def time_from_parts(field_def, variables) -> Any:
     """PS-614: the seconds since 1970 of the UTC instant the referenced parts name, or
     OMITTED where a part has no value (PS-314). A part that is not a whole number, and
-    parts that name no valid date and time, are errors naming the field."""
+    parts that name no valid date and time, raise TimeOmitted: the field is omitted with
+    a warning naming it, and decoding continues (PS-614 as amended 2026-10-15)."""
     name = field_def.get('name')
     parts = field_def['time']['parts']
     values = {}
@@ -4322,13 +4565,13 @@ def time_from_parts(field_def, variables) -> Any:
                 or not isinstance(value, (int, float)):
             return OMITTED
         if value != int(value):
-            raise FieldError(f"Field '{name}': its {part} is {float(value)!r}, not a whole "
-                             f"number (PS-614)")
+            raise TimeOmitted(f"Field '{name}': its {part} is {float(value)!r}, not a whole "
+                              f"number; the field is omitted (PS-614)")
         values[part] = int(value)
     if not _valid_civil(*(values.get(p, 0) for p in TIME_PARTS)):
         shown = ', '.join(f"'{p}': {v}" for p, v in values.items())
-        raise FieldError(f"Field '{name}': its parts {{{shown}}} do not name a valid UTC "
-                         f"date and time (PS-614)")
+        raise TimeOmitted(f"Field '{name}': its parts {{{shown}}} do not name a valid UTC "
+                          f"date and time; the field is omitted (PS-614)")
     return _civil_seconds(*(values.get(p, 0) for p in TIME_PARTS))
 
 
@@ -4478,6 +4721,8 @@ def schema_iterator_errors(schema):
     errors = field_name_errors(schema)
     errors.extend(withdrawn_errors(schema))                          # CR-2026-159
     errors.extend(numeral_errors(schema))                            # PS-560
+    errors.extend(bit_labels_errors(schema))                         # PS-616, PS-617
+    errors.extend(packed_repeat_errors(schema))                      # PS-621
     errors.extend(ascii_text_errors(schema))                         # PS-534, PS-593
     errors.extend(checksum_errors(schema))                           # PS-585
     errors.extend(checksum_placement_errors(schema))                 # PS-608
@@ -5172,6 +5417,8 @@ def reports_of(field_def):
         return next(iter(kinds)) if len(kinds) == 1 else None
     if isinstance(field_def.get('tlv'), dict) and not field_def.get('type'):
         return 'array'                                # `channels` of a merge: false tlv
+    if 'bit_labels' in field_def:                                     # PS-616 (CR-2026-187)
+        return 'string' if 'join' in field_def else 'array'
     if is_time_field(field_def):                      # PS-610 (CR-2026-186)
         return {'unix': 'number', 'calendar': 'object'}.get(
             field_def['time'].get('format'), 'string')
@@ -6750,9 +6997,9 @@ class SchemaInterpreter:
             return field_def['value'], pos
 
         if field_type == 'ascii':
-            terminated = field_def.get('terminator') is not None
-            if terminated:
-                length = terminated_span(field_def, buf, pos)            # PS-593
+            terminated = 0
+            if field_def.get('terminator') is not None:
+                length, terminated = terminated_span(field_def, buf, pos)  # PS-593, PS-619
             else:
                 length = resolve_length(field_def, buf, pos, variables=self._variables)
             if pos + length > len(buf):
@@ -6763,7 +7010,7 @@ class SchemaInterpreter:
                 value = decode_numeral(field_def.get('name'), value, field_def['numeral'])
             if is_echo(field_def):                                       # PS-588
                 return value, pos
-            return value, pos + length + (1 if terminated else 0)
+            return value, pos + length + terminated
         
         # `hex:upper` is a `bytes` format (PS-079), not a type (CR-2026-037), so it
         # falls through to the unknown-type error below.
@@ -6960,7 +7207,46 @@ class SchemaInterpreter:
                               else element_value(scratch.data))
             return new_pos
 
-        if count is not None:
+        if 'packed_bits' in field_def:
+            # PS-621, PS-622 (CR-2026-189): the elements are read from one bit stream, most
+            # significant bit first, from `bit_offset` bits into the byte at the read
+            # position. Each is read as the element type's integer, sign-extended where
+            # it is signed, so its sentinel, modifiers and lookup apply as to any element.
+            def resolved(value, key):
+                if isinstance(value, str) and value.startswith('$'):
+                    if value[1:] not in self._variables:
+                        raise ValueError(f"repeat {key} variable not found: {value[1:]}")
+                    return int(self._variables[value[1:]])
+                return int(value)
+
+            width, signed = packed_element_width(field_def['element'])
+            bits, offset = field_def['packed_bits'], field_def.get('bit_offset', 0)
+            length = None
+            if count is not None:
+                count = resolved(count, 'count')
+            else:
+                length = resolved(byte_length, 'byte_length')
+                count = max(length * 8 - offset, 0) // bits
+            if count > max_iterations:
+                raise ValueError(repeat_limit_message(
+                    field_def, max_iterations, f"count {count}", pos, len(buf)))
+            bits, offset, span = packed_layout(field_def, count, length)
+            if pos + span > len(buf):
+                raise name_underflow(BufferUnderflow.need(span, pos, len(buf)),
+                                     field_def.get('name'), 'repeat')
+            stream = int.from_bytes(buf[pos:pos + span], 'big')
+            total = span * 8
+            # The element reads the integer from bytes of its own width, big-endian.
+            nested_fields = [dict(nested_fields[0], endian='big')]
+            for i in range(count):
+                start = offset + i * bits
+                raw = (stream >> (total - start - bits)) & ((1 << bits) - 1)
+                if signed and raw >> (bits - 1):
+                    raw -= 1 << bits                                    # PS-353
+                element(0, raw.to_bytes(width // 8, 'big', signed=signed))
+            pos += span
+
+        elif count is not None:
             # Count-based: fixed number of iterations
             if isinstance(count, str) and count.startswith('$'):
                 var_name = count[1:]
@@ -7229,7 +7515,8 @@ class SchemaInterpreter:
         name unbound altogether.
         """
         names = [n for n in names if n]
-        if field_def.get('lookup') is not None or field_def.get('type') == 'enum':
+        if (field_def.get('lookup') is not None or field_def.get('type') == 'enum'
+                or 'bit_labels' in field_def):                               # PS-616
             number = self._lookup_numbers.pop(field_def, OMITTED)
             numeric = (value is not OMITTED and isinstance(value, (int, float))
                        and not isinstance(value, bool))
@@ -8175,7 +8462,11 @@ class SchemaInterpreter:
             pushed = (self._trace.push(tlv_def, 'tlv', entry_index)
                       if self._trace is not None else False)
             try:
-                tag_result, pos = self._decode_nested_list(matched_fields, buf, pos)
+                # PS-486, PS-619: an entry with a length is decoded within it, so the
+                # end of the entry is the end of the data for its value (a terminated
+                # `end_terminates` text stops there), as the prototype's sub-context.
+                entry_buf = buf if data_length is None else buf[:pos + data_length]
+                tag_result, pos = self._decode_nested_list(matched_fields, entry_buf, pos)
             finally:
                 if self._trace is not None:
                     self._trace.pop(pushed)
@@ -8261,7 +8552,12 @@ class SchemaInterpreter:
             self._lookup_numbers[field_def] = value
         # Apply lookup table
         value = apply_lookup(value, field_def.get('lookup'))
-        
+        # PS-616 (CR-2026-187): the labels of the set bits; a reference binds the number.
+        if ('bit_labels' in field_def and isinstance(value, int)
+                and not isinstance(value, bool)):
+            self._lookup_numbers[field_def] = value
+            value = decode_bit_labels(field_def, value, self._nested_warnings)
+
         return value
     
     def _report_leftover(self, payload: bytes, pos: int, result: DecodeResult) -> None:
@@ -8629,8 +8925,13 @@ class SchemaInterpreter:
             if field_type in COMPUTED_TYPES:
                 try:
                     if is_time_field(field_def) and 'parts' in field_def['time']:
-                        # PS-614 (CR-2026-186): the instant its parts name.
-                        value = time_from_parts(field_def, self._variables)
+                        # PS-614 (CR-2026-186): the instant its parts name. Parts naming
+                        # no date omit the field with a warning (amended 2026-10-15).
+                        try:
+                            value = time_from_parts(field_def, self._variables)
+                        except TimeOmitted as e:
+                            result.warnings.append(str(e))
+                            value = OMITTED
                     else:
                         value = self._decode_computed_field(field_def)
                     if value is OMITTED:
@@ -8665,8 +8966,15 @@ class SchemaInterpreter:
                         # (_motorPosPercent, _motorPosRatio and two high-byte helpers)
                         # in its output.
                         if not name.startswith('_'):
-                            result.data[name] = (format_time(field_def, value)
-                                                 if is_time_field(field_def) else value)
+                            try:
+                                result.data[name] = (format_time(field_def, value)
+                                                     if is_time_field(field_def) else value)
+                            except TimeOmitted as e:
+                                # PS-610 (amended): outside years 1 to 9999, omitted
+                                # with a warning; a reference still binds the number.
+                                result.warnings.append(str(e))
+                                self._bind(field_def, [name], value)
+                                continue
                         else:
                             self._record_internal(field_def, value)         # PS-572
                         self._bind(field_def, [name], value)
@@ -8722,8 +9030,15 @@ class SchemaInterpreter:
                         self._produced(field_def, output_name)      # PS-492
                     # PS-610 (CR-2026-186): reported as an instant in its format; a
                     # reference still binds the number.
-                    result.data[output_name] = (format_time(field_def, value)
-                                                if is_time_field(field_def) else value)
+                    try:
+                        result.data[output_name] = (format_time(field_def, value)
+                                                    if is_time_field(field_def) else value)
+                    except TimeOmitted as e:
+                        # PS-610 (amended 2026-10-15): outside years 1 to 9999, the
+                        # field is omitted with a warning and decoding continues.
+                        result.warnings.append(str(e))
+                        self._bind(field_def, [field_def.get('var'), name], value)
+                        continue
                     # Check valid_range and update quality
                     if field_def.get('valid_range'):
                         quality = self._check_valid_range(value, field_def, result)
@@ -10484,6 +10799,8 @@ class SchemaInterpreter:
             # PS-551: the count and the list must agree; nothing is padded or cut.
             raise ValueError(f"Repeat '{name}' is given {len(records)} values for a count "
                              f"of {count} (PS-551)")
+        if 'packed_bits' in field_def:
+            return self._encode_packed_elements(field_def, record_fields, records)
         index = field_def.get('index')
         out = bytearray()
         for position, record in enumerate(records):
@@ -10506,6 +10823,49 @@ class SchemaInterpreter:
             check_peeks(element)            # PS-551: an element's bytes close with it
             out.extend(element)
         return bytes(out)
+
+    def _encode_packed_elements(self, field_def: Dict[str, Any],
+                                record_fields: List[Dict[str, Any]],
+                                records: List[Dict[str, Any]]) -> 'Frame':
+        """PS-623 (CR-2026-189): each element, inverted through its modifiers as any
+        element is, in `packed_bits` bits, most significant bit first, from `bit_offset`;
+        the last byte padded with 0 bits. A null is the first sentinel, raw (PS-544).
+
+        The bits before `bit_offset` are not this repeat's: the frame marks them
+        unwritten, so the bits the fields before it left pending are ORed into them
+        (PS-551, PS-622), and a peek there is checked against them as usual."""
+        name = field_def.get('name', '')
+        width, signed = packed_element_width(field_def['element'])
+        bits = field_def['packed_bits']
+        low, high = ((-(1 << (bits - 1)), (1 << (bits - 1)) - 1) if signed
+                     else (0, (1 << bits) - 1))
+        # The element writes its integer in bytes of its own width, big-endian.
+        record_fields = [dict(record_fields[0], endian='big')]
+        index = field_def.get('index')
+        stream = 0
+        for position, record in enumerate(records):
+            if index:
+                record = dict(record, **{index: position + index_base(field_def)})
+            pushed = (self._trace.push(field_def, 'repeat', position)
+                      if self._trace is not None else False)
+            try:
+                element = self._encode_object_members(record_fields, record)
+            finally:
+                if self._trace is not None:
+                    self._trace.pop(pushed)
+            number = int.from_bytes(bytes(element), 'big', signed=signed)
+            if not low <= number <= high:
+                raise FieldError(f"Repeat '{name}': element {position} is {number}, which "
+                                 f"does not fit in {bits} bits (PS-623)")
+            stream = (stream << bits) | (number & ((1 << bits) - 1))
+        byte_length = field_def.get('byte_length')
+        if isinstance(byte_length, bool) or not isinstance(byte_length, int):
+            byte_length = None
+        _, offset, span = packed_layout(field_def, len(records), byte_length)
+        stream <<= span * 8 - offset - len(records) * bits
+        data = stream.to_bytes(span, 'big')
+        covered = bytes([0xFF >> offset]) + b'\xff' * (span - 1) if span else b''
+        return Frame(data, 0, covered, [])
 
     @tail_unchecked
     def _encode_repeat(self, field_def: Dict[str, Any], data: Dict[str, Any],
@@ -10533,8 +10893,19 @@ class SchemaInterpreter:
             raise ValueError(missing_field_message(name))
         siblings = siblings or []
         count = self._repeat_size(field_def, 'count', data, siblings)
-        out = bytearray(self._encode_repeat_elements(field_def, data, records, count))
+        elements = self._encode_repeat_elements(field_def, data, records, count)
         byte_length = self._repeat_size(field_def, 'byte_length', data, siblings)
+        if 'packed_bits' in field_def:
+            # PS-623: the elements are padded to a byte_length the input gives as to a
+            # literal one; never cut short of them.
+            if byte_length is not None and len(elements) < byte_length:
+                elements = Frame(bytes(elements).ljust(byte_length, b'\0'), 0,
+                                 frame_covered(elements).ljust(byte_length, b'\xff'), [])
+            if byte_length is not None and len(elements) != byte_length:
+                raise ValueError(f"Repeat '{name}' encodes to {len(elements)} bytes for a "
+                                 f"byte_length of {byte_length} (PS-551)")
+            return elements
+        out = bytearray(elements)
         if byte_length is not None and len(out) != byte_length:
             raise ValueError(f"Repeat '{name}' encodes to {len(out)} bytes for a "
                              f"byte_length of {byte_length} (PS-551)")
@@ -11028,6 +11399,8 @@ class SchemaInterpreter:
             value = time_input_seconds(field_def, value)
         # The value as given, for a PS-168 rejection to name (PS-552).
         self._encode_given = (field_def, value)     # held, compared by identity
+        if 'bit_labels' in field_def:
+            return encode_bit_labels(field_def, value)                     # PS-618
         value = reverse_lookup(value, field_def.get('lookup'),
                                field_def.get('name', '?'))                 # PS-169
 
@@ -11208,7 +11581,8 @@ class SchemaInterpreter:
                                        field_def['numeral'])
             return encode_ascii(field_def.get('name'), value, fixed,
                                 self._encode_warnings, field_def.get('nul', 'trailing'),
-                                field_def.get('terminator') if field_type == 'ascii' else None)
+                                field_def.get('terminator') if field_type == 'ascii' else None,
+                                field_def.get('consume_terminator') is not False)
         
         if field_type in ('hex', 'base64'):
             # PS-601 and PS-602 apply to the hex and base64 types as to `bytes` with that

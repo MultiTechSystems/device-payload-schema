@@ -339,8 +339,8 @@ def test_the_generator_branches_on_a_string_case_key():
     def run(schema, payload):
         code = TS013Generator(schema).generate()
         out = subprocess.run(
-            ["node", "-e", code + "console.log(JSON.stringify(decodeUplink({bytes:%s,fPort:1})))"
-             % _json.dumps(payload)], capture_output=True, text=True, check=True).stdout
+            ["node"], input=code + "console.log(JSON.stringify(decodeUplink({bytes:%s,fPort:1})))"
+            % _json.dumps(payload), capture_output=True, text=True, check=True).stdout
         return _json.loads(out)["data"]
 
     text = {

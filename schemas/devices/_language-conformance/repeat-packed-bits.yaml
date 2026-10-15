@@ -1,0 +1,89 @@
+# Values packed end to end in fewer bits each (PS-621 to PS-623, CR-2026-189).
+#
+# Port 1 is the Nexelec CO2 history layout from the specification's example: a 6-bit count
+# in byte 2 read without moving, a 6-bit repetition taking the low 2 bits of byte 3 and the
+# high 4 of byte 4, then 10-bit readings from bit 4 of byte 4, scaled by 5, with 0x3FF
+# reserved for "no reading". The last reading ends mid-byte, and the position moves to the
+# next byte. An encoder ORs the first reading's bits into the byte the repetition
+# shares, and writes null as the raw 0x3FF, not 0x3FF inverted through the scale.
+#
+# Port 2 reads signed 5-bit values from a 2-byte span: as many as fit whole, 3, and the
+# bit left over is padding. Port 3 reads three 3-bit codes through a label table; the
+# byte after them starts on the next byte boundary, and the bits between are padding,
+# written as 0.
+name: packed_bit_values
+endian: big
+ports:
+  1:
+    fields:
+    - {name: frame_header, type: u16}
+    - {name: history_count, type: "u8[2:7]"}
+    - {name: repetition, type: "u24[4:9]", consume: 2}
+    - name: co2_history
+      type: repeat
+      count: $history_count
+      packed_bits: 10
+      bit_offset: 4
+      element: {type: u16, sentinel: [0x3FF], mult: 5}
+  2:
+    fields:
+    - name: deltas
+      type: repeat
+      byte_length: 2
+      packed_bits: 5
+      element: {type: s8}
+  3:
+    fields:
+    - name: codes
+      type: repeat
+      count: 3
+      packed_bits: 3
+      element:
+        type: u8
+        lookup: [zero, one, two, three, four, five, six, seven]
+    - {name: after, type: u8}
+test_vectors:
+- name: nexelec_history_with_a_gap
+  source: spec-example
+  fPort: 1
+  payload: "0000 0c 00 51 43 ff 00 40"
+  expected:
+    frame_header: 0
+    history_count: 3
+    repetition: 5
+    co2_history: [400, null, 5]
+- name: nexelec_history_two_readings
+  source: generated
+  fPort: 1
+  payload: "1234 08 02 1f f8 00"
+  expected:
+    frame_header: 4660
+    history_count: 2
+    repetition: 33
+    co2_history: [5110, 0]
+- name: signed_values_by_byte_length
+  source: spec-example
+  fPort: 2
+  payload: "f8 40"
+  expected:
+    deltas: [-1, 1, 0]
+- name: signed_values_at_their_limits
+  source: generated
+  fPort: 2
+  payload: "7c 0e"
+  expected:
+    deltas: [15, -16, 7]
+- name: codes_then_the_next_byte
+  source: generated
+  fPort: 3
+  payload: "29 80 07"
+  expected:
+    codes: [one, two, three]
+    after: 7
+- name: codes_high_values
+  source: generated
+  fPort: 3
+  payload: "fa 80 2a"
+  expected:
+    codes: [seven, six, five]
+    after: 42

@@ -174,9 +174,21 @@ holding 0x00 under `stop` is rejected; `drop` does not round-trip a dropped 0x00
 value followed by its terminator, with no padding and no fill for a `numeral`; a value holding the
 terminator is rejected (PS-595).
 
+A field with `terminator` may also declare `consume_terminator: false`, which stops before the
+terminator and leaves it for the next field to read, and an encoder then does not write it; and
+`end_terminates: true`, with which the end of the data (the payload less any `reserve`, or a tlv
+entry's declared length) ends the text too, an empty text being `""` (PS-619). Without
+`end_terminates`, reaching the end is still PS-593's error. Unless `consume_terminator: false`,
+an encoder writes the terminator even under `end_terminates`, so a frame that ended without one
+re-encodes with it (PS-620). Either key without `terminator`, or with a value other than true or
+false, is rejected at load.
+
 ```yaml
 - {name: model, type: ascii, length: 8, nul: stop}   # 45 4D 33 31 30 00 58 59 -> "EM310"
 - {name: version, type: ascii, terminator: 0x00}     # 31 2E 32 00 -> "1.2"
+# Each element: a channel byte, then a name up to the next 0xFF channel byte or the end.
+# FF 45 4D 34 33 30 31 FF 58 -> [{channel: 255, model: "EM4301"}, {channel: 255, model: "X"}]
+- {name: model, type: ascii, terminator: 0xFF, consume_terminator: false, end_terminates: true}
 ```
 
 A `bytes` field reports a **lowercase** hex string by default (PS-281). Its `format:` is
@@ -521,6 +533,42 @@ Values may be numbers as well as strings (PS-106).
 **A `default` label cannot be encoded back.** It stands for every value the table does not
 list, so there is no original to recover; encoders report the field rather than writing a
 plausible byte. The same applies to an `enum` `default` (PS-068).
+
+### Set-Bit Labels (`bit_labels`)
+
+A status, alarm or capability word is often reported as the names of its set bits. A
+`lookup` names one value; `bit_labels` names each bit (0 the least significant), and the field
+reports the labels of the bits that are set (PS-616):
+
+```yaml
+- name: sensor_type                  # 0x0F -> "T/H,CO2,PMx,Gas1"
+  type: u8
+  bit_labels: {0: T/H, 1: CO2, 2: PMx, 3: Gas1, 4: Gas2, 5: Light, 6: Noise, 7: Pressure}
+  join: ","
+
+- name: options                      # 0x00 -> ["None"]; 0x05 -> ["sensor", "led"]
+  type: u8
+  bit_labels: {0: sensor, 2: led, 3: buzzer}
+  none: None
+```
+
+- It is declared on an unsigned integer (`u8` to `u64`) or an unsigned bit range, and not
+  beside `lookup`, arithmetic, `transform`, `polynomial`, `time`, `compute`, `encoding` or
+  `value`. `join`, `none` and `order` belong to it.
+- The labels are a list, or one string separated by `join` where it is declared. `order` is
+  `ascending` (the default) or `descending`, by bit number. Where no listed bit is set the
+  field reports its `none` label (`["None"]`, or the text), else `[]` or `""`.
+- A `$` reference to the field binds its number, as for a lookup (PS-523).
+- A set bit with no label is not reported, and the decoder warns, naming the field and the
+  bit (PS-617). A bit outside the width, two bits with one label, a `none` that is a bit's
+  label, or a label containing a non-empty `join` is rejected at load.
+- An empty `join` concatenates the labels; an encoder splits such text by the longest label
+  first, so where one label is a prefix of another the schema decodes but is refused for
+  encoding (PS-617).
+- An encoder takes a list, or the joined text where `join` is declared, and writes the bits of
+  those labels and no others; an unknown label is rejected, and `[]`, `""` or the `none` label
+  writes 0. Order and repetition do not matter (PS-618).
+- `_meta` reports `array`, or `string` where `join` is declared (PS-570).
 
 ## Computed Fields
 
@@ -925,13 +973,42 @@ leading `_` hides nothing: the value is still reported, and `$_x` still reads it
 The element is one data field: it declares `type` and is not a `match`, `byte_group`,
 `flagged`, `tlv` or `records` entry, which is rejected at load; a `type: object` element
 reports one object per position. An encoder takes the array of values back (PS-529) and
-writes the element's first `sentinel` for a `null` position; with no sentinel it reports
-an error naming the repeat and the position (PS-544).
+writes the element's first `sentinel` for a `null` position, as the raw integer the field
+reads, without inverting any modifier (a `div: 10` element with `sentinel: [0xFFFF]`
+writes `FFFF`); with no sentinel it reports an error naming the repeat and the position
+(PS-544).
 
 ```yaml
 - {name: probes, type: repeat, count: 3, element: {type: u16, sentinel: [0xFFFF]}}
 # 0001 FFFF 0003  ->  {"probes": [1, null, 3]}  ->  encodes back to 0001 FFFF 0003
 ```
+
+### Values packed in bits (`packed_bits`, `bit_offset`)
+
+```yaml
+- {name: _count, type: "u8[2:7]"}
+- {name: _repetition, type: "u24[4:9]", consume: 2}
+- name: co2_history
+  type: repeat
+  count: $_count
+  packed_bits: 10                   # each element is the next 10 bits (PS-621)
+  bit_offset: 4                     # the first starts 4 bits into the byte
+  element: {type: u16, sentinel: [0x3FF], mult: 5}
+# 0000 0C 00 5143FF0040  ->  {"co2_history": [400, null, 5]}
+```
+
+A repeat with `element` may pack its elements end to end: one bit stream, most significant
+bit first, the first element starting `bit_offset` bits (0 to 7, default 0) into the byte at
+the read position. Each element is the next `packed_bits` bits (1 to 32), read unsigned or,
+for a signed element type, sign-extended, and then decoded as the element type's integer, so
+its `sentinel`, modifiers and `lookup` apply. The element is an integer type at least
+`packed_bits` wide, and the repeat declares `count` or `byte_length`; with `byte_length` the
+elements are as many as fit whole in `byte_length x 8 - bit_offset` bits. Afterwards the read
+position moves to the next byte, or to the end of `byte_length` where that is further
+(PS-622). The bits before `bit_offset` belong to the fields before the repeat, read as bit
+ranges that consume nothing. Either key anywhere else is rejected at load. An encoder writes
+each element through its modifiers inverted, rejects one that does not fit in `packed_bits`,
+ORs the first byte into the bits the fields before it left, and pads with 0 bits (PS-623).
 
 ### Several records from one element (`records`)
 
@@ -1232,7 +1309,10 @@ the field still binds the number.
   (milliseconds), `%b` (`Jan`), `%a` (`Mon`) and `%%` replaced; names are English (PS-613).
 - `parts:` on a `type: number` field maps `year`, `month`, `day` and optionally `hour`,
   `minute`, `second` to fields decoded earlier; a part that is not whole, or a date that
-  does not exist, is an error naming the field. `epoch` does not apply (PS-614).
+  does not exist (an all-zero clock), omits the field with a warning naming it, and
+  decoding continues; a rolled-over date is never reported. `epoch` does not apply
+  (PS-614).
+- An instant outside the years 1 to 9999 likewise omits the field with a warning (PS-610).
 - Milliseconds, `fraction` and `%L` truncate, as JavaScript's `Date` does.
 - An encoder parses the value back in its format (PS-615). A pattern lacking `%Y`, `%m` or
   `%b`, `%d`, `%H`, `%M` or `%S`, and `parts` naming a field that reads no bytes, decode

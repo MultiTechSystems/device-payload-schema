@@ -1578,6 +1578,25 @@ public static class SchemaEncoder
             var list = RepeatRecords(field, data)
                 ?? throw new InvalidOperationException(MissingFieldMessage(field.Name ?? ""));
             var count = RepeatSize(field.Count, data, siblings);
+            if (field.PackedBits > 0)
+            {
+                // PS-623 (CR-2026-189): padded to a byte_length the input gives, as to a
+                // literal one; the bits before bit_offset are the pending bits of the fields
+                // before it, which the frame marks unwritten.
+                var packed = EncodeRepeatElements(field, data, list, count);
+                var length = RepeatSize(field.ByteLength, data, siblings);
+                var covered = Enumerable.Repeat((byte)0xFF, Math.Max(packed.Length, (int)(length ?? 0))).ToArray();
+                if (packed.Length > 0) covered[0] = (byte)(0xFF >> field.BitOffset);
+                if (length != null && packed.Length < length)
+                    packed = packed.Concat(new byte[(int)length - packed.Length]).ToArray();
+                if (length != null && packed.Length != length)
+                    throw new InvalidOperationException($"Repeat '{field.Name}' encodes to {packed.Length} "
+                        + $"bytes for a byte_length of {length} (PS-551)");
+                _frameBytes = packed;
+                _framePending = 0;
+                _frameMeta = new FrameMeta(covered.Take(packed.Length).ToArray(), new List<Peek>());
+                return packed;
+            }
             var output = new List<byte>(EncodeRepeatElements(field, data, list, count));
             var byteLength = RepeatSize(field.ByteLength, data, siblings);
             if (byteLength != null && output.Count != byteLength)
@@ -1693,6 +1712,7 @@ public static class SchemaEncoder
                 // PS-551: the count and the list must agree; nothing is padded or cut.
                 throw new InvalidOperationException($"Repeat '{field.Name}' is given {list.Count} "
                     + $"values for a count of {count} (PS-551)");
+            if (field.PackedBits > 0) return EncodePacked(field, list);
 
             var output = new List<byte>();
             int position = 0;
@@ -1717,6 +1737,47 @@ public static class SchemaEncoder
                 position++;
             }
             return output.ToArray();
+        }
+
+        /// <summary>
+        /// PS-623 (CR-2026-189): each element, inverted through its modifiers as any element
+        /// is, in `packed_bits` bits, most significant bit first, from `bit_offset`, the last
+        /// byte padded with 0 bits. A null is the element's first sentinel, raw (PS-544).
+        /// </summary>
+        byte[] EncodePacked(SchemaField field, List<object?> list)
+        {
+            int bits = field.PackedBits, offset = field.BitOffset;
+            bool signed = field.PackedSigned;
+            long low = signed ? -(1L << (bits - 1)) : 0, high = signed ? (1L << (bits - 1)) - 1 : (1L << bits) - 1;
+            int span = (offset + list.Count * bits + 7) / 8;
+            if (field.ByteLength is int literal) span = Math.Max(span, literal);
+            var output = new byte[span];
+            for (int position = 0; position < list.Count; position++)
+            {
+                var asMap = (Dictionary<string, object?>)list[position]!;
+                if (!string.IsNullOrEmpty(field.Index))
+                    asMap = new Dictionary<string, object?>(asMap) { [field.Index!] = position + field.IndexBase };
+                var pushed = _trace?.Push(field.Node, "repeat", position) ?? false;
+                byte[] element;
+                try { element = EncodeObjectMembers(field.Fields, asMap); }
+                finally { _trace?.Pop(pushed); }
+                long number = 0;
+                for (int i = 0; i < element.Length; i++)
+                {
+                    if (i == 0 && signed && (element[0] & 0x80) != 0) number = -1;
+                    number = (number << 8) | element[i];
+                }
+                if (number < low || number > high)
+                    throw new FieldErrorException($"Repeat '{field.Name}': element {position} is {number}, "
+                        + $"which does not fit in {bits} bits (PS-623)");
+                for (int b = 0; b < bits; b++)
+                    if (((number >> (bits - 1 - b)) & 1) != 0)
+                    {
+                        int at = offset + position * bits + b;
+                        output[at >> 3] |= (byte)(1 << (7 - (at & 7)));
+                    }
+            }
+            return output;
         }
 
         /// <summary>
@@ -2897,6 +2958,8 @@ public static class SchemaEncoder
             // The value as given, for a PS-168 rejection to name (PS-552).
             _givenField = field;
             _givenValue = value;
+            if (BitLabels.Declared(field))
+                return BitLabels.Encode(field, value, MessageValue);                 // PS-618
             var reversed = ReverseLookup(value, field.Lookup, field.Name ?? "?");   // PS-169
 
             if (reversed is bool unmatched && field.Lookup is { Count: > 0 })
@@ -3314,7 +3377,7 @@ public static class SchemaEncoder
                     var text = Numeral.Encode(field.Name, Helpers.ToFloat64(value).Item2,
                         fixedLen, field.Numeral);
                     return Helpers.EncodeAscii(field.Name, text, fixedLen,
-                        _result.Warnings, field.Nul, field.Terminator);
+                        _result.Warnings, field.Nul, field.Terminator, !field.KeepTerminator);
                 }
                 case FieldType.Ascii or FieldType.String:
                     // PS-537. A fixed `length` pads and bounds the value; `remaining` or a
@@ -3322,7 +3385,8 @@ public static class SchemaEncoder
                     return Helpers.EncodeAscii(field.Name, value?.ToString() ?? "",
                         field.Length > 0 && field.LengthRef == null ? field.Length : null,
                         _result.Warnings, field.Nul,
-                        field.Type == FieldType.Ascii ? field.Terminator : null);
+                        field.Type == FieldType.Ascii ? field.Terminator : null,
+                        !field.KeepTerminator);
             }
 
             throw new InvalidOperationException($"Cannot encode type: {field.Type}");

@@ -1,0 +1,107 @@
+# CR-2026-188 (PS-593 amended, PS-619, PS-620): an `ascii` field with `terminator` may leave
+# the terminator unread (`consume_terminator: false`) and may end at the end of the data
+# (`end_terminates: true`).
+#
+# Three lists, read by the reference and the generated codec
+# (tests/test_cr_2026_188_cases.py), Go (go/schema/cr188_test.go), Java (CR2026188Test.java)
+# and C# (CR2026_188Tests.cs). C cannot hold either key (PS-446). The spec prototype's
+# TestCR2026188TerminatorOrEnd, case for case, and a few more.
+#
+#   decode: `schema` (YAML text), `payload` (hex) and either `expected` (the whole decoded
+#           data) or `error` (text one of the errors contains; no data is reported).
+#   cases:  `schema`, `input` (JSON text) and either `payload` (hex) or `error`.
+#   load:   `schema` and the `error` its load reports.
+
+decode:
+
+- name: the_next_record_reads_the_terminator_and_the_end_ends_the_last
+  schema: "name: t\nfields:\n  - name: records\n    type: repeat\n    until: end\n    fields:\n      - {name: channel, type: u8}\n      - {name: model, type: ascii, terminator: 0xFF, consume_terminator: false, end_terminates: true}\n"
+  payload: "FF454D34333031FF58"
+  expected: {records: [{channel: 255, model: EM4301}, {channel: 255, model: X}]}
+
+- name: the_end_of_the_payload_ends_the_text
+  schema: "name: t\nfields:\n  - {name: a, type: ascii, terminator: 0, end_terminates: true}\n"
+  payload: "616263"
+  expected: {a: abc}
+
+- name: an_empty_payload_is_empty_text
+  schema: "name: t\nfields:\n  - {name: a, type: ascii, terminator: 0, end_terminates: true}\n"
+  payload: ""
+  expected: {a: ""}
+
+- name: a_terminator_found_is_still_consumed
+  schema: "name: t\nfields:\n  - {name: a, type: ascii, terminator: 0, end_terminates: true}\n  - {name: b, type: u8}\n"
+  payload: "61620007"
+  expected: {a: ab, b: 7}
+
+- name: without_end_terminates_the_end_is_still_an_error
+  schema: "name: t\nfields:\n  - {name: a, type: ascii, terminator: 0}\n"
+  payload: "616263"
+  error: "Field 'a': no terminator byte 0x00 before the end of the payload (PS-593) (PS-535)"
+
+- name: a_terminator_left_unread
+  schema: "name: t\nfields:\n  - {name: a, type: ascii, terminator: 0x3B, consume_terminator: false}\n  - {name: sep, type: u8}\n  - {name: b, type: u8}\n"
+  payload: "61623B07"
+  expected: {a: ab, sep: 59, b: 7}
+
+- name: consume_terminator_true_is_the_default
+  schema: "name: t\nfields:\n  - {name: a, type: ascii, terminator: 0x3B, consume_terminator: true}\n  - {name: b, type: u8}\n"
+  payload: "61623B07"
+  expected: {a: ab, b: 7}
+
+- name: the_end_is_before_a_reserve
+  schema: "name: t\nfields:\n  - name: readings\n    type: repeat\n    until: end\n    reserve: 2\n    fields:\n      - {name: s, type: ascii, terminator: 0x2C, end_terminates: true}\n  - {name: checksum, type: u16}\n"
+  payload: "41422C43ABCD"
+  expected: {readings: [{s: AB}, {s: C}], checksum: 43981}
+
+- name: the_end_of_a_tlv_entry_ends_the_text
+  schema: "name: t\nfields:\n  - tlv:\n      tag_size: 1\n      length_size: 1\n      cases:\n        1:\n          - {name: s, type: ascii, terminator: 0, end_terminates: true}\n        2:\n          - {name: b, type: u8}\n"
+  payload: "01024142020107"
+  expected: {s: AB, b: 7}
+
+cases:
+
+- name: the_records_re_encode_exactly
+  schema: "name: t\nfields:\n  - name: records\n    type: repeat\n    until: end\n    fields:\n      - {name: channel, type: u8}\n      - {name: model, type: ascii, terminator: 0xFF, consume_terminator: false, end_terminates: true}\n"
+  input: '{"records": [{"channel": 255, "model": "EM4301"}, {"channel": 255, "model": "X"}]}'
+  payload: "ff454d34333031ff58"
+
+- name: end_terminates_writes_the_terminator
+  schema: "name: t\nfields:\n  - {name: a, type: ascii, terminator: 0, end_terminates: true}\n"
+  input: '{"a": "abc"}'
+  payload: "61626300"
+
+- name: a_terminator_left_unread_is_not_written
+  schema: "name: t\nfields:\n  - {name: a, type: ascii, terminator: 0x3B, consume_terminator: false}\n  - {name: sep, type: u8}\n  - {name: b, type: u8}\n"
+  input: '{"a": "ab", "sep": 59, "b": 7}'
+  payload: "61623b07"
+
+- name: a_value_holding_an_unconsumed_terminator_is_rejected
+  schema: "name: t\nfields:\n  - {name: a, type: ascii, terminator: 0x3B, consume_terminator: false}\n  - {name: sep, type: u8}\n  - {name: b, type: u8}\n"
+  input: '{"a": "a;b", "sep": 59, "b": 7}'
+  error: "Field 'a': the value holds its terminator byte 0x3B (PS-595)"
+
+- name: end_terminates_still_rejects_a_value_holding_it
+  schema: "name: t\nfields:\n  - {name: a, type: ascii, terminator: 0, end_terminates: true}\n"
+  input: '{"a": "a\u0000b"}'
+  error: "Field 'a': the value holds its terminator byte 0x00 (PS-595)"
+
+# Either key without `terminator`, or with a value other than true or false, is rejected
+# when the schema is loaded (PS-619).
+load:
+
+- name: end_terminates_with_a_length
+  schema: "name: t\nfields:\n  - {name: a, type: ascii, length: 2, end_terminates: true}\n"
+  error: "Field 'a': consume_terminator and end_terminates belong to a field with a terminator (PS-619)"
+
+- name: consume_terminator_as_text
+  schema: "name: t\nfields:\n  - {name: a, type: ascii, terminator: 0, consume_terminator: \"no\"}\n"
+  error: "Field 'a': consume_terminator is true or false (PS-619)"
+
+- name: consume_terminator_on_an_integer
+  schema: "name: t\nfields:\n  - {name: a, type: u8, consume_terminator: false}\n"
+  error: "Field 'a': consume_terminator and end_terminates belong to a field with a terminator (PS-619)"
+
+- name: end_terminates_as_a_number
+  schema: "name: t\nfields:\n  - {name: a, type: ascii, terminator: 0, end_terminates: 1}\n"
+  error: "Field 'a': end_terminates is true or false (PS-619)"

@@ -97,10 +97,17 @@ The `inherent` reasons, each of which is a decision recorded elsewhere:
                     to write back (PS-595: "a decode followed by an encode may differ from the
                     original frame"). Judged from the schema: an ascii field with either mode
                     in a vector that does not re-encode.
+  end-terminated    An `ascii` field declared `end_terminates: true` with a consumed terminator
+                    (PS-619, PS-620, CR-2026-188). A frame whose text the end ended carries
+                    no terminator, and an encoder writes one, so the re-encoded frame is a
+                    byte longer. Judged from the schema, as nul-mode is.
   checksum-mismatch A checksum declaring `on_mismatch: warn` did not match its frame, and
                     the decode warned and reported the rest (PS-586, CR-2026-174). An
                     encoder computes the check value over the bytes it writes (PS-587), so
                     the wrong value the frame carried is not in the output.
+  unlabelled-bit    A `bit_labels` field had a set bit its mapping does not list: the bit is
+                    not reported, and the decode warned (PS-617, CR-2026-187). An encoder
+                    writes only the bits of the labels it is given (PS-618).
 
 One reason is *not* inherent and is reported separately, because it is a gap rather than a
 loss:
@@ -147,7 +154,9 @@ INHERENT = (
     "shared-label",
     "negative-zero",
     "nul-mode",
+    "end-terminated",
     "checksum-mismatch",
+    "unlabelled-bit",
 )
 
 #: The floating-point types PS-566 covers.
@@ -275,6 +284,19 @@ def zero_floats(schema, data, port=None):
             and not isinstance(data.get(f["name"]), bool) and data[f["name"]] == 0]
 
 
+def end_terminated_fields(schema, port=None):
+    """Top-level ascii fields that the end of the data may end and that write their
+    terminator on encode (PS-619, PS-620)."""
+    fields = schema.get("fields") or []
+    ports = schema.get("ports") or {}
+    if ports:
+        entry = ports.get(port, ports.get(str(port), ports.get("default")))
+        fields = (entry or {}).get("fields") or [] if isinstance(entry, dict) else []
+    return [f["name"] for f in fields
+            if isinstance(f, dict) and f.get("type") == "ascii" and f.get("name")
+            and f.get("end_terminates") is True and f.get("consume_terminator") is not False]
+
+
 def nul_mode_fields(schema, port=None):
     """Top-level ascii fields declared `nul: stop` or `nul: drop` (PS-534, PS-595)."""
     fields = schema.get("fields") or []
@@ -306,6 +328,8 @@ def classify(decoded, traits, schema=None, port=None):
                 return "undecoded-bytes"
             if "(PS-586)" in warning:
                 return "checksum-mismatch"                               # CR-2026-174
+            if "(PS-617)" in warning:
+                return "unlabelled-bit"                                  # CR-2026-187
     if has_null_element(decoded.data):
         return "null-element"
     for trait in INHERENT + FIXABLE:
@@ -319,6 +343,8 @@ def classify(decoded, traits, schema=None, port=None):
         return "negative-zero"                                           # PS-566
     if schema is not None and nul_mode_fields(schema, port):
         return "nul-mode"                                                # PS-534, PS-595
+    if schema is not None and end_terminated_fields(schema, port):
+        return "end-terminated"                                          # PS-619, PS-620
     return None
 
 

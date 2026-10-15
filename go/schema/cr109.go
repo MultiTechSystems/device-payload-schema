@@ -80,7 +80,7 @@ func (ctx *DecodeContext) bindReference(name string, field Field, reported any) 
 	if name == "" {
 		return
 	}
-	looked := (hasLookup(field) || isEnumField(field)) && ctx.lookupNumber.set &&
+	looked := (hasLookup(field) || isEnumField(field) || hasBitLabels(field)) && ctx.lookupNumber.set &&
 		ctx.lookupNumber.owner == field.Name
 	if !looked {
 		if reported == omitted {
