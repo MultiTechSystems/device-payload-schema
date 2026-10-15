@@ -1,0 +1,319 @@
+# CR-2026-181 (PS-601, PS-602; PS-081, PS-527 and PS-551 amended; merged on spec main for
+# 0.5.8): an encoder writes a `bytes` value, and a `hex` or `base64` one, exactly as given.
+# A malformed value (PS-601) and one whose byte count is not a literal `length` (PS-602)
+# are rejected naming the field; nothing is cut, padded or zero-filled. A field-named
+# length is fixed by the value, and a tlv case whose literal length differs does not take
+# it (PS-527).
+#
+# Read by the reference and the generated codec (tests/test_cr_2026_181_cases.py), Go
+# (go/schema/cr181_test.go), Java (CR2026181Test.java) and C# (CR2026_181Tests.cs). C's
+# encoder has its own selftest (src/selftest_schema.c).
+#
+#   cases: `schema` (YAML text), `input` (JSON text) and either `payload` (hex) or `error`
+#          (text one of the errors contains; no payload is written).
+#
+# The messages are the spec prototype's (la-payload-schema `cr/0.5.8-apply-181`,
+# `byte_string_value` and `write_byte_string`); a value is shown as given, in single quotes.
+# The prototype's TestCR2026181BytesEncode cases are the `prototype_` ones below.
+
+cases:
+
+# The CR's example: the key's byte count fixes key_len, the separator is optional.
+- name: cr_example
+  schema: "name: t\nfields:\n  - {name: key_len, type: u8}\n  - {name: key, type: bytes, length: key_len, format: hex, separator: ':'}\n  - {name: eui, type: bytes, length: 8}\n"
+  input: '{"key": "a1:b2:c3", "eui": "0011223344556677"}'
+  payload: "03a1b2c30011223344556677"
+
+- name: cr_example_short_eui
+  schema: "name: t\nfields:\n  - {name: key_len, type: u8}\n  - {name: key, type: bytes, length: key_len, format: hex, separator: ':'}\n  - {name: eui, type: bytes, length: 8}\n"
+  input: '{"key": "a1:b2:c3", "eui": "00112233445566"}'
+  error: "Field 'eui' is given 7 bytes for a length of 8 (PS-602)"
+
+- name: cr_example_malformed_key
+  schema: "name: t\nfields:\n  - {name: key_len, type: u8}\n  - {name: key, type: bytes, length: key_len, format: hex, separator: ':'}\n  - {name: eui, type: bytes, length: 8}\n"
+  input: '{"key": "a1:b2:c", "eui": "0011223344556677"}'
+  error: "Field 'key': 'a1:b2:c' is not well-formed hex with separator ':' (PS-601)"
+
+- name: separator_is_optional_on_input
+  schema: "name: t\nfields:\n  - {name: key_len, type: u8}\n  - {name: key, type: bytes, length: key_len, format: hex, separator: ':'}\n"
+  input: '{"key": "a1b2c3"}'
+  payload: "03a1b2c3"
+
+- name: another_separator_is_malformed
+  schema: "name: t\nfields:\n  - {name: key_len, type: u8}\n  - {name: key, type: bytes, length: key_len, format: hex, separator: ':'}\n"
+  input: '{"key": "a1-b2-c3"}'
+  error: "Field 'key': 'a1-b2-c3' is not well-formed hex with separator ':' (PS-601)"
+
+- name: named_length_given_and_agreeing
+  schema: "name: t\nfields:\n  - {name: n, type: u8}\n  - {name: k, type: bytes, length: $n}\n"
+  input: '{"n": 2, "k": "aabb"}'
+  payload: "02aabb"
+
+- name: named_length_given_and_disagreeing
+  schema: "name: t\nfields:\n  - {name: n, type: u8}\n  - {name: k, type: bytes, length: $n}\n"
+  input: '{"n": 4, "k": "aabb"}'
+  error: "Field 'k' is given 2 bytes, but 'n', its length, is 4 (PS-602)"
+
+- name: named_length_empty_value
+  schema: "name: t\nfields:\n  - {name: n, type: u8}\n  - {name: k, type: bytes, length: n}\n"
+  input: '{"k": ""}'
+  payload: "00"
+
+# The CR's table: a literal length neither cuts nor pads.
+- name: longer_value_not_cut
+  schema: "name: t\nfields:\n  - {name: k, type: bytes, length: 4}\n"
+  input: '{"k": "aabbccddee"}'
+  error: "Field 'k' is given 5 bytes for a length of 4 (PS-602)"
+
+- name: shorter_value_not_padded
+  schema: "name: t\nfields:\n  - {name: k, type: bytes, length: 4}\n"
+  input: '{"k": "aabb"}'
+  error: "Field 'k' is given 2 bytes for a length of 4 (PS-602)"
+
+- name: exact_value_written
+  schema: "name: t\nfields:\n  - {name: k, type: bytes, length: 4}\n"
+  input: '{"k": "AaBbCcDd"}'
+  payload: "aabbccdd"
+
+- name: hex_not_a_digit
+  schema: "name: t\nfields:\n  - {name: k, type: bytes, length: 2}\n"
+  input: '{"k": "zz11"}'
+  error: "Field 'k': 'zz11' is not well-formed hex (PS-601)"
+
+- name: hex_odd_digit_count
+  schema: "name: t\nfields:\n  - {name: k, type: bytes, length: 4}\n"
+  input: '{"k": "aabbccd"}'
+  error: "Field 'k': 'aabbccd' is not well-formed hex (PS-601)"
+
+- name: hex_space_is_not_the_separator
+  schema: "name: t\nfields:\n  - {name: k, type: bytes, length: 2}\n"
+  input: '{"k": "aa bb"}'
+  error: "Field 'k': 'aa bb' is not well-formed hex (PS-601)"
+
+- name: hex_upper_takes_lower_case
+  schema: "name: t\nfields:\n  - {name: k, type: bytes, length: 2, format: 'hex:upper'}\n"
+  input: '{"k": "aabb"}'
+  payload: "aabb"
+
+- name: remaining_writes_all
+  schema: "name: t\nfields:\n  - {name: a, type: u8}\n  - {name: k, type: bytes, length: remaining}\n"
+  input: '{"a": 1, "k": "0203040506"}'
+  payload: "010203040506"
+
+- name: base64_padded
+  schema: "name: t\nfields:\n  - {name: k, type: bytes, length: 2, format: base64}\n"
+  input: '{"k": "AQI="}'
+  payload: "0102"
+
+- name: base64_unpadded
+  schema: "name: t\nfields:\n  - {name: k, type: bytes, length: 2, format: base64}\n"
+  input: '{"k": "AQI"}'
+  payload: "0102"
+
+- name: base64_not_base64
+  schema: "name: t\nfields:\n  - {name: k, type: bytes, length: 3, format: base64}\n"
+  input: '{"k": "!!!!"}'
+  error: "Field 'k': '!!!!' is not valid base64 (PS-601)"
+
+- name: base64_impossible_length
+  schema: "name: t\nfields:\n  - {name: k, type: bytes, length: remaining, format: base64}\n"
+  input: '{"k": "AQIDB"}'
+  error: "Field 'k': 'AQIDB' is not valid base64 (PS-601)"
+
+- name: base64_wrong_length
+  schema: "name: t\nfields:\n  - {name: k, type: bytes, length: 4, format: base64}\n"
+  input: '{"k": "AQID"}'
+  error: "Field 'k' is given 3 bytes for a length of 4 (PS-602)"
+
+- name: array_written
+  schema: "name: t\nfields:\n  - {name: k, type: bytes, length: 2, format: array}\n"
+  input: '{"k": [1, 255]}'
+  payload: "01ff"
+
+- name: array_short_not_padded
+  schema: "name: t\nfields:\n  - {name: k, type: bytes, length: 2, format: array}\n"
+  input: '{"k": [1]}'
+  error: "Field 'k' is given 1 bytes for a length of 2 (PS-602)"
+
+- name: array_element_too_large
+  schema: "name: t\nfields:\n  - {name: k, type: bytes, length: 2, format: array}\n"
+  input: '{"k": [1, 256]}'
+  error: "Field 'k': an array element is not an integer from 0 to 255 (PS-601)"
+
+- name: array_element_negative
+  schema: "name: t\nfields:\n  - {name: k, type: bytes, length: 1, format: array}\n"
+  input: '{"k": [-1]}'
+  error: "Field 'k': an array element is not an integer from 0 to 255 (PS-601)"
+
+- name: array_element_fraction
+  schema: "name: t\nfields:\n  - {name: k, type: bytes, length: 1, format: array}\n"
+  input: '{"k": [1.5]}'
+  error: "Field 'k': an array element is not an integer from 0 to 255 (PS-601)"
+
+- name: array_element_text
+  schema: "name: t\nfields:\n  - {name: k, type: bytes, length: 1, format: array}\n"
+  input: '{"k": ["a"]}'
+  error: "Field 'k': an array element is not an integer from 0 to 255 (PS-601)"
+
+- name: array_into_a_hex_field
+  schema: "name: t\nfields:\n  - {name: k, type: bytes, length: 2}\n"
+  input: '{"k": [10, 11]}'
+  payload: "0a0b"
+
+- name: a_number_is_no_bytes_value
+  schema: "name: t\nfields:\n  - {name: k, type: bytes, length: 1}\n"
+  input: '{"k": 5}'
+  error: "Field 'k': a number is not a byte string value (PS-081)"
+
+# The hex and base64 string types (PS-071) as `bytes` with that format.
+- name: hex_type_exact
+  schema: "name: t\nfields:\n  - {name: k, type: hex, length: 2}\n"
+  input: '{"k": "0a0b"}'
+  payload: "0a0b"
+
+- name: hex_type_too_long
+  schema: "name: t\nfields:\n  - {name: k, type: hex, length: 2}\n"
+  input: '{"k": "0a0b0c"}'
+  error: "Field 'k' is given 3 bytes for a length of 2 (PS-602)"
+
+- name: hex_type_malformed
+  schema: "name: t\nfields:\n  - {name: k, type: hex, length: 2}\n"
+  input: '{"k": "0a0g"}'
+  error: "Field 'k': '0a0g' is not well-formed hex (PS-601)"
+
+- name: base64_type_exact
+  schema: "name: t\nfields:\n  - {name: k, type: base64, length: 3}\n"
+  input: '{"k": "AQID"}'
+  payload: "010203"
+
+- name: base64_type_too_short
+  schema: "name: t\nfields:\n  - {name: k, type: base64, length: 4}\n"
+  input: '{"k": "AQID"}'
+  error: "Field 'k' is given 3 bytes for a length of 4 (PS-602)"
+
+- name: base64_type_malformed
+  schema: "name: t\nfields:\n  - {name: k, type: base64, length: 3}\n"
+  input: '{"k": "AQ*D"}'
+  error: "Field 'k': 'AQ*D' is not valid base64 (PS-601)"
+
+# PS-527 amended: a case whose literal length differs from the value does not take it.
+# The Tektelic shape: one name, a 6-byte case declared first and a 3-byte one after.
+- name: tlv_three_byte_value_takes_the_three_byte_case
+  schema: "name: t\nfields:\n  - tlv:\n      tag_size: 1\n      cases:\n        1:\n          - {name: id, type: bytes, length: 6}\n        2:\n          - {name: id, type: bytes, length: 3}\n"
+  input: '{"id": "010203"}'
+  payload: "02010203"
+
+- name: tlv_six_byte_value_takes_the_six_byte_case
+  schema: "name: t\nfields:\n  - tlv:\n      tag_size: 1\n      cases:\n        1:\n          - {name: id, type: bytes, length: 6}\n        2:\n          - {name: id, type: bytes, length: 3}\n"
+  input: '{"id": "010203040506"}'
+  payload: "01010203040506"
+
+- name: tlv_no_case_takes_another_length
+  schema: "name: t\nfields:\n  - tlv:\n      tag_size: 1\n      cases:\n        1:\n          - {name: id, type: bytes, length: 6}\n        2:\n          - {name: id, type: bytes, length: 3}\n"
+  input: '{"id": "0102"}'
+  error: "no case takes the value of 'id'"
+
+# The spec prototype's TestCR2026181BytesEncode, case for case.
+- name: prototype_too_long
+  schema: "name: t\nfields:\n  - {name: k, type: bytes, length: 4}\n"
+  input: '{"k": "aabbccddee"}'
+  error: "PS-602"
+
+- name: prototype_too_short
+  schema: "name: t\nfields:\n  - {name: k, type: bytes, length: 4}\n"
+  input: '{"k": "aabb"}'
+  error: "PS-602"
+
+- name: prototype_not_hex
+  schema: "name: t\nfields:\n  - {name: k, type: bytes, length: 2}\n"
+  input: '{"k": "zz11"}'
+  error: "Field 'k': 'zz11' is not well-formed hex (PS-601)"
+
+- name: prototype_odd_hex
+  schema: "name: t\nfields:\n  - {name: k, type: bytes, length: 2}\n"
+  input: '{"k": "abc"}'
+  error: "Field 'k': 'abc' is not well-formed hex (PS-601)"
+
+- name: prototype_another_separator
+  schema: "name: t\nfields:\n  - {name: k, type: bytes, length: 3, separator: ':'}\n"
+  input: '{"k": "aa-bb-cc"}'
+  error: "Field 'k': 'aa-bb-cc' is not well-formed hex with separator ':' (PS-601)"
+
+- name: prototype_not_base64
+  schema: "name: t\nfields:\n  - {name: k, type: bytes, length: 3, format: base64}\n"
+  input: '{"k": "!!!!"}'
+  error: "Field 'k': '!!!!' is not valid base64 (PS-601)"
+
+- name: prototype_array_element_too_large
+  schema: "name: t\nfields:\n  - {name: k, type: bytes, length: 2}\n"
+  input: '{"k": [1, 300]}'
+  error: "Field 'k': an array element is not an integer from 0 to 255 (PS-601)"
+
+- name: prototype_hex_type_odd
+  schema: "name: t\nfields:\n  - {name: k, type: hex, length: 2}\n"
+  input: '{"k": "abc"}'
+  error: "Field 'k': 'abc' is not well-formed hex (PS-601)"
+
+- name: prototype_separator_in_mixed_case
+  schema: "name: t\nfields:\n  - {name: k, type: bytes, length: 3, separator: ':'}\n"
+  input: '{"k": "AA:bb:cc"}'
+  payload: "aabbcc"
+
+- name: prototype_separator_left_out
+  schema: "name: t\nfields:\n  - {name: k, type: bytes, length: 3, separator: ':'}\n"
+  input: '{"k": "aabbcc"}'
+  payload: "aabbcc"
+
+- name: prototype_base64
+  schema: "name: t\nfields:\n  - {name: k, type: bytes, length: 3, format: base64}\n"
+  input: '{"k": "qrvM"}'
+  payload: "aabbcc"
+
+- name: prototype_array
+  schema: "name: t\nfields:\n  - {name: k, type: bytes, length: 2}\n"
+  input: '{"k": [1, 255]}'
+  payload: "01ff"
+
+- name: prototype_named_length_derived
+  schema: "name: t\nfields:\n  - {name: n, type: u8}\n  - {name: k, type: bytes, length: n}\n"
+  input: '{"k": "aabbcc"}'
+  payload: "03aabbcc"
+
+- name: prototype_named_length_agreeing
+  schema: "name: t\nfields:\n  - {name: n, type: u8}\n  - {name: k, type: bytes, length: n}\n"
+  input: '{"n": 3, "k": "aabbcc"}'
+  payload: "03aabbcc"
+
+- name: prototype_named_length_disagreeing
+  schema: "name: t\nfields:\n  - {name: n, type: u8}\n  - {name: k, type: bytes, length: n}\n"
+  input: '{"n": 2, "k": "aabbcc"}'
+  error: "Field 'k' is given 3 bytes, but 'n', its length, is 2 (PS-602)"
+
+- name: prototype_remaining
+  schema: "name: t\nfields:\n  - {name: k, type: bytes, length: remaining}\n"
+  input: '{"k": "aabbcc"}'
+  payload: "aabbcc"
+
+# The Tektelic orca shape: b0010203c4 goes back through the 3-byte case, where it was
+# padded into the 6-byte one as 0a010203000000c4.
+- name: prototype_tlv_three_byte_case
+  schema: "name: t\nfields:\n  - tlv:\n      tag_size: 1\n      merge: true\n      cases:\n        0x0A:\n          - {name: id, type: bytes, length: 6}\n          - {name: rssi, type: u8}\n        0xB0:\n          - {name: id, type: bytes, length: 3}\n          - {name: rssi, type: u8}\n"
+  input: '{"id": "010203", "rssi": 196}'
+  payload: "b0010203c4"
+
+- name: prototype_tlv_six_byte_case
+  schema: "name: t\nfields:\n  - tlv:\n      tag_size: 1\n      merge: true\n      cases:\n        0x0A:\n          - {name: id, type: bytes, length: 6}\n          - {name: rssi, type: u8}\n        0xB0:\n          - {name: id, type: bytes, length: 3}\n          - {name: rssi, type: u8}\n"
+  input: '{"id": "010203040506", "rssi": 196}'
+  payload: "0a010203040506c4"
+
+# The registry's Tektelic orca shape itself: each case holds a repeat of {id, rssi}, so the
+# repeat takes a list whose every id its element's `length` takes (PS-527).
+- name: tlv_repeat_of_three_byte_ids
+  schema: "name: t\nfields:\n  - tlv:\n      tag_size: 1\n      cases:\n        0x0A:\n          - name: devices\n            type: repeat\n            until: end\n            fields:\n              - {name: id, type: bytes, length: 6, format: 'hex:upper'}\n              - {name: rssi, type: s8}\n        0xB0:\n          - name: devices\n            type: repeat\n            until: end\n            fields:\n              - {name: id, type: bytes, length: 3, format: 'hex:upper'}\n              - {name: rssi, type: s8}\n"
+  input: '{"devices": [{"id": "010203", "rssi": -60}]}'
+  payload: "b0010203c4"
+
+- name: tlv_repeat_of_six_byte_ids
+  schema: "name: t\nfields:\n  - tlv:\n      tag_size: 1\n      cases:\n        0x0A:\n          - name: devices\n            type: repeat\n            until: end\n            fields:\n              - {name: id, type: bytes, length: 6, format: 'hex:upper'}\n              - {name: rssi, type: s8}\n        0xB0:\n          - name: devices\n            type: repeat\n            until: end\n            fields:\n              - {name: id, type: bytes, length: 3, format: 'hex:upper'}\n              - {name: rssi, type: s8}\n"
+  input: '{"devices": [{"id": "0A0B0C0D0E0F", "rssi": -60}]}'
+  payload: "0a0a0b0c0d0e0fc4"

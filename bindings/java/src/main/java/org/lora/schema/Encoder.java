@@ -5,7 +5,6 @@ package org.lora.schema;
 
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
-import java.util.Base64;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
@@ -1560,6 +1559,28 @@ final class Encoder {
         Map<String, Object> derived = new LinkedHashMap<>(data);
         if (rec != null) recordedInputs(list, data, derived);                   // PS-573
         for (Field f : list) {
+            String lengthRef = f.getLengthRef();
+            if (Cr181.isByteString(f.getType()) && lengthRef != null && !lengthRef.isEmpty()
+                    && data.get(f.getName()) != null) {
+                // PS-602, PS-551 (CR-2026-181): the value's byte count fixes the field its
+                // length names; a given value that differs is rejected.
+                int count = Cr181.input(f, data.get(f.getName())).length;
+                Field source = sizeSource(list, lengthRef);
+                String name = source != null ? source.getName() : lengthRef;
+                if (derived.get(name) == null) {
+                    if (source != null && derivable(source) && !isPeek(list, source)) {
+                        derived.put(name, (long) count);
+                    }
+                    continue;
+                }
+                Object given = boundFromReported(source, derived.get(name));
+                if (given instanceof Number n && !(given instanceof Boolean) && n.doubleValue() != count) {
+                    throw new SchemaException.FieldEncodeException("Field '" + f.getName() + "' is given "
+                            + count + " bytes, but '" + name + "', its length, is " + messageValue(given)
+                            + " (PS-602)");
+                }
+                continue;
+            }
             if (f.getType() == FieldType.REPEAT && f.getMatchInline() == null) {
                 List<Object> records = repeatRecords(f, data);
                 if (records == null) continue;
@@ -2340,6 +2361,13 @@ final class Encoder {
      * 0xfffffe through {@code div: 100}.
      */
     static boolean[] caseTakes(Field f, Object value) {
+        if (Cr181.isByteString(f.getType())) {                      // CR-2026-181 (PS-527)
+            boolean took = Cr181.takes(f, value);
+            return new boolean[] {took, took};
+        }
+        if (f.getType() == FieldType.REPEAT && value instanceof List<?> list) {
+            return Cr181.repeatTakes(f, list);
+        }
         Object reversed = reverseLookup(value, f.getLookup());
         if (reversed instanceof Boolean || !(reversed instanceof Number number)) {
             return new boolean[] {true, true};
@@ -3314,9 +3342,8 @@ final class Encoder {
             return new byte[] {(byte) (((whole & 0x0F) << 4) | Math.floorMod(n, 10L))};
         }
 
-        if (type == FieldType.BYTES || type == FieldType.HEX) {
-            byte[] raw = toBytes(field, value);
-            return pad(raw, encodeLength(field, raw.length));
+        if (Cr181.isByteString(type)) {
+            return Cr181.encode(field, value);       // CR-2026-181: PS-081, PS-601, PS-602
         }
 
         if (((type == FieldType.STRING || type == FieldType.BOOLEAN) && field.getValue() != null)
@@ -3335,12 +3362,6 @@ final class Encoder {
                         (long) Math.rint(asDouble(value)), fixed, field.getNumeral()));
             }
             return encodeAscii(field, String.valueOf(value));
-        }
-
-        if (type == FieldType.BASE64) {
-            byte[] raw = Base64.getDecoder().decode(String.valueOf(value));
-            int length = field.getLength() > 0 ? field.getLength() : raw.length;
-            return pad(raw, length);
         }
 
         throw new SchemaException.EncodeException("Cannot encode type: " + type);
@@ -3495,54 +3516,10 @@ final class Encoder {
         return fixed == null ? raw : pad(raw, fixed);
     }
 
-    private static int encodeLength(Field field, int natural) {
-        // `length: remaining` has no fixed count when encoding (PS-014) - the value
-        // supplies it. It arrives as the negative sentinel the parser stores.
-        int declared = field.getLength();
-        return declared > 0 ? declared : Math.max(0, natural);
-    }
-
     private static byte[] pad(byte[] raw, int length) {
         if (raw.length == length) return raw;
         byte[] out = new byte[length];
         System.arraycopy(raw, 0, out, 0, Math.min(raw.length, length));
-        return out;
-    }
-
-    private byte[] toBytes(Field field, Object value) {
-        if (value instanceof byte[] raw) return raw;
-        if (value instanceof List<?> list) {
-            byte[] out = new byte[list.size()];
-            for (int i = 0; i < list.size(); i++) {
-                Long item = asLong(list.get(i));
-                out[i] = (byte) (item == null ? 0 : item & 0xFF);
-            }
-            return out;
-        }
-        // CR-2026-008/PS-281 makes the decoder report a byte sequence as a lowercase hex
-        // string, so that is the form encoding has to accept for a round trip.
-        // The declared format and separator say how the value was rendered (PS-079,
-        // PS-391); only ':' was stripped, so "0a-0b" could not be read back.
-        if ("base64".equals(field.getFormat())) {
-            return Base64.getDecoder().decode(String.valueOf(value));
-        }
-        String text = String.valueOf(value).replace(" ", "");
-        String separator = field.getSeparator();
-        text = separator != null && !separator.isEmpty() ? text.replace(separator, "") : text.replace(":", "");
-        if (text.length() % 2 != 0) {
-            throw new SchemaException.EncodeException("field '" + field.getName()
-                    + "': expected hex, got '" + value + "' (odd number of digits)");
-        }
-        byte[] out = new byte[text.length() / 2];
-        for (int i = 0; i < out.length; i++) {
-            int hi = Character.digit(text.charAt(i * 2), 16);
-            int lo = Character.digit(text.charAt(i * 2 + 1), 16);
-            if (hi < 0 || lo < 0) {
-                throw new SchemaException.EncodeException("field '" + field.getName()
-                        + "': expected hex, got '" + value + "'");
-            }
-            out[i] = (byte) ((hi << 4) | lo);
-        }
         return out;
     }
 

@@ -232,10 +232,10 @@ implementation has a runner that reads the same YAML and the same vectors:
 
 | Implementation | Runner | Decode floor | Re-encode floor |
 |---|---|---|---|
-| Python | `tests/test_corpus_conformance.py` | every vector | 2285 |
-| Go | `go/schema/corpus_conformance_test.go` | 2896 | 2303 (plain API 2275) |
-| C# | `dotnet/PayloadSchema.Tests/CorpusConformanceTests.cs` | 2896 | 2286 |
-| Java | `bindings/java/.../CorpusConformanceTest.java` | 2896 | 2285 |
+| Python | `tests/test_corpus_conformance.py` | every vector | 2290 |
+| Go | `go/schema/corpus_conformance_test.go` | 2901 | 2308 (plain API 2280) |
+| C# | `dotnet/PayloadSchema.Tests/CorpusConformanceTests.cs` | 2901 | 2291 |
+| Java | `bindings/java/.../CorpusConformanceTest.java` | 2901 | 2290 |
 | C | `tools/c-corpus-harness.py` (builds each expressible schema through the struct API) | 575 of 575 attempted | n/a |
 
 These figures move with every schema added. `make check-floors` prints each floor beside
@@ -832,10 +832,10 @@ exercised to the best-covered part of the project:
 
 | | Runner | Round-trips |
 |---|---|---|
-| Python | `tests/test_encode_round_trip.py` | 2285 |
-| Go | `go/schema/corpus_encode_test.go` | 2303 (plain 2275) |
-| Java | `bindings/java/.../CorpusEncodeRoundTripTest.java` | 2285 |
-| C# | `dotnet/.../CorpusEncodeRoundTripTests.cs` | 2286 |
+| Python | `tests/test_encode_round_trip.py` | 2290 |
+| Go | `go/schema/corpus_encode_test.go` | 2308 (plain 2280) |
+| Java | `bindings/java/.../CorpusEncodeRoundTripTest.java` | 2290 |
+| C# | `dotnet/.../CorpusEncodeRoundTripTests.cs` | 2291 |
 | C | `src/test_encoder.c`, built by `make test-c` (unit tests, not a corpus round trip) | n/a |
 
 - **A name may be an object under one tag and a scalar under another, and a tlv encoder
@@ -3888,6 +3888,52 @@ improved. The Go, Java and C# corpus runners write per-vector reports only when
     (185 -> 191); the Go, Java and C# text scans file it `match` (173 -> 179) because
     `on_mismatch:` contains `match:`. No corpus or registry schema declares the key, so no
     other vector changed (failing sets diffed in Go, Java and C#).
+
+- **CR-2026-181 (PS-601, PS-602; PS-081, PS-527 and PS-551 amended; la-payload-schema main, for
+  0.5.8): an encoder writes a `bytes`, `hex` or `base64` value exactly as given.**
+  - **Input (PS-081):** an array of integers 0 to 255, or text in the field's own format - base64,
+    padded or not, for `format: base64` and the `base64` type; otherwise hex in either case, with
+    the declared `separator` or without. No guessing between the two: `aabb` is hex for a hex
+    field and base64 for a base64 one. A separator is accepted only where the field declares
+    one (and only on `bytes`, as PS-391 places it).
+  - **Rejected, naming the field, in the prototype's text** (`byte_string_value`,
+    `write_byte_string`): `Field 'k': 'zz11' is not well-formed hex (PS-601)` (` with separator
+    ':'` where one is declared), `... is not valid base64 (PS-601)`, `Field 'k': an array element
+    is not an integer from 0 to 255 (PS-601)`, `Field 'k': a number is not a byte string value
+    (PS-081)` (the JSON type, where the prototype writes Python's), `Field 'k' is given 5 bytes
+    for a length of 4 (PS-602)` and `Field 'k' is given 2 bytes, but 'n', its length, is 4
+    (PS-602)`. Nothing is cut, padded or zero-filled; `remaining` takes every byte.
+  - **A field-named `length` is fixed by the value (PS-551)**, an internal one included (it was
+    a PS-434 missing input), and a given value that differs is the second PS-602 error.
+  - **PS-527:** a literal-length byte string takes only a value of that byte count in tlv case
+    choice, and a repeat takes a list whose every member its fields take, so the registry's
+    Tektelic orca shape (a 6-byte `id` case declared before a 3-byte one) goes back through
+    its own case.
+  - **Where:** Python `byte_string_input`, `check_byte_string_length`,
+    `byte_string_named_length` and `_derive_byte_count`; the runtime's `encByteString`,
+    `encByteStringLength`, `encByteLengthRef`; Go `go/schema/cr181.go` (`encodeByteString`,
+    `deriveByteCount` from `cr134.go`, `byteStringTakes`/`repeatTakes` from `cr110.go`); Java
+    `Cr181` (derivation in `Encoder.deriveInputs`, `caseTakes`); C# `Cr181.cs` (likewise in
+    `SchemaEncoder`). C's struct-API encoder takes native values and has no byte string input:
+    it refuses a bytes, hex or base64 field by name (`Field 'k': this encoder cannot write a
+    bytes value (PS-601, PS-602)`, `test_a_byte_string_is_refused_by_name`), where it returned
+    `SCHEMA_ERR_UNSUPPORTED` with no message.
+  - **Measured before:** Python cut and padded (`ljust`), masked array elements `& 0xFF`,
+    decoded base64 leniently and never checked a named or `remaining` length; Go cut and
+    padded, cast elements with `byte()` (a non-number became 0), wrote nothing for a non-string
+    value and stripped `:` and `-` whatever the separator; Java and C# cut and zero-filled,
+    masked `& 0xFF`, read an unparseable element as 0 and let base64 errors through unnamed;
+    the runtime cut and padded (`encPad`, now ascii only) and dropped non-base64 characters.
+  - **Cases:** `tests/cr-2026-181-cases.yaml` (the prototype's `TestCR2026181BytesEncode`, its
+    12 tests as 18 `prototype_*` rows, and 40 more), read by `test_cr_2026_181_cases.py`
+    (reference and generated codec), Go `cr181_test.go`, Java `CR2026181Test`, C#
+    `CR2026_181Tests`.
+  - **Fixture** `_language-conformance/bytes-encode-exact.yaml`: five decode vectors, each
+    round-tripping (the 3-byte and 6-byte entries, an internal length fixed by its key, an empty
+    key), and two encode rejections as `expected_error` vectors (PS-602, PS-601). Floors:
+    decode +5 in Go, Java and C#; re-encode and `tlv` +5 everywhere (Python and Java 2239 ->
+    2244, C# 2240 -> 2245, Go 2257 -> 2262, plain 2229 -> 2234). No other corpus vector's
+    round trip changed (failing sets diffed against master).
 
 ## Converting a vendor codec
 

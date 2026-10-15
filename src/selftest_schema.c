@@ -966,6 +966,28 @@ static void test_a_nibble_decimal_that_does_not_fit_is_named(void) {
                    "Field 'v': -8.5 encodes as -8.5, outside -8 to 7.9 (PS-168)"));
 }
 
+/* CR-2026-181 (PS-601, PS-602): the struct API's encoder has no byte string input, so a
+ * bytes, hex or base64 field is refused naming the field, never written as zeros. */
+static void test_a_byte_string_is_refused_by_name(void) {
+    field_def_t fields[] = { field_bytes_type("k", 2), field_hex("h", 2) };
+    const char* want[] = {
+        "Field 'k': this encoder cannot write a bytes value (PS-601, PS-602)",
+        "Field 'h': this encoder cannot write a hex value (PS-601, PS-602)",
+    };
+    for (int i = 0; i < 2; i++) {
+        schema_t s;
+        encode_inputs_t inputs;
+        encode_result_t out;
+        memset(&s, 0, sizeof(s));
+        schema_add_field(&s, &fields[i]);
+        encode_inputs_init(&inputs);
+        encode_inputs_add_int(&inputs, fields[i].name, 1);
+        TCHECK(schema_encode(&s, &inputs, &out) != SCHEMA_OK);
+        TCHECK(out.len == 0);
+        TCHECK(strcmp(out.error_msg, want[i]) == 0);
+    }
+}
+
 /* CR-2026-136 (PS-064, PS-062): bit ranges and bools are written as a decoder reads
  * them - a non-consuming one shares its byte with the next field - and a value the range
  * cannot hold is rejected rather than masked into its neighbour. */
@@ -2222,6 +2244,7 @@ void selftest_schema(void) {
     test_a_negative_zero_is_zero();
     test_a_value_that_does_not_fit_is_named();
     test_a_nibble_decimal_that_does_not_fit_is_named();
+    test_a_byte_string_is_refused_by_name();
     test_bit_ranges_are_laid_out_as_decoded();
     test_a_missing_input_is_named();
     test_no_construct_is_encoded_as_nothing();

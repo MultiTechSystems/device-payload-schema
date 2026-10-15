@@ -2483,6 +2483,17 @@ static inline int encode_field(
         *pos += field->size;
         return SCHEMA_OK;
     }
+    if (field->type == FIELD_TYPE_BYTES || field->type == FIELD_TYPE_HEX
+            || field->type == FIELD_TYPE_BASE64) {
+        /* CR-2026-181 (PS-601, PS-602): this encoder takes native values and has no byte
+         * string input, so it writes none rather than zeros or a guess. It returned
+         * SCHEMA_ERR_UNSUPPORTED with no message; the refusal now names the field. */
+        if (err && err_len) {
+            snprintf(err, err_len, "Field '%s': this encoder cannot write a %s value "
+                     "(PS-601, PS-602)", field->name, schema_type_label(field->type));
+        }
+        return SCHEMA_ERR_UNSUPPORTED;
+    }
     if (input && input->is_text) {
         /* Text for a numeric field: its bytes are not a number, and reading them as one
          * would write whatever the union's other member happens to hold. */

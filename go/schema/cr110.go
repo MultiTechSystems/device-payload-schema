@@ -628,6 +628,13 @@ func tlvCaseOrder(field Field, order keyOrder) []string {
 // test this replaces asked for an integer within an absolute 1e-9, which refused every
 // float field and 0xfffffe through `div: 100`.
 func caseTakes(f Field, value any) (bool, bool) {
+	if isByteStringType(f.Type) { // CR-2026-181 (PS-527, PS-601, PS-602)
+		ok := byteStringTakes(f, value)
+		return ok, ok
+	}
+	if list, isList := value.([]any); isList && (f.Type == TypeRepeat || f.Type == TypeRepeatLower) {
+		return repeatTakes(f, list)
+	}
 	reversed, err := reverseLookupAnyCode(f, value)
 	if err != nil {
 		return false, false

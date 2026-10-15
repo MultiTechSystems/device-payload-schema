@@ -4887,16 +4887,13 @@ fields:
 		t.Fatalf("ParseSchema() error = %v", err)
 	}
 
-	// Only 4 bytes, should be padded to 8
-	encoded, err := schema.Encode(map[string]any{
+	// CR-2026-181 (PS-602): 4 bytes for a length of 8 is rejected, never padded.
+	_, err = schema.Encode(map[string]any{
 		"data": "AABBCCDD",
 	})
-	if err != nil {
-		t.Fatalf("Encode() error = %v", err)
-	}
-
-	if len(encoded) != 8 {
-		t.Errorf("encoded length = %d, want 8", len(encoded))
+	want := "Field 'data' is given 4 bytes for a length of 8 (PS-602)"
+	if err == nil || !strings.Contains(err.Error(), want) {
+		t.Errorf("Encode() error = %v, want %q", err, want)
 	}
 }
 

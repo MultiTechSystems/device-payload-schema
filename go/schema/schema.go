@@ -6325,34 +6325,10 @@ func encodeField(field Field, value any, ctx *EncodeContext) error {
 			ctx.Write(data)
 		}
 
-	case TypeBase64Lower:
-		if strVal, ok := value.(string); ok {
-			data, err := base64.StdEncoding.DecodeString(strVal)
-			if err != nil {
-				return fmt.Errorf("base64 field %q: %v", field.Name, err)
-			}
-			if length <= 0 {
-				length = len(data)
-			}
-			padded := make([]byte, length)
-			copy(padded, data)
-			ctx.Write(padded)
-		}
-
-	case TypeHex, TypeHexLower, TypeHexUpperLower:
-		if strVal, ok := value.(string); ok {
-			strVal = strings.ReplaceAll(strVal, ":", "")
-			strVal = strings.ReplaceAll(strVal, "-", "")
-			data, err := hex.DecodeString(strVal)
-			if err != nil {
-				return fmt.Errorf("hex field %q: %v", field.Name, err)
-			}
-			if length <= 0 {
-				length = len(data)
-			}
-			padded := make([]byte, length)
-			copy(padded, data)
-			ctx.Write(padded)
+	case TypeBase64, TypeBase64Lower, TypeHex, TypeHexLower, TypeHexUpperLower:
+		// PS-601, PS-602 apply to the hex and base64 types as to bytes (CR-2026-181).
+		if err := encodeByteString(field, value, ctx); err != nil {
+			return err
 		}
 
 	case TypeBool, TypeBoolLower:
@@ -6380,7 +6356,7 @@ func encodeField(field Field, value any, ctx *EncodeContext) error {
 		ctx.Write(encoded)
 
 	case TypeBytes, TypeBytesLower:
-		if err := encodeBytes(field, value, length, ctx); err != nil {
+		if err := encodeByteString(field, value, ctx); err != nil { // CR-2026-181
 			return err
 		}
 
@@ -6421,59 +6397,6 @@ func encodeField(field Field, value any, ctx *EncodeContext) error {
 
 	return nil
 }
-
-func encodeBytes(field Field, value any, length int, ctx *EncodeContext) error {
-	var data []byte
-
-	switch v := value.(type) {
-	case string:
-		// The declared format says how the value was rendered (PS-079, PS-391). This
-		// guessed instead - stripping ':' and '-' whatever the separator, and trying
-		// base64 on any string whose length was a multiple of four - and dropped a
-		// decode error, writing zeros where the value could not be read.
-		var err error
-		if field.Format == "base64" {
-			data, err = base64.StdEncoding.DecodeString(v)
-		} else {
-			text := strings.ReplaceAll(v, " ", "")
-			if field.Separator != "" {
-				text = strings.ReplaceAll(text, field.Separator, "")
-			}
-			data, err = hex.DecodeString(text)
-		}
-		if err != nil {
-			return fmt.Errorf("bytes field %q: cannot read %q as %s: %v", field.Name, v,
-				map[bool]string{true: "base64", false: "hex"}[field.Format == "base64"], err)
-		}
-
-	case []any:
-		data = make([]byte, len(v))
-		for i, b := range v {
-			if num, ok := toFloat64(b); ok {
-				data[i] = byte(num)
-			}
-		}
-
-	case []byte:
-		data = v
-	}
-
-	// `length: remaining` (PS-014) parses to the negative sentinel, and it gives no
-	// fixed count when encoding - the value supplies its own. make([]byte, -1) panicked,
-	// which is how radio-bridge's stored downlink brought the encoder down rather than
-	// reporting anything.
-	if length < 0 {
-		length = len(data)
-	}
-
-	// Pad or truncate to exact length
-	padded := make([]byte, length)
-	copy(padded, data)
-	ctx.Write(padded)
-
-	return nil
-}
-
 
 func maxInt(a, b int) int {
 	if a > b {
