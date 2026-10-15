@@ -3307,6 +3307,51 @@ improved. The Go, Java and C# corpus runners write per-vector reports only when
     carries its own schema, so 91 distinct run-time schemas would join `_language-conformance/`
     (or share one per CR with a port each, as the fixture does).
 
+- **CR-2026-168 (PS-345, PS-346 amended, PS-578 to PS-580; la-payload-schema main, for
+  0.5.7): field templates and shared lookup tables.** A definition carries exactly one of
+  `fields` (a group), `field` (one field) or `lookup` (a table). A `$ref` to a `field`
+  definition may carry field keys, each replacing the defined key whole (one level deep, so a
+  `lookup` given there is not merged); the result must have a `name`. A `$ref` to a group
+  carries nothing else, and a `$ref` in a field list never names a `lookup`. A field's
+  `lookup` may be the pointer `#/definitions/<name>`. References resolve transitively; the
+  definitions kept on the resolved document are resolved too, so no later check sees a
+  pointer. An `enum`'s `values` cannot point to a table (not adopted).
+  - **Where:** one resolver per language, the prototype's `resolve_references`, with its
+    messages word for word: Python `expand_refs`/`definition_kind`; Go `go/schema/refs.go`,
+    which now resolves on the **YAML node tree** before any value is built (`resolveRefNodes`;
+    `ParseSchema` decodes `raw` and builds `keyOrder` from the resolved tree, so a template's
+    copy keeps its source key order - a match's case order, PS-563, and `_meta` read it; a
+    JSON-only document is turned into a node tree first); Java `Schema.expandRawRefs`; C#
+    `SchemaParser.ExpandRefs`. The validator now checks the resolved schema throughout
+    (`validate_schema_structure`), the TS013 generator and `generate_output_schema.py` resolve
+    first, and `tools/schema_binary.py` resolves before converting, so **C reads templates and
+    shared tables** with no change to the interpreter: the fixture passes 3 of 3 through the
+    struct API and both blob forms. The vocabulary's `definition` context gains `field` and
+    `lookup`, and `referenced_definitions` follows lookup pointers; `payload-schema.json`
+    describes the three kinds and the pointer.
+  - **Measured before:** every implementation refused a `field` or `lookup` definition
+    ("not a field group", PS-345). Python and the generated codec read `lookup:
+    "#/definitions/x"` as a sequence of characters, so code 1 decoded as `'/'`, with success;
+    a `$ref` to a group carrying `name` was accepted and the key silently ignored. The binary
+    converter wrote a `$ref` entry as a field record of its own (`ref-header.yaml`'s blob had
+    a nameless first record), which `test_cr_2026_142_binary_names.py` had pinned; it now
+    compares against the resolved list.
+  - **Messages changed:** the old PS-345 and PS-348 texts ("is not a field group with a
+    `fields` array", "does not resolve to a field group") are the prototype's now
+    ("must carry exactly one of `fields`, `field` or `lookup`, not none", "which `definitions`
+    does not define"). The cycle text gained backquotes (`` `$ref` cycle: f -> f``).
+  - **Cases:** `tests/cr-2026-168-cases.yaml` (the prototype's
+    `TestCR2026168ReusableDefinitions`, 9 loaded and 9 rejected), read by
+    `test_cr_2026_168_cases.py` (interpreter, validator, generator, binary converter, codec
+    decode and encode, `_meta` against the written-out schema), Go `cr168_test.go`, Java
+    `CR2026168Test`, C# `CR2026_168Tests`; each also pins that a template keeps its case order.
+  - **Fixture** `definitions-field-and-lookup.yaml` (3 vectors, mutation 100%): decode floors
+    +3 in Go, Java and C#; re-encode and `plain fixed` +3 everywhere.
+  - **Corpus and registry:** every `definitions` entry in both carries `fields`, so nothing is
+    rejected. Measured in Python against master over the corpus, library, examples and the
+    private registry (919 schemas): validator output, and every vector's decode and re-encode,
+    identical. No schema uses the new forms yet.
+
 - **Range case keys take numeric bounds (PS-398); a malformed one is a load error.** `"12.1..35.4"`
   is inclusive over the reals, and a discriminator may be fractional (a computed field). The
   reference read each bound through `int()`, so such a key matched nothing and raised no error

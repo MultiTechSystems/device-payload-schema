@@ -1251,6 +1251,36 @@ A reference that does not resolve, a cycle, or a pointer not of the form
 applies `rename:` and `prefix:`; an interpreter given one rejects it (PS-462). The `use:`
 shorthand is withdrawn (CR-2026-045): write `$ref`.
 
+### Field templates and shared lookup tables
+
+A definition carries exactly one of `fields` (a group, as above), `field` (one field) or
+`lookup` (a table) (PS-345, CR-2026-168):
+
+```yaml
+definitions:
+  alarm_codes:
+    lookup: {0: none, 1: low, 2: high, 3: sensor_fault, default: "alarm${value}"}
+  probe:
+    field: {type: s16, div: 10, unit: Cel, valid_range: [-40, 125]}
+
+fields:
+  - {$ref: "#/definitions/probe", name: temp_1}
+  - {$ref: "#/definitions/probe", name: temp_2}
+  - {$ref: "#/definitions/probe", name: temp_ext, div: 100}   # div replaced
+  - {name: alarm_1, type: u8, lookup: "#/definitions/alarm_codes"}
+```
+
+A `$ref` to a `field` definition may carry field keys beside it: each replaces the defined
+key whole, one level deep, so a `lookup` or `transform` given there is not merged with the
+definition's (PS-578). The resolved field must have a `name`, from the definition or the
+reference. A `$ref` to a group carries nothing else, and a `$ref` in a field list never
+names a `lookup` definition (PS-348). A field's `lookup` may be the pointer
+`#/definitions/<name>` to a `lookup` definition, and decodes and encodes exactly as the
+table written in its place (PS-579). A `field` definition may use a pointer, and a group may
+reference `field` definitions; references resolve transitively, and a cycle is invalid
+(PS-580, PS-349). The decoded output and `_meta` are those of the schema written out. An
+`enum`'s `values` cannot point to a table.
+
 ## Port-Based Routing
 
 ```yaml

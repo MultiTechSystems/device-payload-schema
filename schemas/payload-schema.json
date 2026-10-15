@@ -80,11 +80,12 @@
           "description": "Store decoded value as variable for later match/formula references"
         },
         "lookup": {
-          "type": "array",
-          "items": {
-            "type": "string"
-          },
-          "description": "Lookup table: index -> string value"
+          "anyOf": [
+            {"type": "array"},
+            {"type": "object"},
+            {"type": "string", "pattern": "^#/definitions/[^/]+$"}
+          ],
+          "description": "Lookup table: a sequence (PS-104), a sparse mapping (PS-268), or a pointer #/definitions/<name> to a lookup definition (PS-579)"
         },
         "values": {
           "description": "Enum values: dict {int: string} or list [string]"
@@ -593,7 +594,15 @@
     },
     "definitions": {
       "type": "object",
-      "description": "Reusable field group definitions for $ref"
+      "description": "Name to definition, each carrying exactly one of `fields` (a field group), `field` (one field) or `lookup` (a table) (PS-345). A `$ref` to a `field` definition may carry field keys, each replacing the defined key whole (PS-578)",
+      "additionalProperties": {
+        "type": "object",
+        "properties": {
+          "fields": {"type": "array", "items": {"$ref": "#/definitions/field"}},
+          "field": {"$ref": "#/definitions/field"},
+          "lookup": {"anyOf": [{"type": "array"}, {"type": "object"}]}
+        }
+      }
     },
     "test_vectors": {
       "type": "array",

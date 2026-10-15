@@ -15,6 +15,7 @@ Usage:
     payload = interpreter.encode(data_dict)
 """
 
+import copy
 import calendar
 import struct
 import re
@@ -1473,55 +1474,119 @@ def object_key_withdrawn(field_def):
 REF_PREFIX = '#/definitions/'
 
 
+#: The three kinds of definition (PS-345, CR-2026-168): the key each carries, the shape its
+#: value takes and how a message describes that shape.
+DEFINITION_KINDS = (('fields', (list,), 'a list of fields'), ('field', (dict,), 'a field'),
+                    ('lookup', (dict, list), 'a lookup table'))
+
+
+def definition_kind(definitions, name, chain):
+    """The kind of definition `name` is (PS-345), or ValueError: a cycle (PS-349), an
+    undefined name (PS-348), or a definition carrying none or several kinds."""
+    if name in chain:
+        raise ValueError(f"`$ref` cycle: {' -> '.join(list(chain) + [name])} (PS-349)")
+    if name not in definitions:
+        raise ValueError(f"`$ref` to '{REF_PREFIX}{name}', which `definitions` does "
+                         f"not define (PS-348)")
+    group = definitions[name]
+    kinds = [k for k, _, _ in DEFINITION_KINDS if isinstance(group, dict) and k in group]
+    if len(kinds) != 1:
+        raise ValueError(f"definition '{name}' must carry exactly one of `fields`, "
+                         f"`field` or `lookup`, not {kinds or 'none'} (PS-345)")
+    for key, shape, described in DEFINITION_KINDS:
+        if key == kinds[0] and not isinstance(group[key], shape):
+            raise ValueError(f"definition '{name}': `{key}` must be {described} (PS-345)")
+    return kinds[0]
+
+
 def expand_refs(schema):
-    """Splice every `{$ref: '#/definitions/name'}` into the field list it sits in.
+    """Resolve every reference to `definitions` (CR-2026-045, CR-2026-168).
 
-    Returns (expanded schema, errors). The errors are the reasons the schema is invalid
-    and must be rejected rather than decoded:
+    Returns (expanded schema, errors). A `{$ref: '#/definitions/name'}` in a field list is
+    replaced by the group's fields, or by the one field with each key the reference
+    carries replacing the defined key whole (PS-346, PS-578); a field's `lookup` given as
+    `#/definitions/name` becomes that table (PS-579). References resolve transitively
+    (PS-580). The `definitions` kept on the result are themselves resolved, so no later
+    check sees a reference. The errors are the reasons the schema is invalid and must be
+    rejected rather than decoded, in the spec prototype's words:
 
-    - a definition that is not a field group `{fields: [...]}` (PS-345);
-    - a reference that does not resolve (PS-348), or names a file (PS-462: support is
-      optional, and this implementation rejects it rather than guess);
+    - a definition that carries none, or more than one, of `fields`, `field` and
+      `lookup`, or one of the wrong shape (PS-345);
+    - a reference that does not resolve, or names a definition of the wrong kind (PS-348);
+      or names a file (PS-462: support is optional, and this implementation rejects it);
+    - a group reference carrying other keys, or a nameless resolved field (PS-578);
     - a pointer not of the form `#/definitions/<name>` (PS-461);
     - a cycle, direct or transitive (PS-349).
 
-    `definitions` and `test_vectors` are carried over as they are.
+    `test_vectors` are carried over as they are.
     """
     if not isinstance(schema, dict):
         return schema, []
     definitions = schema.get('definitions') or {}
     errors = []
     if not isinstance(definitions, dict):
-        return schema, ["'definitions' must map names to field groups (PS-345)"]
-    for name, group in definitions.items():
-        if not (isinstance(group, dict) and isinstance(group.get('fields'), list)):
-            errors.append(
-                f"definition '{name}' is not a field group with a `fields` array (PS-345)")
+        return schema, ["`definitions` must map names to definitions (PS-345)"]
 
-    def resolve(ref, stack):
-        if not isinstance(ref, str) or not ref.startswith(REF_PREFIX):
+    def target(ref):
+        if not isinstance(ref, str) or not ref.startswith(REF_PREFIX) \
+                or '/' in ref[len(REF_PREFIX):] or not ref[len(REF_PREFIX):]:
             if isinstance(ref, str) and '#' in ref and not ref.startswith('#'):
                 raise ValueError(f"$ref {ref!r} names another document; this implementation "
                                  f"resolves only #/definitions/<name> (PS-462)")
             raise ValueError(f"$ref {ref!r} is not of the form #/definitions/<name> (PS-461)")
-        name = ref[len(REF_PREFIX):]
-        if name in stack:
-            raise ValueError(f"$ref cycle: {' -> '.join(stack + [name])} (PS-349)")
-        group = definitions.get(name)
-        if not (isinstance(group, dict) and isinstance(group.get('fields'), list)):
-            raise ValueError(f"$ref {ref!r} does not resolve to a field group (PS-348)")
-        return expand(group['fields'], stack + [name])
+        return ref[len(REF_PREFIX):]
 
-    def expand(node, stack):
+    def group_fields(name, chain):
+        definition_kind(definitions, name, chain)
+        return expand(definitions[name]['fields'], chain + [name])
+
+    def field_definition(name, chain):
+        return expand(copy.deepcopy(definitions[name]['field']), chain + [name])
+
+    def reference(item, chain):
+        name = target(item['$ref'])
+        found = definition_kind(definitions, name, chain)
+        overrides = {key: value for key, value in item.items() if key != '$ref'}
+        if found == 'lookup':
+            raise ValueError(f"`$ref` to '{REF_PREFIX}{name}' in a field list names a lookup "
+                             f"table, not a field or a field group (PS-346, PS-348)")
+        if found == 'fields':
+            if overrides:
+                raise ValueError(f"a `$ref` to the field group '{name}' carries nothing "
+                                 f"else: {item!r} (PS-578)")
+            return group_fields(name, chain)
+        field = field_definition(name, chain)
+        field.update(expand(overrides, chain))         # each key replaced whole (PS-578)
+        if not isinstance(field.get('name'), str) and field.get('type') != 'skip':
+            raise ValueError(f"the field resolved from '{REF_PREFIX}{name}' has no `name`; "
+                             f"the definition or the reference declares one (PS-578, PS-553)")
+        return [field]
+
+    def lookup_table(pointer, chain):
+        name = target(pointer)
+        if definition_kind(definitions, name, chain) != 'lookup':
+            raise ValueError(f"`lookup: {pointer}` names a definition that is not a lookup "
+                             f"table (PS-579, PS-348)")
+        return copy.deepcopy(definitions[name]['lookup'])
+
+    def expand(node, chain):
         if isinstance(node, dict):
-            return {k: expand(v, stack) for k, v in node.items()}
+            out = {}
+            for key, value in node.items():
+                if key == 'lookup' and isinstance(value, str):
+                    out[key] = lookup_table(value, chain)        # PS-579
+                elif key == 'lookup':
+                    out[key] = value                             # a table's keys are data
+                else:
+                    out[key] = expand(value, chain)
+            return out
         if isinstance(node, list):
             out = []
             for item in node:
                 if isinstance(item, dict) and '$ref' in item:
-                    out.extend(resolve(item['$ref'], stack))
+                    out.extend(reference(item, chain))
                 else:
-                    out.append(expand(item, stack))
+                    out.append(expand(item, chain))
             return out
         return node
 
@@ -1535,14 +1600,24 @@ def expand_refs(schema):
         except ValueError as exc:
             errors.append(str(exc))
             expanded[key] = value
-    # A definition no field list reaches is still checked for cycles and dangling refs.
+    # Every definition is checked even where unreferenced, so a malformed library is
+    # reported; the definitions kept on the result are the resolved ones.
+    resolved = {}
     for name, group in definitions.items():
-        if isinstance(group, dict) and isinstance(group.get('fields'), list):
-            try:
-                expand(group['fields'], [name])
-            except ValueError as exc:
-                if str(exc) not in errors:
-                    errors.append(str(exc))
+        try:
+            found = definition_kind(definitions, name, [])
+            if found == 'fields':
+                resolved[name] = dict(group, fields=group_fields(name, []))
+            elif found == 'field':
+                resolved[name] = dict(group, field=field_definition(name, []))
+            else:
+                resolved[name] = copy.deepcopy(group)
+        except ValueError as exc:
+            if str(exc) not in errors:
+                errors.append(str(exc))
+            resolved[name] = group
+    if 'definitions' in schema:
+        expanded['definitions'] = resolved
     return expanded, errors
 
 
