@@ -897,7 +897,14 @@ def warnings_property(yaml_schema: Dict[str, Any]) -> Optional[Dict[str, Any]]:
 
 def generate_output_schema(yaml_schema: Dict[str, Any]) -> Dict[str, Any]:
     """Generate JSON Schema for codec output from YAML payload schema."""
-    
+    # Templates and lookup pointers are written out first (CR-2026-168), as every
+    # interpreter reads them; a schema whose references do not resolve keeps its own
+    # splicing below, which drops what it cannot resolve.
+    from schema_interpreter import expand_refs as resolve_references
+    resolved, problems = resolve_references(yaml_schema)
+    if not problems:
+        yaml_schema = resolved
+
     schema_name = yaml_schema.get('name', 'payload')
     schema_version = yaml_schema.get('version', 1)
     description = yaml_schema.get('description', f'{schema_name} decoded payload')

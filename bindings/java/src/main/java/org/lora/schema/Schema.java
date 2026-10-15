@@ -241,6 +241,7 @@ public class Schema {
             checkBytesFormat(fm);
             if (fm.containsKey("byte_group")) checkByteGroup(fm);        // PS-070, PS-397
             checkCaseBodies(fm);               // PS-441
+            TemplateStrings.check(fm, aggregates);   // PS-361, PS-430, PS-532, PS-590
             checkLiteral(fm);
             checkAnnotations(fm);              // PS-510
             checkWave4(fm);
@@ -314,27 +315,34 @@ public class Schema {
 
     private static final String REF_PREFIX = "#/definitions/";
 
+    /** The three kinds of definition (PS-345, CR-2026-168), in the order a message lists them. */
+    private static final List<String> DEFINITION_KINDS = List.of("fields", "field", "lookup");
+
     /**
-     * CR-2026-045: splice every {@code {$ref: '#/definitions/<name>'}} into the field list
-     * it sits in, before anything is parsed, so a reference works in any field list - a
-     * port entry, an object, a repeat, a case (PS-346, PS-347). This resolved only the
-     * schema's and the ports' own lists, and an unresolvable reference was kept and
-     * produced nothing. Rejected at load: a definition that is not a field group
-     * (PS-345), a reference that does not resolve (PS-348) or names another document
-     * (PS-462, optional and not supported here), a pointer of another form (PS-461), a
-     * cycle (PS-349). Mirrors expand_refs in tools/schema_interpreter.py.
+     * CR-2026-045 and CR-2026-168: resolve every reference to {@code definitions} before
+     * anything is parsed. A definition carries exactly one of {@code fields} (a group),
+     * {@code field} (one field) or {@code lookup} (a table) (PS-345). A
+     * {@code {$ref: '#/definitions/<name>'}} in a field list is replaced by the group's
+     * fields, or by the one field with each key the reference carries replacing the defined
+     * key whole (PS-346, PS-578); a field's {@code lookup} given as a pointer becomes the
+     * table (PS-579). References resolve transitively (PS-580), and the definitions kept are
+     * themselves resolved. Rejected at load, in the spec prototype's words: a definition of
+     * no kind, several or the wrong shape (PS-345), a reference that does not resolve or
+     * names the wrong kind (PS-348) or another document (PS-462, optional and not supported
+     * here), a group reference with keys or a nameless result (PS-578), a pointer of
+     * another form (PS-461), a cycle (PS-349). Mirrors expand_refs in
+     * tools/schema_interpreter.py.
      */
     @SuppressWarnings("unchecked")
     private static Map<String, Object> expandRawRefs(Map<String, Object> raw) {
         Object defsRaw = raw.get("definitions");
         if (defsRaw != null && !(defsRaw instanceof Map)) {
-            throw new SchemaException("'definitions' must map names to field groups (PS-345)");
+            throw new SchemaException("`definitions` must map names to definitions (PS-345)");
         }
-        Map<String, Object> definitions = defsRaw == null ? Map.of() : (Map<String, Object>) defsRaw;
-        for (Map.Entry<String, Object> e : definitions.entrySet()) {
-            if (!(e.getValue() instanceof Map<?, ?> group) || !(group.get("fields") instanceof List)) {
-                throw new SchemaException("definition '" + e.getKey()
-                        + "' is not a field group with a `fields` array (PS-345)");
+        Map<String, Object> definitions = new LinkedHashMap<>();
+        if (defsRaw != null) {
+            for (Map.Entry<?, ?> e : ((Map<?, ?>) defsRaw).entrySet()) {
+                definitions.put(String.valueOf(e.getKey()), e.getValue());
             }
         }
         Map<String, Object> out = new LinkedHashMap<>();
@@ -342,10 +350,66 @@ public class Schema {
             boolean carried = e.getKey().equals("definitions") || e.getKey().equals("test_vectors");
             out.put(e.getKey(), carried ? e.getValue() : expandNode(e.getValue(), definitions, new ArrayList<>()));
         }
+        // Every definition is checked even where unreferenced; the kept ones are resolved.
+        Map<String, Object> resolved = new LinkedHashMap<>();
         for (Map.Entry<String, Object> e : definitions.entrySet()) {
-            List<String> stack = new ArrayList<>(List.of(e.getKey()));
-            expandNode(((Map<String, Object>) e.getValue()).get("fields"), definitions, stack);
+            String name = e.getKey();
+            String kind = definitionKind(definitions, name, List.of());
+            Map<String, Object> entry = new LinkedHashMap<>();
+            for (Map.Entry<?, ?> k : ((Map<?, ?>) e.getValue()).entrySet()) {
+                entry.put(String.valueOf(k.getKey()), k.getValue());
+            }
+            if (!kind.equals("lookup")) {
+                entry.put(kind, expandNode(entry.get(kind), definitions, List.of(name)));
+            }
+            resolved.put(name, entry);
         }
+        if (defsRaw != null) out.put("definitions", resolved);
+        return out;
+    }
+
+    /** The kind of definition {@code name} is (PS-345), checked for a cycle and existence. */
+    private static String definitionKind(Map<String, Object> definitions, String name, List<String> chain) {
+        if (chain.contains(name)) {
+            List<String> path = new ArrayList<>(chain);
+            path.add(name);
+            throw new SchemaException("`$ref` cycle: " + String.join(" -> ", path) + " (PS-349)");
+        }
+        if (!definitions.containsKey(name)) {
+            throw new SchemaException("`$ref` to '" + REF_PREFIX + name
+                    + "', which `definitions` does not define (PS-348)");
+        }
+        Object group = definitions.get(name);
+        List<String> kinds = new ArrayList<>();
+        for (String kind : DEFINITION_KINDS) {
+            if (group instanceof Map<?, ?> g && g.containsKey(kind)) kinds.add(kind);
+        }
+        if (kinds.size() != 1) {
+            String listed = kinds.isEmpty() ? "none" : Sampled.repr(kinds);
+            throw new SchemaException("definition '" + name + "' must carry exactly one of `fields`, "
+                    + "`field` or `lookup`, not " + listed + " (PS-345)");
+        }
+        String kind = kinds.get(0);
+        Object body = ((Map<?, ?>) group).get(kind);
+        boolean ok = switch (kind) {
+            case "fields" -> body instanceof List;
+            case "field" -> body instanceof Map;
+            default -> body instanceof Map || body instanceof List;
+        };
+        if (!ok) {
+            String described = switch (kind) {
+                case "fields" -> "a list of fields";
+                case "field" -> "a field";
+                default -> "a lookup table";
+            };
+            throw new SchemaException("definition '" + name + "': `" + kind + "` must be " + described + " (PS-345)");
+        }
+        return kind;
+    }
+
+    private static List<String> deeper(List<String> chain, String name) {
+        List<String> out = new ArrayList<>(chain);
+        out.add(name);
         return out;
     }
 
@@ -354,7 +418,12 @@ public class Schema {
         if (node instanceof Map<?, ?> map) {
             Map<String, Object> out = new LinkedHashMap<>();
             for (Map.Entry<?, ?> e : map.entrySet()) {
-                out.put(String.valueOf(e.getKey()), expandNode(e.getValue(), definitions, stack));
+                String key = String.valueOf(e.getKey());
+                if (key.equals("lookup") && e.getValue() instanceof String pointer) {
+                    out.put(key, lookupTable(pointer, definitions, stack));          // PS-579
+                } else {
+                    out.put(key, expandNode(e.getValue(), definitions, stack));
+                }
             }
             return out;
         }
@@ -362,7 +431,7 @@ public class Schema {
             List<Object> out = new ArrayList<>();
             for (Object item : list) {
                 if (item instanceof Map<?, ?> m && m.containsKey("$ref")) {
-                    out.addAll(resolveRef(m.get("$ref"), definitions, stack));
+                    out.addAll(resolveRef((Map<String, Object>) m, definitions, stack));
                 } else {
                     out.add(expandNode(item, definitions, stack));
                 }
@@ -372,26 +441,56 @@ public class Schema {
         return node;
     }
 
+    private static String refTarget(Object ref) {
+        if (ref instanceof String text && text.startsWith(REF_PREFIX)) {
+            String name = text.substring(REF_PREFIX.length());
+            if (!name.isEmpty() && !name.contains("/")) return name;
+        }
+        if (ref instanceof String text && text.contains("#") && !text.startsWith("#")) {
+            throw new SchemaException("$ref " + Sampled.repr(text) + " names another document; this "
+                    + "implementation resolves only #/definitions/<name> (PS-462)");
+        }
+        throw new SchemaException("$ref " + Sampled.repr(ref) + " is not of the form #/definitions/<name> (PS-461)");
+    }
+
     @SuppressWarnings("unchecked")
-    private static List<Object> resolveRef(Object ref, Map<String, Object> definitions, List<String> stack) {
-        if (!(ref instanceof String text) || !text.startsWith(REF_PREFIX)) {
-            if (ref instanceof String text && text.contains("#") && !text.startsWith("#")) {
-                throw new SchemaException("$ref " + text + " names another document; this implementation "
-                        + "resolves only #/definitions/<name> (PS-462)");
+    private static List<Object> resolveRef(Map<String, Object> item, Map<String, Object> definitions, List<String> stack) {
+        String name = refTarget(item.get("$ref"));
+        String kind = definitionKind(definitions, name, stack);
+        Map<String, Object> overrides = new LinkedHashMap<>();
+        for (Map.Entry<?, ?> e : item.entrySet()) {
+            if (!"$ref".equals(String.valueOf(e.getKey()))) overrides.put(String.valueOf(e.getKey()), e.getValue());
+        }
+        Map<?, ?> group = (Map<?, ?>) definitions.get(name);
+        if (kind.equals("lookup")) {
+            throw new SchemaException("`$ref` to '" + REF_PREFIX + name + "' in a field list names a "
+                    + "lookup table, not a field or a field group (PS-346, PS-348)");
+        }
+        if (kind.equals("fields")) {
+            if (!overrides.isEmpty()) {
+                throw new SchemaException("a `$ref` to the field group '" + name + "' carries nothing else: "
+                        + Sampled.repr(item) + " (PS-578)");
             }
-            throw new SchemaException("$ref " + ref + " is not of the form #/definitions/<name> (PS-461)");
+            return (List<Object>) expandNode(group.get("fields"), definitions, deeper(stack, name));
         }
-        String name = text.substring(REF_PREFIX.length());
-        if (stack.contains(name)) {
-            throw new SchemaException("$ref cycle: " + String.join(" -> ", stack) + " -> " + name + " (PS-349)");
+        Map<String, Object> field = (Map<String, Object>) expandNode(group.get("field"), definitions, deeper(stack, name));
+        // each key the reference carries replaces the defined key whole (PS-578)
+        field.putAll((Map<String, Object>) expandNode(overrides, definitions, stack));
+        if (!(field.get("name") instanceof String) && !"skip".equals(field.get("type"))) {
+            throw new SchemaException("the field resolved from '" + REF_PREFIX + name + "' has no `name`; "
+                    + "the definition or the reference declares one (PS-578, PS-553)");
         }
-        Object group = definitions.get(name);
-        if (!(group instanceof Map<?, ?> g) || !(g.get("fields") instanceof List<?> fields)) {
-            throw new SchemaException("$ref " + text + " does not resolve to a field group (PS-348)");
+        return new ArrayList<>(List.of(field));
+    }
+
+    private static Object lookupTable(String pointer, Map<String, Object> definitions, List<String> stack) {
+        String name = refTarget(pointer);
+        if (!definitionKind(definitions, name, stack).equals("lookup")) {
+            throw new SchemaException("`lookup: " + pointer + "` names a definition that is not a "
+                    + "lookup table (PS-579, PS-348)");
         }
-        List<String> deeper = new ArrayList<>(stack);
-        deeper.add(name);
-        return (List<Object>) expandNode(fields, definitions, deeper);
+        // a copy, keys stringified as every other mapping here is
+        return expandNode(((Map<?, ?>) definitions.get(name)).get("lookup"), definitions, stack);
     }
 
     /**
@@ -582,7 +681,7 @@ public class Schema {
         for (Field f : fields) {
             FieldType t = f.getType();
             if (t == FieldType.NUMBER || t == FieldType.BOOLEAN
-                    || (t == FieldType.STRING && f.getValue() != null)) continue;
+                    || (t == FieldType.STRING && f.getValue() != null) || f.isTemplate()) continue;
             if (t == FieldType.BITS || t == FieldType.BOOL) { total += f.getConsume(); continue; }
             if (f.isEcho()) continue;               // PS-588: it advances nothing
             if (t == FieldType.BYTES || t == FieldType.ASCII || t == FieldType.HEX
@@ -1049,6 +1148,9 @@ public class Schema {
             }
             f.setLookup(lookup);
             f.setLookupSequence(true);
+        }
+        if (fm.get("template") instanceof String template) {
+            f.setTemplate(template);                    // PS-590 (CR-2026-176)
         }
         Object nameFromRaw = fm.get("name_from");
         if (nameFromRaw != null) {
@@ -1856,6 +1958,13 @@ public class Schema {
      */
     private Object decodeField(Field field, DecodeContext ctx, boolean fieldRules) {
         try {
+            if (field.isPeekedNumber()) {
+                // PS-603 (CR-2026-182): a whole number declaring `consume: 0` reads in place.
+                int start = ctx.getOffset();
+                Object value = decodeFieldBody(field, ctx, fieldRules);
+                ctx.setOffset(start);
+                return value;
+            }
             return decodeFieldBody(field, ctx, fieldRules);
         } catch (SchemaException.BufferUnderflow e) {
             // PS-535: the innermost field that read past the end is named; an enclosing
@@ -2072,15 +2181,16 @@ public class Schema {
             }
             
             case STRING -> {
-                // A literal reads no bytes (PS-357), and `string` is only ever a literal: a
-                // string read from the payload is `ascii` (PS-361). A string with no value
-                // reported null.
-                if (field.getValue() == null) {
-                    throw new SchemaException.DecodeException("field '" + field.getName()
-                            + "': type string declares no value; a string read from the payload "
-                            + "is type ascii (PS-361)");
+                // A literal reads no bytes (PS-357), nor does a template (PS-590); a string
+                // read from the payload is `ascii` (PS-361), so one with neither is refused
+                // at load. A string with no value reported null.
+                if (field.isTemplate()) {
+                    value = TemplateStrings.render(field, ctx);     // null: absent (PS-591/592)
+                } else if (field.getValue() == null) {
+                    throw new SchemaException.DecodeException(TemplateStrings.neitherMessage(field.getName()));
+                } else {
+                    value = field.getValue();
                 }
-                value = field.getValue();
             }
 
             case BOOLEAN -> {
@@ -3187,6 +3297,18 @@ public class Schema {
                 return value;
             }
         }
+    }
+
+    /**
+     * What a whole number that does not consume decodes from {@code span} (PS-604,
+     * CR-2026-182): its type, arithmetic and lookup, as a decoder applies them; null where
+     * it has no value.
+     */
+    Object peekedNumberValue(Field field, byte[] span) {
+        Object value = decodeField(field, new DecodeContext(span, getEndian()));
+        if (value instanceof Double d && d == 0.0) return 0.0;      // PS-566
+        return value instanceof Number || value instanceof String || value instanceof Boolean
+                ? value : null;
     }
 
     private Object formatBytes(byte[] data, String format, String separator) {

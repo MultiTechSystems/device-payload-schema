@@ -129,6 +129,11 @@ func checkReferences(raw map[string]any, order keyOrder) error {
 					for _, match := range declaredNameTemplate.FindAllStringSubmatch(s, -1) {
 						names = append(names, match[1])
 					}
+				} else if k == "template" {
+					// PS-590 (CR-2026-176): a string field's ${name} and ${name:format}.
+					for _, match := range stringTemplateReference.FindAllStringSubmatch(s, -1) {
+						names = append(names, match[1])
+					}
 				}
 				for _, n := range names {
 					if !declared[n] {

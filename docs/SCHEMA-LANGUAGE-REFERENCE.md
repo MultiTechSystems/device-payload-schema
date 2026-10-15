@@ -274,7 +274,31 @@ field a level may hold (PS-015).
   equal what the field decodes from the bytes the other fields write over its span (its
   `format` and `separator`, or the trailing 0x00 removal, applied first), or the input is
   rejected naming the field (PS-589).
-- On any other type than a bit range or `bool`, `consume: 0` is NOT RECOMMENDED (PS-453).
+- On any other type than a bit range, a `bool`, a byte string or a whole number (below),
+  `consume: 0` is NOT RECOMMENDED (PS-453).
+
+#### Reading a whole number in place (`consume: 0`)
+
+A whole numeric field - an integer `uN`/`sN`, a float `f16`/`bf16`/`f32`/`f64`, a minifloat,
+`udec`/`sdec` or a word-ordered variant - declaring `consume: 0` reads its value from the bytes
+at the read position as it otherwise would, and leaves the position where it was (PS-603). It
+is reported, referenced and matched on like any field, as its full bit range is. A frame's kind
+peeked before the cases that read it again:
+
+```yaml
+- {name: _kind, type: u8, consume: 0}
+- match:
+    field: $_kind
+    cases:
+      1: [{name: kind, type: u8}, {name: temperature, type: s16, div: 10}]
+      2: [{name: kind, type: u8}, {name: battery, type: u8}]
+# 01 00D7 -> {"kind": 1, "temperature": 21.5}
+```
+
+- An encoder writes nothing for it; the fields that consume its bytes write them. Where the
+  input omits it, the bytes fix it, and it is not required. A value given for it must equal
+  what those bytes decode to, through its own type, arithmetic and lookup, or the input is
+  rejected naming the field (PS-604).
 
 ### Special Types
 
@@ -749,7 +773,15 @@ a format carrying `:N`.
 Encoding parses each segment by its format: leading zeros are accepted, hex in either case,
 and a `-` only on `sdecimal` (PS-096, PS-431). A segment the part's width cannot hold - 0 to
 2^w - 1, or -2^(w-1) to 2^(w-1) - 1 for `sdecimal` - is rejected naming the field and the
-segment, never masked (PS-583).
+segment, never masked (PS-583). A value without the declared `prefix`, or with a segment
+count other than the part count, is rejected; a missing part is never filled with 0 and an
+extra segment never ignored (PS-605).
+
+With `delimiter: ""` the parts are joined with nothing between them, and an encoder splits
+the value by each part's `:N` width (PS-606). That needs every part to declare a width that
+holds its largest value (`hex:2` for 8 bits, `decimal:3`) and no part to be `sdecimal`; a
+field that does not meet this still decodes, but is refused for encoding, and a value whose
+length differs from the sum of the widths is rejected.
 
 ## Test Vectors
 
@@ -1133,6 +1165,32 @@ stays available as a variable.
 This is the one construct whose output cannot be round-tripped: encoding looks a field up
 by its schema name, and the decoded output holds the resolved key instead.
 
+## Template Strings (`template`)
+
+A `type: string` field declares either `value`, a literal, or `template`, text joined from
+values decoded earlier (PS-361, PS-590). It reads and writes no bytes, and an encoder ignores
+a value given for it.
+
+```yaml
+- {name: _major, type: u8}
+- {name: _minor, type: u8}
+- {name: _build, type: u16}
+- name: firmware_version            # 01 02 0003 -> "1.02.003"
+  type: string
+  template: "${_major}.${_minor:decimal:2}.${_build:decimal:3}"
+```
+
+- `${name}` writes the value as `name_from` does (PS-532): a number as JavaScript's
+  `String(n)`, a looked-up field's label, a string as it is, a boolean as `true`/`false`.
+- `${name:format}` writes the number the reference binds - a looked-up field's code - in a
+  bitfield_string part format: `decimal`, `sdecimal`, `hex` or `hex:upper`, with an optional
+  `:N` minimum width (zero-filled, never cut; a `-` before the padding).
+- `$$` writes a `$`.
+- A reference with no value makes the field absent (PS-592); a format given a fraction, or
+  `hex` given a negative number, makes it absent with a warning (PS-591).
+- A reference to an undeclared name, an object or a repeat, a format that is not a part
+  format, and `template` beside `value` or off `type: string` are rejected at load.
+
 ## TLV (Type-Length-Value)
 
 Parse tag-based variable content. Supports single and multi-byte tags.
@@ -1292,6 +1350,36 @@ A reference that does not resolve, a cycle, or a pointer not of the form
 (`lib.yaml#/definitions/x`) is resolved only by `tools/schema_preprocessor.py`, which also
 applies `rename:` and `prefix:`; an interpreter given one rejects it (PS-462). The `use:`
 shorthand is withdrawn (CR-2026-045): write `$ref`.
+
+### Field templates and shared lookup tables
+
+A definition carries exactly one of `fields` (a group, as above), `field` (one field) or
+`lookup` (a table) (PS-345, CR-2026-168):
+
+```yaml
+definitions:
+  alarm_codes:
+    lookup: {0: none, 1: low, 2: high, 3: sensor_fault, default: "alarm${value}"}
+  probe:
+    field: {type: s16, div: 10, unit: Cel, valid_range: [-40, 125]}
+
+fields:
+  - {$ref: "#/definitions/probe", name: temp_1}
+  - {$ref: "#/definitions/probe", name: temp_2}
+  - {$ref: "#/definitions/probe", name: temp_ext, div: 100}   # div replaced
+  - {name: alarm_1, type: u8, lookup: "#/definitions/alarm_codes"}
+```
+
+A `$ref` to a `field` definition may carry field keys beside it: each replaces the defined
+key whole, one level deep, so a `lookup` or `transform` given there is not merged with the
+definition's (PS-578). The resolved field must have a `name`, from the definition or the
+reference. A `$ref` to a group carries nothing else, and a `$ref` in a field list never
+names a `lookup` definition (PS-348). A field's `lookup` may be the pointer
+`#/definitions/<name>` to a `lookup` definition, and decodes and encodes exactly as the
+table written in its place (PS-579). A `field` definition may use a pointer, and a group may
+reference `field` definitions; references resolve transitively, and a cycle is invalid
+(PS-580, PS-349). The decoded output and `_meta` are those of the schema written out. An
+`enum`'s `values` cannot point to a table.
 
 ## Port-Based Routing
 

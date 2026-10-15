@@ -90,6 +90,9 @@ public static partial class SchemaParser
                     else if (k == "name_from" || (inSenml && k == "name"))
                         foreach (Match m in TemplateReference.Matches(v))
                             names.Add(m.Groups[1].Value);
+                    else if (k == "template")                                  // PS-590
+                        foreach (Match m in TemplateStrings.Reference.Matches(v))
+                            names.Add(m.Groups[1].Value);
                     foreach (var n in names)
                         if (!declared.Contains(n)) ahead.Add((n, k));
                 }

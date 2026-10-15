@@ -173,7 +173,11 @@ public static class SchemaEncoder
         => f.Type is FieldType.Number or FieldType.String or FieldType.Boolean && f.Value != null;
 
     /// <summary>A computed field: <c>type: number</c> (or integer) with no <c>value</c>.</summary>
-    static bool IsComputed(SchemaField f) => f.Type == FieldType.Number && f.Value == null;
+    static bool IsComputed(SchemaField f) => f.Type == FieldType.Number && f.Value == null || IsTemplate(f);
+
+    /// <summary>A template string (PS-590, CR-2026-176): computed, writing no bytes; an input
+    /// value for it is ignored.</summary>
+    static bool IsTemplate(SchemaField f) => f.Type == FieldType.String && f.Template != null;
 
     /// <summary>
     /// Every name a field list declares, anywhere in it, with whether some declaration
@@ -449,7 +453,8 @@ public static class SchemaEncoder
             }
 
             // PS-359: a literal writes no bytes and its key is not required of the input.
-            if (field.Type is FieldType.String or FieldType.Boolean && field.Value != null)
+            if (field.Type is FieldType.String or FieldType.Boolean && field.Value != null
+                || IsTemplate(field))                                   // PS-590: computed
                 return Array.Empty<byte>();
             // PS-587 (CR-2026-174): a checksum is computed over the bytes written, never
             // taken from the input; its value is filled in when the frame is finished.
@@ -460,7 +465,7 @@ public static class SchemaEncoder
             // frame closes.
             if (field.IsEcho)
             {
-                frame?.AddEcho(field, data);
+                frame?.AddEcho(field, data, _endian);
                 return Array.Empty<byte>();
             }
             // PS-360: `value` on a field that reads bytes is the constant to write,
@@ -851,7 +856,7 @@ public static class SchemaEncoder
             foreach (var f in fields)
             {
                 if (IsPeekField(f)) { pending.Add(f); continue; }
-                if (f.Type == FieldType.Number
+                if (f.Type == FieldType.Number || IsTemplate(f)
                     || (f.Type is FieldType.String or FieldType.Boolean && f.Value != null))
                     continue;
                 bool construct = f.MatchInline != null || f.TLVInline != null || f.ByteGroup.Count > 0
@@ -1056,7 +1061,7 @@ public static class SchemaEncoder
         static bool Derivable(SchemaField? source)
         {
             if (source == null || string.IsNullOrEmpty(source.Name)) return false;
-            if (source.Type == FieldType.Number) return false;
+            if (source.Type == FieldType.Number || IsTemplate(source)) return false;
             if (source.Type is FieldType.String or FieldType.Boolean && source.Value != null) return false;
             return source.Value == null && source.NameFrom == null && source.Lookup == null
                 && source.Mult == null && source.Div == null && source.Add == null
@@ -1456,7 +1461,7 @@ public static class SchemaEncoder
             foreach (var member in group.ByteGroup)
             {
                 // A computed or literal member has no bits of its own (PS-359).
-                if (member.Type == FieldType.Number
+                if (member.Type == FieldType.Number || IsTemplate(member)
                     || (member.Type is FieldType.String or FieldType.Boolean && member.Value != null))
                     continue;
                 object? value = string.IsNullOrEmpty(member.Name) ? 0.0
@@ -1646,7 +1651,8 @@ public static class SchemaEncoder
             // in the payload, so they cannot be written back. Only elements that read
             // nothing (computed fields and literals) can be encoded.
             if (field.PresentIf != null && field.Fields.Any(f =>
-                    f.Type != FieldType.Number && !(f.Type is FieldType.String or FieldType.Boolean && f.Value != null)))
+                    f.Type != FieldType.Number && !IsTemplate(f)
+                    && !(f.Type is FieldType.String or FieldType.Boolean && f.Value != null)))
                 throw new InvalidOperationException($"repeat field '{field.Name}' declares present_if "
                     + "and its elements read payload bytes, so the elements it dropped cannot be "
                     + "encoded (PS-387)");
@@ -3236,8 +3242,8 @@ public static class SchemaEncoder
                     var raw = ToBytes(field, value);
                     return Pad(raw, EncodeLength(field, raw.Length));
                 }
-                case FieldType.String or FieldType.Boolean when field.Value != null:
-                    // A literal came from no bytes, so it writes none.
+                case FieldType.String or FieldType.Boolean when field.Value != null || IsTemplate(field):
+                    // A literal or a template came from no bytes, so it writes none.
                     return Array.Empty<byte>();
                 case FieldType.Ascii when field.Numeral != null && Helpers.ToFloat64(value).Item1:
                 {
@@ -3313,23 +3319,21 @@ public static class SchemaEncoder
         /// </remarks>
         byte[] EncodeBitfieldString(SchemaField field, string value)
         {
-            var text = value;
-            var prefix = field.Prefix ?? "";
-            if (prefix.Length > 0 && text.StartsWith(prefix))
-                text = text[prefix.Length..];
-            var delimiter = field.Delimiter ?? ".";
-            var segments = text.Split(delimiter);
+            var parts = field.Parts
+                .Where(p => p.Count >= 2 && Helpers.ToInt(p[0]).Item1 && Helpers.ToInt(p[1]).Item1)
+                .ToList();
+            // PS-605, PS-606 (CR-2026-183): the prefix required, the segment count checked, an
+            // empty delimiter split by width.
+            var segments = BitfieldParts.Segments(field.Name, field.Prefix, field.Delimiter, parts, value);
 
             ulong packed = 0;
-            for (int i = 0; i < field.Parts.Count; i++)
+            for (int i = 0; i < parts.Count; i++)
             {
-                var part = field.Parts[i];
-                if (part.Count < 2) continue;
-                var (offOk, bitOff) = Helpers.ToInt(part[0]);
-                var (lenOk, bitLen) = Helpers.ToInt(part[1]);
-                if (!offOk || !lenOk) continue;
+                var part = parts[i];
+                var (_, bitOff) = Helpers.ToInt(part[0]);
+                var (_, bitLen) = Helpers.ToInt(part[1]);
                 object? format = part.Count >= 3 ? part[2] : "decimal";
-                string segment = i < segments.Length ? segments[i] : "0";
+                string segment = segments[i];
                 // PS-096, PS-431, PS-583: parsed by the part's format; a value the width
                 // cannot hold is rejected, never masked.
                 ulong raw = BitfieldParts.ParseSegment(segment, bitLen, format, field.Name);
@@ -3436,7 +3440,7 @@ public static class SchemaEncoder
         static string? PayloadName(SchemaField f)
         {
             if (string.IsNullOrEmpty(f.Name) || f.Name.StartsWith("_")) return null;
-            if (f.Type == FieldType.Number) return null;
+            if (f.Type == FieldType.Number || IsTemplate(f)) return null;
             return f.Name;
         }
 
@@ -3502,12 +3506,13 @@ internal sealed class FrameBuffer
     /// value given for it is recorded at the position a decoder is at - the start of any
     /// bytes still pending - with its length read from the input (null for
     /// <c>remaining</c>).</summary>
-    public void AddEcho(SchemaField field, Dictionary<string, object?> data)
+    public void AddEcho(SchemaField field, Dictionary<string, object?> data, string endian = "big")
     {
         if (string.IsNullOrEmpty(field.Name)
             || !data.TryGetValue(field.Name, out var given) || given == null) return;
         int? length;
-        if (field.LengthRef != null)
+        if (field.IsPeekedNumber) length = SchemaField.WholeNumberSize(field.Type);   // PS-604
+        else if (field.LengthRef != null)
         {
             if (!data.TryGetValue(field.LengthRef, out var n)
                 || Helpers.ToFloat64(n) is not (true, var d) || d < 0 || d != Math.Floor(d))
@@ -3517,7 +3522,7 @@ internal sealed class FrameBuffer
         else if (field.Length < 0) length = null;
         else length = field.Length != 0 || field.LengthDeclared
             ? field.Length : Helpers.InferLengthFromType(field.Type);
-        _echoes.Add(new Echo(_buf.Count, field, given, length));
+        _echoes.Add(new Echo(_buf.Count, field, given, length, endian));
     }
 
     void Cover(int position, byte[] mask)
@@ -3645,7 +3650,8 @@ internal sealed record Peek(int Position, int Size, bool Little, int Start, int 
 /// <summary>A non-consuming byte string given a value (CR-2026-175, PS-589): where a decoder
 /// reads it, its field, the value given, and its length (null for <c>remaining</c>, the end
 /// of the frame it is checked in).</summary>
-internal sealed record Echo(int Position, SchemaField Field, object? Given, int? Length);
+internal sealed record Echo(int Position, SchemaField Field, object? Given, int? Length,
+    string Endian = "big");
 
 /// <summary>
 /// A frame's PS-551 metadata (CR-2026-141): per byte, the bits some field wrote, and each
@@ -3755,13 +3761,19 @@ internal sealed class FrameMeta
             else
             {
                 object? found;
-                try { found = EchoValue(e.Field, frame.AsSpan(e.Position, length)); }
+                try
+                {
+                    found = e.Field.IsPeekedNumber
+                        ? SchemaDecoder.PeekedNumberValue(e.Field, frame.AsSpan(e.Position, length).ToArray(), e.Endian)
+                        : EchoValue(e.Field, frame.AsSpan(e.Position, length));
+                }
                 catch (Exception) { found = null; }
                 if (found != null && EchoEquals(found, e.Given)) continue;
                 written = found != null ? EchoText(found) : "too few bytes";
             }
             throw new FieldErrorException($"Field '{e.Field.Name}' is given {EchoText(e.Given)}, "
-                + $"but the other fields write {written} over its span (PS-589)");
+                + $"but the other fields write {written} over its span "
+                + (e.Field.IsPeekedNumber ? "(PS-604)" : "(PS-589)"));
         }
     }
 

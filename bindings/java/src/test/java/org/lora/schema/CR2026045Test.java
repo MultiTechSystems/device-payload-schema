@@ -38,8 +38,9 @@ public class CR2026045Test {
                 "{name: k, type: number, value: 3, mult: 2}"}) {
             assertThrows(SchemaException.class, () -> Schema.fromYaml("name: p\nfields:\n  - " + field + "\n"), field);
         }
-        Schema bare = Schema.fromYaml("name: p\nfields:\n  - {name: s, type: string, length: 2}\n");
-        Exception e = assertThrows(SchemaException.class, () -> bare.decode(new byte[]{'a', 'b'}));
+        // CR-2026-176 (PS-361 amended): refused at load, where it was refused at decode.
+        Exception e = assertThrows(SchemaException.class, () -> Schema.fromYaml(
+                "name: p\nfields:\n  - {name: s, type: string, length: 2}\n"));
         assertTrue(e.getMessage().contains("PS-361"), e.getMessage());
         Schema schema = Schema.fromYaml("name: p\nfields:\n  - {name: cid, type: u8, value: 16}\n"
             + "  - {name: unit, type: string, value: ppm}\n  - {name: x, type: u8}\n");

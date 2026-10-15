@@ -204,6 +204,7 @@ C_UNSUPPORTED_KEYS = {
     # CR-2026-174: the C interpreter checks and computes one (field_set_checksum), but a
     # field record has no slot for its algorithm, seed, `from` or `on_mismatch`.
     "checksum": "this format has no checksum record (PS-585)",
+    "template": "the C interpreter has no template string; a string joined from values is not built (PS-590)",
     "sentinel": "the C interpreter has no sentinel (PS-427)",
     "out_of_range": "the C interpreter has no out_of_range: omit (PS-428)",
     "default": ("the C interpreter has no enum default, and no field default to write "
@@ -321,6 +322,13 @@ def field_errors(field: Dict, schema_endian: str = 'big') -> List[str]:
         # advances past every byte string, so the fields after it would read other bytes.
         refuse("`consume: 0` on a byte string",
                "the C interpreter has no non-consuming byte string (PS-588)")
+
+    from schema_interpreter import is_peeked_number
+    if is_peeked_number(field):
+        # CR-2026-182: a whole number that reads in place (PS-603). The C interpreter
+        # advances past every whole field, so the fields after it would read other bytes.
+        refuse("`consume: 0` on a whole numeric field",
+               "the C interpreter has no whole field that reads in place (PS-603)")
 
     if 'match' in field and not field.get('type'):
         refuse("`match`", "this format has no inline match record")
@@ -445,12 +453,17 @@ def _clamp_stages(node, _top=True):
 
 def schema_errors(schema: Dict) -> List[str]:
     """Every field_errors() finding in a schema, plus what the C loader would cut."""
-    errors = []
+    # PS-345 to PS-349, PS-578 to PS-580 (CR-2026-168): references and lookup pointers are
+    # resolved on the host, so the blob carries each field and table written out, and an
+    # invalid reference is refused in the spec prototype's text.
+    from schema_interpreter import expand_refs, reference_errors
+    expanded, errors = expand_refs(schema)
+    if not errors:
+        schema = expanded
     endian = schema.get('endian', 'big')
     # PS-539 (CR-2026-117): a reference naming nothing declared is a schema error on
     # every path, the binary blob the C interpreter loads included.
-    from schema_interpreter import expand_refs, reference_errors
-    errors.extend(reference_errors(expand_refs(schema)[0]))     # after splicing (CR-2026-127)
+    errors.extend(reference_errors(expanded))                   # after splicing (CR-2026-127)
     # PS-553 (CR-2026-138): a nameless field other than a skip is refused. Since PS-555
     # (CR-2026-142) the binary form carries the schema's names, and its name table gives a
     # length of 0 to a skip alone; the YAML is checked here, before conversion.
@@ -589,6 +602,9 @@ def encode_schema(schema: Dict, names: bool = True) -> bytes:
     makes that a rejection.
     """
     errors = schema_errors(schema)
+    if not errors:
+        from schema_interpreter import expand_refs
+        schema = expand_refs(schema)[0]          # every reference written out (CR-2026-168)
     fields = schema.get('fields', [])
     if (names and not errors and fields and _is_bit_range(fields[-1])
             and not fields[-1].get('consume')

@@ -286,7 +286,8 @@ final class Encoder {
     }
 
     private static boolean isComputed(Field f) {
-        return f.getType() == FieldType.NUMBER || f.getType() == FieldType.INTEGER;
+        return f.getType() == FieldType.NUMBER || f.getType() == FieldType.INTEGER
+                || f.isTemplate();          // PS-590: written from what it joins, no bytes
     }
 
     private static boolean isLiteral(Field f) {
@@ -843,6 +844,7 @@ final class Encoder {
 
     /** The byte count of a non-consuming byte string, read from the input. */
     private static Integer echoLength(Field field, Map<String, Object> data) {
+        if (field.isPeekedNumber()) return Field.wholeNumberSize(field.getType());   // PS-604
         if (field.getLengthRef() != null) {
             String ref = field.getLengthRef();
             if (ref.startsWith("$")) ref = ref.substring(1);
@@ -902,8 +904,9 @@ final class Encoder {
             } else {
                 Object found;
                 try {
-                    found = schema.echoValue(e.field(),
-                            java.util.Arrays.copyOfRange(frame, e.pos(), e.pos() + length));
+                    byte[] span = java.util.Arrays.copyOfRange(frame, e.pos(), e.pos() + length);
+                    found = e.field().isPeekedNumber() ? schema.peekedNumberValue(e.field(), span)
+                            : schema.echoValue(e.field(), span);
                 } catch (RuntimeException x) {
                     found = null;
                 }
@@ -912,7 +915,8 @@ final class Encoder {
             }
             throw new SchemaException.EncodeException("Field '" + e.field().getName()
                     + "' is given " + echoText(e.given()) + ", but the other fields write "
-                    + written + " over its span (PS-589)");
+                    + written + " over its span ("
+                    + (e.field().isPeekedNumber() ? "PS-604" : "PS-589") + ")");
         }
     }
 
@@ -1288,7 +1292,8 @@ final class Encoder {
             for (Field member : field.getFields()) {
                 boolean readsNothing = member.getType() == FieldType.NUMBER
                         || member.getType() == FieldType.BOOLEAN
-                        || (member.getType() == FieldType.STRING && member.getValue() != null);
+                        || (member.getType() == FieldType.STRING && member.getValue() != null)
+                        || member.isTemplate();
                 if (!readsNothing) {
                     throw new SchemaException.EncodeException("repeat field '" + name
                             + "' declares present_if and its elements read payload bytes, so the "
@@ -3314,8 +3319,9 @@ final class Encoder {
             return pad(raw, encodeLength(field, raw.length));
         }
 
-        if ((type == FieldType.STRING || type == FieldType.BOOLEAN) && field.getValue() != null) {
-            // A literal came from no bytes, so it writes none. This wrote its text:
+        if (((type == FieldType.STRING || type == FieldType.BOOLEAN) && field.getValue() != null)
+                || field.isTemplate()) {
+            // A literal came from no bytes, so it writes none, nor does a template (PS-590). This wrote its text:
             // `{type: string, value: "ppm"}` re-encoded 07 as 70706d07.
             return new byte[0];
         }
@@ -3395,31 +3401,31 @@ final class Encoder {
      * The hex parts are lowercase on output (PS-074), and parsing is case-insensitive.
      */
     private byte[] encodeBitfieldString(Field field, String value) {
-        String text = value;
-        String prefix = field.getPrefix() == null ? "" : field.getPrefix();
-        if (!prefix.isEmpty() && text.startsWith(prefix)) {
-            text = text.substring(prefix.length());
+        List<List<Object>> parts = new ArrayList<>();
+        if (field.getParts() != null) {
+            for (List<Object> part : field.getParts()) {
+                if (part.size() >= 2 && asLong(part.get(0)) != null && asLong(part.get(1)) != null) {
+                    parts.add(part);
+                }
+            }
         }
-        String delimiter = field.getDelimiter() == null ? "." : field.getDelimiter();
-        String[] segments = text.split(java.util.regex.Pattern.quote(delimiter), -1);
+        // PS-605, PS-606 (CR-2026-183): the prefix required, the segment count checked, an
+        // empty delimiter split by width.
+        List<String> segments = BitfieldParts.segments(field.getName(), field.getPrefix(),
+                field.getDelimiter(), parts, value);
 
         long packed = 0;
-        List<List<Object>> parts = field.getParts();
-        if (parts != null) {
-            for (int i = 0; i < parts.size(); i++) {
-                List<Object> part = parts.get(i);
-                if (part.size() < 2) continue;
-                Long bitOff = asLong(part.get(0));
-                Long bitLen = asLong(part.get(1));
-                if (bitOff == null || bitLen == null) continue;
-                Object format = part.size() >= 3 ? part.get(2) : "decimal";
-                String segment = i < segments.length ? segments[i] : "0";
-                // PS-096, PS-431, PS-583: parsed by the part's format; a value the width
-                // cannot hold is rejected, never masked.
-                long raw = BitfieldParts.parseSegment(segment, bitLen.intValue(), format, field.getName());
-                long mask = bitLen >= 64 ? -1L : (1L << bitLen) - 1;
-                packed |= (raw & mask) << bitOff;
-            }
+        for (int i = 0; i < parts.size(); i++) {
+            List<Object> part = parts.get(i);
+            Long bitOff = asLong(part.get(0));
+            Long bitLen = asLong(part.get(1));
+            Object format = part.size() >= 3 ? part.get(2) : "decimal";
+            String segment = segments.get(i);
+            // PS-096, PS-431, PS-583: parsed by the part's format; a value the width
+            // cannot hold is rejected, never masked.
+            long raw = BitfieldParts.parseSegment(segment, bitLen.intValue(), format, field.getName());
+            long mask = bitLen >= 64 ? -1L : (1L << bitLen) - 1;
+            packed |= (raw & mask) << bitOff;
         }
         int length = field.getLength() > 0 ? field.getLength() : 2;
         // PS-050a: the field's own byte order, as it is decoded; this wrote the schema's.
