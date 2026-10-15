@@ -1,0 +1,158 @@
+# CR-2026-185 (PS-585 amended, PS-608, PS-609): where a checksum field may sit, an empty
+# covered range, and normalizeUplink() without an FPort.
+#
+# Four lists. `decode`, `cases` and `load` are read by the reference and the generated codec
+# (tests/test_cr_2026_185_cases.py), Go (go/schema/cr185_test.go), Java (CR2026185Test.java)
+# and C# (CR2026_185Tests.cs); `normalize` by the reference and the generated codec only, the
+# two that produce a normalized payload:
+#
+#   decode:    `schema` (YAML text), `payload` (hex) and either `expected` (the whole data
+#              mapping, compared exactly) or `error` (text one of the errors contains).
+#   cases:     `schema`, `input` (JSON text) and either `payload` (hex) or `error`.
+#   load:      `schema` and `error`, text one of the load errors contains.
+#   normalize: `schema`, `data` (the decoded data, a mapping), optional `fport`, and
+#              `normalized` (normalizeUplink()'s data) with `warnings` (the exact list).
+#
+# The errors and warnings are the spec prototype's text (TestCR2026185ChecksumPlacementAndNormalize).
+
+decode:
+
+- name: a_match_case_covers_the_discriminator
+  schema: "name: t\nfields:\n  - {name: k, type: u8}\n  - match:\n      field: $k\n      cases:\n        1:\n          - {name: v, type: u8}\n          - {name: c, type: u8, checksum: {algo: xor8}}\n"
+  payload: "013031"
+  expected: {k: 1, v: 48, c: 49}
+
+- name: an_empty_range_is_an_error
+  schema: "name: t\nfields:\n  - {name: a, type: u8}\n  - {name: c, type: u8, checksum: {algo: xor8, from: 1}}\n"
+  payload: "0700"
+  error: "Field 'c': the checksum range starts at byte 1, at or after the field at byte 1, so it covers nothing (PS-608)"
+
+- name: a_range_past_the_field_is_an_error
+  schema: "name: t\nfields:\n  - {name: a, type: u8}\n  - {name: c, type: u8, checksum: {algo: xor8, from: 2}}\n"
+  payload: "0700"
+  error: "Field 'c': the checksum range starts at byte 2, at or after the field at byte 1, so it covers nothing (PS-608)"
+
+- name: a_repeat_trailer_counts_from_the_frame
+  schema: "name: t\nfields:\n  - name: items\n    type: repeat\n    until: end\n    reserve: 1\n    fields:\n      - {name: v, type: u8}\n    trailer:\n      - {name: c, type: u8, checksum: {algo: xor8}}\n"
+  payload: "010203"
+  expected: {items: [{v: 1}, {v: 2}], c: 3}
+
+- name: a_repeat_trailer_mismatch
+  schema: "name: t\nfields:\n  - name: items\n    type: repeat\n    until: end\n    reserve: 1\n    fields:\n      - {name: v, type: u8}\n    trailer:\n      - {name: c, type: u8, checksum: {algo: xor8}}\n"
+  payload: "010204"
+  error: "Field 'c': xor8 over bytes 0 to 1 is 0x3, but the frame carries 0x4 (PS-586)"
+
+- name: after_a_tlv_that_reserves_it
+  schema: "name: t\nfields:\n  - {name: h, type: u8}\n  - tlv:\n      tag_size: 1\n      reserve: 1\n      cases:\n        1: [{name: v, type: u8}]\n  - {name: c, type: u8, checksum: {algo: xor8}}\n"
+  payload: "0901050d"
+  expected: {h: 9, v: 5, c: 13}
+
+- name: in_a_flagged_group
+  schema: "name: t\nfields:\n  - {name: mask, type: u8}\n  - flagged:\n      field: mask\n      groups:\n        - bit: 0\n          fields:\n            - {name: v, type: u8}\n            - {name: c, type: u8, checksum: {algo: sum8}}\n"
+  payload: "010506"
+  expected: {mask: 1, v: 5, c: 6}
+
+cases:
+
+- name: a_match_case_covers_the_discriminator
+  schema: "name: t\nfields:\n  - {name: k, type: u8}\n  - match:\n      field: $k\n      cases:\n        1:\n          - {name: v, type: u8}\n          - {name: c, type: u8, checksum: {algo: xor8}}\n"
+  input: '{"k": 1, "v": 48}'
+  payload: "013031"
+
+- name: an_empty_range_is_rejected
+  schema: "name: t\nfields:\n  - {name: a, type: u8}\n  - {name: c, type: u8, checksum: {algo: xor8, from: 1}}\n"
+  input: '{"a": 7}'
+  error: "Field 'c': the checksum range starts at byte 1, where the field is, so it covers nothing (PS-608)"
+
+- name: a_repeat_trailer_counts_from_the_frame
+  schema: "name: t\nfields:\n  - name: items\n    type: repeat\n    until: end\n    reserve: 1\n    fields:\n      - {name: v, type: u8}\n    trailer:\n      - {name: c, type: u8, checksum: {algo: xor8}}\n"
+  input: '{"items": [{"v": 1}, {"v": 2}]}'
+  payload: "010203"
+
+- name: a_repeat_trailer_from_an_offset
+  schema: "name: t\nfields:\n  - {name: h, type: u8}\n  - name: items\n    type: repeat\n    until: end\n    reserve: 1\n    fields:\n      - {name: v, type: u8}\n    trailer:\n      - {name: c, type: u8, checksum: {algo: sum8, from: 1}}\n"
+  input: '{"h": 255, "items": [{"v": 1}, {"v": 2}]}'
+  payload: "ff010203"
+
+- name: after_a_tlv_that_reserves_it
+  schema: "name: t\nfields:\n  - {name: h, type: u8}\n  - tlv:\n      tag_size: 1\n      reserve: 1\n      cases:\n        1: [{name: v, type: u8}]\n  - {name: c, type: u8, checksum: {algo: xor8}}\n"
+  input: '{"h": 9, "v": 5}'
+  payload: "0901050d"
+
+- name: in_a_flagged_group
+  schema: "name: t\nfields:\n  - {name: mask, type: u8}\n  - flagged:\n      field: mask\n      groups:\n        - bit: 0\n          fields:\n            - {name: v, type: u8}\n            - {name: c, type: u8, checksum: {algo: sum8}}\n"
+  input: '{"mask": 1, "v": 5}'
+  payload: "010506"
+
+load:
+
+- name: a_byte_group_member
+  schema: "name: t\nfields:\n  - byte_group:\n      size: 2\n      fields:\n        - {name: a, type: \"u16[8:15]\"}\n        - {name: c, type: u8, checksum: {algo: xor8}}\n"
+  error: "Field 'c': a checksum field cannot sit within a byte_group; its `from` counts from the frame (PS-608)"
+
+- name: a_repeat_element
+  schema: "name: t\nfields:\n  - {name: n, type: u8}\n  - name: r\n    type: repeat\n    count: $n\n    fields:\n      - {name: v, type: u8}\n      - {name: c, type: u8, checksum: {algo: xor8}}\n"
+  error: "Field 'c': a checksum field cannot sit within a repeat element; its `from` counts from the frame (PS-608)"
+
+- name: a_repeat_element_of_one_field
+  schema: "name: t\nfields:\n  - name: r\n    type: repeat\n    until: end\n    element: {name: c, type: u8, checksum: {algo: xor8}}\n"
+  error: "Field 'c': a checksum field cannot sit within a repeat element; its `from` counts from the frame (PS-608)"
+
+- name: a_tlv_entry
+  schema: "name: t\nfields:\n  - tlv:\n      tag_fields: [{name: t, type: u8}]\n      tag_key: t\n      cases:\n        1:\n          - {name: v, type: u8}\n          - {name: c, type: u8, checksum: {algo: xor8}}\n"
+  error: "Field 'c': a checksum field cannot sit within a tlv entry; its `from` counts from the frame (PS-608)"
+
+- name: a_tlv_entry_with_a_length
+  schema: "name: t\nfields:\n  - tlv:\n      tag_size: 1\n      length_size: 1\n      cases:\n        1:\n          - {name: v, type: u8}\n          - {name: c, type: u8, checksum: {algo: sum8}}\n"
+  error: "Field 'c': a checksum field cannot sit within a tlv entry; its `from` counts from the frame (PS-608)"
+
+- name: a_records_entry
+  schema: "name: t\nfields:\n  - name: r\n    type: repeat\n    until: end\n    fields:\n      - records:\n          - - {name: v, type: u8}\n            - {name: c, type: u8, checksum: {algo: xor8}}\n"
+  error: "Field 'c': a checksum field cannot sit within a records entry; its `from` counts from the frame (PS-608)"
+
+- name: a_match_case_in_a_tlv_entry
+  schema: "name: t\nfields:\n  - tlv:\n      tag_size: 1\n      cases:\n        1:\n          - {name: k, type: u8}\n          - match:\n              field: $k\n              cases:\n                1: [{name: c, type: u8, checksum: {algo: xor8}}]\n"
+  error: "Field 'c': a checksum field cannot sit within a tlv entry; its `from` counts from the frame (PS-608)"
+
+- name: a_port_entry_repeat_element
+  schema: "name: t\nports:\n  2:\n    fields:\n      - name: r\n        type: repeat\n        until: end\n        fields:\n          - {name: v, type: u8}\n          - {name: c, type: u8, checksum: {algo: xor8}}\n"
+  error: "Field 'c': a checksum field cannot sit within a repeat element; its `from` counts from the frame (PS-608)"
+
+normalize:
+
+- name: ports_that_place_differently
+  schema: &ports "name: t\nversion: 1\nports:\n  1:\n    fields:\n      - {name: temperature, type: s16, div: 10, unit: \"°C\", semantic: air.temperature}\n  2:\n    fields:\n      - {name: temperature, type: s16, div: 10, unit: \"°C\", semantic: soil.temperature}\n      - {name: moisture, type: u8, unit: \"%\", semantic: soil.moisture}\n  3:\n    direction: downlink\n    fields:\n      - {name: temperature, type: u8}\n"
+  data: {temperature: 21.5}
+  normalized: {}
+  warnings: ["no FPort given and FPorts 1, 2 would place the values differently; nothing is placed (PS-609)"]
+
+- name: one_port_covers_every_key
+  schema: *ports
+  data: {temperature: 12.0, moisture: 31}
+  normalized: {soil: {temperature: 12.0, moisture: 31}}
+  warnings: []
+
+- name: an_fport_selects_the_entry
+  schema: *ports
+  data: {temperature: 21.5}
+  fport: 1
+  normalized: {air: {temperature: 21.5}}
+  warnings: []
+
+- name: candidates_that_agree_place_the_value
+  schema: "name: t\nversion: 1\nports:\n  1:\n    fields:\n      - {name: t, type: s16, unit: \"°C\", semantic: air.temperature}\n  2:\n    fields:\n      - {name: t, type: s16, unit: \"°C\", semantic: air.temperature}\n      - {name: x, type: u8}\n"
+  data: {t: 20}
+  normalized: {air: {temperature: 20}}
+  warnings: []
+
+- name: candidates_whose_plans_differ_but_place_alike
+  schema: "name: t\nversion: 1\nports:\n  1:\n    fields:\n      - {name: t, type: s16, unit: \"°C\", semantic: air.temperature}\n  2:\n    fields:\n      - {name: t, type: s16, unit: \"°C\", semantic: air.temperature}\n      - {name: m, type: u8, unit: \"%\", semantic: soil.moisture}\n"
+  data: {t: 20}
+  normalized: {air: {temperature: 20}}
+  warnings: []
+
+- name: no_candidate
+  schema: *ports
+  data: {other: 1}
+  normalized: {}
+  warnings: ["no FPort given and no uplink port entry reports every key of the data; nothing is placed (PS-609)"]

@@ -277,6 +277,7 @@ public static partial class SchemaParser
         CheckFieldNames(root);
         CheckSampled(root);    // PS-569 (CR-2026-156)
         PayloadSchema.Checksum.Check(root);    // PS-585 (CR-2026-174)
+        PayloadSchema.Checksum.CheckPlacement(root);    // PS-608 (CR-2026-185)
         Meta.CheckLookupTypes(root);    // PS-571 (CR-2026-161)
         schema.RepeatOnlyNames = RepeatOnlyNames(root);
         // PS-491 (CR-2026-096): one reported name's declarations in one field list agree

@@ -102,10 +102,11 @@ decode:
   payload: "1e07521e"
   expected: {segment: 30, a: 7}
 
-- name: empty_range_is_the_seed
+# CR-2026-185 (PS-608): an empty range is an error; it used to be the seed alone.
+- name: empty_range_is_an_error
   schema: "name: t\nfields:\n  - {name: c, type: u8, checksum: {algo: sum8, seed: 7}}\n  - {name: a, type: u8}\n"
   payload: "0709"
-  expected: {c: 7, a: 9}
+  error: "Field 'c': the checksum range starts at byte 0, at or after the field at byte 0, so it covers nothing (PS-608)"
 
 - name: in_a_case_after_an_inline_discriminator
   schema: "name: t\nfields:\n  - match:\n      length: 1\n      var: k\n      cases:\n        1:\n          - {name: a, type: u8}\n          - {name: c, type: u8, checksum: {algo: sum8}}\n"
@@ -115,7 +116,7 @@ decode:
 - name: range_starting_after_the_field
   schema: "name: t\nfields:\n  - {name: a, type: u8}\n  - {name: c, type: u8, checksum: {algo: sum8, from: 3}}\n"
   payload: "0102"
-  error: "Field 'c': the checksum range starts at byte 3, after the field at byte 1 (PS-585)"
+  error: "Field 'c': the checksum range starts at byte 3, at or after the field at byte 1, so it covers nothing (PS-608)"
 
 cases:
 
@@ -179,15 +180,8 @@ cases:
   input: '{"p": 1}'
   error: "Field 'c': the bytes its checksum covers are not all written when it is reached (PS-587)"
 
-- name: in_a_repeat_element
-  schema: "name: t\nfields:\n  - name: items\n    type: repeat\n    until: end\n    fields:\n      - {name: a, type: u8}\n      - {name: c, type: u8, checksum: {algo: sum8}}\n"
-  input: '{"items": [{"a": 1}]}'
-  error: "Field 'c': the bytes its checksum covers are not all written when it is reached (PS-587)"
-
-- name: in_a_tlv_entry
-  schema: "name: t\nfields:\n  - tlv:\n      tag_size: 1\n      cases:\n        1:\n          - {name: a, type: u8}\n          - {name: c, type: u8, checksum: {algo: sum8}}\n"
-  input: '{"a": 1}'
-  error: "Field 'c': the bytes its checksum covers are not all written when it is reached (PS-587)"
+# A checksum in a repeat element or a tlv entry is rejected at load since CR-2026-185
+# (PS-608): see tests/cr-2026-185-cases.yaml.
 
 load:
 

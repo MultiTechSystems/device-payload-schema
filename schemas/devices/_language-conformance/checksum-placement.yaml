@@ -1,0 +1,98 @@
+# PS-585 as amended and PS-608 (CR-2026-185): a check value's `from` counts from the first
+# byte of the frame wherever the field sits, and a range that covers nothing is an error.
+#
+# - port 1: the check value inside a case body covers the discriminator before it;
+# - port 2: the check value in the bytes reserved at the end of an element list covers
+#   every element before it, as a decoder reads it at its frame offset;
+# - port 3: the check value after a list of tagged entries that reserves its byte;
+# - port 4: the check value inside a group the mask selects;
+# - port 5: `from` at the field's own offset covers nothing, an error naming the field.
+#
+# Each frame with a correct check value re-encodes to itself, since the encoder computes
+# the value over the frame it writes.
+name: probe_checksum_placement
+endian: big
+ports:
+  1:
+    fields:
+      - {name: k, type: u8}
+      - match:
+          field: $k
+          cases:
+            1:
+              - {name: v, type: u8}
+              - {name: c, type: u8, checksum: {algo: xor8}}
+            2:
+              - {name: w, type: u16}
+              - {name: c, type: u8, checksum: {algo: sum8, from: 1}}
+  2:
+    fields:
+      - name: items
+        type: repeat
+        until: end
+        reserve: 1
+        fields:
+          - {name: v, type: u8}
+        trailer:
+          - {name: c, type: u8, checksum: {algo: xor8}}
+  3:
+    fields:
+      - {name: h, type: u8}
+      - tlv:
+          tag_size: 1
+          reserve: 1
+          cases:
+            1: [{name: v, type: u8}]
+      - {name: c, type: u8, checksum: {algo: xor8}}
+  4:
+    fields:
+      - {name: sel, type: u8}
+      - flagged:
+          field: sel
+          groups:
+            - bit: 0
+              fields:
+                - {name: v, type: u8}
+                - {name: c, type: u8, checksum: {algo: sum8}}
+  5:
+    fields:
+      - {name: a, type: u8}
+      - {name: c, type: u8, checksum: {algo: xor8, from: 1}}
+test_vectors:
+  - name: case_covers_its_discriminator
+    source: generated
+    fPort: 1
+    payload: "013031"
+    expected: {k: 1, v: 48, c: 49}
+  - name: case_from_an_offset
+    source: generated
+    fPort: 1
+    payload: "02123446"
+    expected: {k: 2, w: 4660, c: 70}
+  - name: reserved_byte_after_the_elements
+    source: generated
+    fPort: 2
+    payload: "010203"
+    expected: {items: [{v: 1}, {v: 2}], c: 3}
+  - name: reserved_byte_after_three_elements
+    source: generated
+    fPort: 2
+    payload: "10204070"
+    expected: {items: [{v: 16}, {v: 32}, {v: 64}], c: 112}
+  - name: after_the_tagged_entries
+    source: generated
+    fPort: 3
+    payload: "0901050d"
+    expected: {h: 9, v: 5, c: 13}
+  - name: in_the_selected_group
+    source: generated
+    fPort: 4
+    payload: "010506"
+    expected: {sel: 1, v: 5, c: 6}
+  - name: a_range_that_covers_nothing
+    source: generated
+    fPort: 5
+    payload: "0700"
+    expected_error:
+      requirement: PS-608
+      at: c

@@ -345,6 +345,8 @@ def fill_checksums(frame: bytes, placed: list, written: Optional[list] = None) -
         start = int(spec.get('from', 0))
         if start > position:
             raise FieldError(checksum_unwritten_message(field_def.get('name')))
+        if start == position:       # PS-608 (CR-2026-185): the range covers nothing
+            raise FieldError(checksum_covers_nothing_message(field_def.get('name'), start))
         value = compute_checksum(spec['algo'], bytes(out[start:position]),
                                  int(spec.get('seed', 0)))
         size = CHECKSUM_WIDTHS[field_def['type']] // 8
@@ -686,6 +688,21 @@ def written_discriminator_error(value, name):
     label = f"'{name}'" if name else 'an unnamed match'
     return (f"Field {label}: the discriminator {format_lookup_value(value)} is not an "
             f"integer, so it cannot be written (PS-557)")
+
+
+def checksum_apart(method):
+    """A tlv entry or a repeat element is encoded apart from the frame, so a checksum there
+    is refused (`_checksum_apart`); PS-608 rejects one at load. A repeat's trailer, encoded
+    beside its elements at its frame offset, is not apart (CR-2026-185)."""
+    def wrapper(self, *args, **kwargs):
+        self._checksum_apart = getattr(self, '_checksum_apart', 1) + 1
+        try:
+            return method(self, *args, **kwargs)
+        finally:
+            self._checksum_apart -= 1
+    wrapper.__name__ = method.__name__
+    wrapper.__doc__ = method.__doc__
+    return wrapper
 
 
 def tail_unchecked(method):
@@ -3956,19 +3973,82 @@ def checksum_mismatch(field_def: Dict[str, Any], buf: bytes, start_pos: int,
                       carried: int) -> Optional[str]:
     """PS-586: the declared checksum over `buf[from:start_pos]` against the value read.
     Returns the mismatch message, or None where they agree. A range starting after the
-    field is an error (PS-585)."""
+    field, or starting at it, covers nothing and is an error (PS-608)."""
     spec = field_def['checksum']
     name = field_def.get('name')
     start = int(spec.get('from', 0))
-    if start > start_pos:
-        raise FieldError(f"Field '{name}': the checksum range starts at byte {start}, after "
-                         f"the field at byte {start_pos} (PS-585)")
+    if start >= start_pos:          # PS-608 (CR-2026-185): an empty range is an error
+        raise FieldError(checksum_empty_range_message(name, start, start_pos))
     computed = compute_checksum(spec['algo'], bytes(buf[start:start_pos]),
                                 int(spec.get('seed', 0)))
     if computed == carried:
         return None
     return (f"Field '{name}': {spec['algo']} over bytes {start} to {start_pos - 1} is "
             f"0x{computed:X}, but the frame carries 0x{carried:X} (PS-586)")
+
+
+#: PS-608 (CR-2026-185): the constructs a checksum field may not sit within, as the spec
+#: prototype's CHECKSUM_EXCLUDED. `from` counts from the frame's first byte (PS-585), which
+#: these decode or encode apart from (a tlv entry) or repeat (a records entry, an element).
+CHECKSUM_EXCLUDED = {'byte_group': 'a byte_group', 'tlv': 'a tlv entry',
+                     'records': 'a records entry'}
+
+
+def checksum_placement_message(name, inside: str) -> str:
+    """PS-608: the prototype's check_checksum_placement text."""
+    return (f"Field '{name}': a checksum field cannot sit within {inside}; its `from` "
+            f"counts from the frame (PS-608)")
+
+
+def checksum_placement_errors(schema) -> List[str]:
+    """PS-608 (CR-2026-185): a checksum field as a byte_group member, or within a tlv entry,
+    a records entry or a repeat's `fields` or `element`, is rejected at load. A repeat's
+    `trailer` is read at its frame offset (PS-383) and is allowed. Walked as the spec
+    prototype walks it, over the header, fields and ports of the `$ref`-spliced schema; the
+    first violation only, as the prototype raises it."""
+    if not isinstance(schema, dict):
+        return []
+    try:
+        schema = expand_refs(schema)[0]
+    except Exception:
+        pass
+
+    def walk(node, inside):
+        if isinstance(node, list):
+            for item in node:
+                found = walk(item, inside)
+                if found:
+                    return found
+        elif isinstance(node, dict):
+            if 'checksum' in node and 'type' in node and inside:
+                return checksum_placement_message(node.get('name'), inside)
+            repeat = node.get('type') == 'repeat'
+            for key, value in node.items():
+                if key == 'checksum':
+                    continue
+                within = CHECKSUM_EXCLUDED.get(key, inside)
+                if repeat and key in ('fields', 'element'):
+                    within = 'a repeat element'
+                found = walk(value, within)
+                if found:
+                    return found
+        return None
+
+    found = walk({'header': schema.get('header'), 'fields': schema.get('fields'),
+                  'ports': schema.get('ports')}, None)
+    return [found] if found else []
+
+
+def checksum_empty_range_message(name, start: int, position: int) -> str:
+    """PS-608 (CR-2026-185) on decode: `from` at or past the field covers nothing."""
+    return (f"Field '{name}': the checksum range starts at byte {start}, at or after the "
+            f"field at byte {position}, so it covers nothing (PS-608)")
+
+
+def checksum_covers_nothing_message(name, start: int) -> str:
+    """PS-608 (CR-2026-185) on encode: `from` where the field is covers nothing."""
+    return (f"Field '{name}': the checksum range starts at byte {start}, where the field "
+            f"is, so it covers nothing (PS-608)")
 
 
 def checksum_unwritten_message(name) -> str:
@@ -4389,6 +4469,7 @@ def schema_iterator_errors(schema):
     errors.extend(numeral_errors(schema))                            # PS-560
     errors.extend(ascii_text_errors(schema))                         # PS-534, PS-593
     errors.extend(checksum_errors(schema))                           # PS-585
+    errors.extend(checksum_placement_errors(schema))                 # PS-608
     errors.extend(bitfield_part_errors(schema))                      # PS-430
     errors.extend(string_template_errors(schema))                    # PS-590
     errors.extend(time_errors(schema))                               # PS-610 to PS-614
@@ -5501,6 +5582,189 @@ def semantic_warnings(schema: Dict[str, Any]) -> List[str]:
     return warnings
 
 
+def _bit_list(bits) -> str:
+    """Bit numbers as runs: {0, 5, 6, 7} is 'bits 0, 5-7'; {7} is 'bit 7'."""
+    runs: List[List[int]] = []
+    ordered = sorted(bits)
+    for bit in ordered:
+        if runs and bit == runs[-1][1] + 1:
+            runs[-1][1] = bit
+        else:
+            runs.append([bit, bit])
+    text = ', '.join(str(a) if a == b else f"{a}-{b}" for a, b in runs)
+    return ('bit ' if len(ordered) == 1 else 'bits ') + text
+
+
+def _skip_bit_positions(member: Dict[str, Any], endian: str) -> set:
+    """The (byte, bit) positions a bit range, bool or whole integer covers, bytes counted
+    from where it reads, in its byte order (PS-059)."""
+    base, low, high, _ = byte_group_member_range(member)
+    positions = set()
+    for bit in range(low, high + 1):
+        index = bit // 8 if endian == 'little' else base - 1 - bit // 8
+        positions.add((index, bit % 8))
+    return positions
+
+
+class _BitTrack:
+    """PS-607's view of one decode path, as the spec prototype's: the bits read in place, per
+    byte offset, and where the read position is. `known` says whether offsets still count
+    from the frame's start."""
+
+    def __init__(self, known: bool):
+        self.read: Dict[int, set] = {}
+        self.position = 0
+        self.known = known
+
+    def copy(self) -> '_BitTrack':
+        other = _BitTrack(self.known)
+        other.read = {k: set(v) for k, v in self.read.items()}
+        other.position = self.position
+        return other
+
+    def lose(self) -> None:
+        self.read.clear()
+        self.position, self.known = 0, False
+
+
+def _skip_bit_walk(fields: Any, track: _BitTrack, endian: str, notes: List[str]) -> None:
+    """PS-607 along one decode path, as the spec prototype's `_skip_bit_walk`. Bits are
+    tracked across the frame: an object's members continue the same bytes, and each match
+    case or flagged group starts from a copy of the state before it (an inline discriminator
+    read first), so a bit any field of the same path reads counts as read. A construct whose
+    size the walk cannot know ends the tracking afterwards, and a repeat's or tlv's bodies
+    are walked on their own; the check stays silent rather than guess."""
+
+    def advance(count: int, by: str) -> None:
+        for offset in range(track.position, track.position + count):
+            bits = track.read.pop(offset, None)
+            if bits and len(bits) < 8:
+                where = f"byte {offset}" if track.known else "a byte"
+                notes.append(
+                    f"{where} is read in part ({_bit_list(bits)}) and {by} advances past "
+                    f"it; {_bit_list(set(range(8)) - bits)} "
+                    f"{'is' if len(bits) == 7 else 'are'} read by no field. A decoder "
+                    f"discards them and an encoder writes them as 0 (PS-607)")
+        track.position += count
+
+    def branches(bodies) -> None:
+        for body in bodies:
+            if isinstance(body, dict):
+                body = body.get('fields')
+            if isinstance(body, list):
+                _skip_bit_walk(body, track.copy(), endian, notes)
+        track.lose()
+
+    def apart(bodies) -> None:
+        for body in bodies:
+            if isinstance(body, dict) and 'type' in body:
+                body = [body]
+            elif isinstance(body, dict):
+                body = body.get('fields')
+            if isinstance(body, list):
+                _skip_bit_walk(body, _BitTrack(False), endian, notes)
+
+    for item in fields or []:
+        if not isinstance(item, dict):
+            continue
+        kind = str(item.get('type', '')).strip()
+        lower = kind.lower()
+        lower = _META_TYPE_ALIASES.get(lower, lower)
+        if not kind:  # a construct
+            if 'match' in item and isinstance(item['match'], dict):
+                spec = item['match']
+                if 'type' in spec:  # an inline discriminator is read first
+                    _skip_bit_walk([{k: v for k, v in spec.items()
+                                     if k in ('name', 'type', 'consume', 'bit', 'endian')}],
+                                   track, endian, notes)
+                cases = spec.get('cases')
+                bodies = list(cases.values()) if isinstance(cases, dict) else []
+                if spec.get('default') is not None:
+                    bodies.append(spec['default'])
+                branches(bodies)
+            elif 'flagged' in item and isinstance(item['flagged'], dict):
+                branches(item['flagged'].get('groups') or [])
+            elif 'tlv' in item and isinstance(item['tlv'], dict):
+                cases = item['tlv'].get('cases')
+                apart(list(cases.values()) if isinstance(cases, dict) else [])
+                track.lose()
+            elif 'records' in item and isinstance(item['records'], list):
+                apart(item['records'])
+                track.lose()
+            else:
+                track.lose()  # byte_group (PS-553) and the rest
+            continue
+        name = item.get('name')
+        label = f"'{name}'" if name else f"the {lower}"
+        own = item.get('endian', endian)
+        if lower == 'skip':
+            length = item.get('length')
+            if isinstance(length, int) and not isinstance(length, bool):
+                advance(length, f"the skip {label}" if name else "a skip")
+            else:
+                track.lose()
+            continue
+        if lower == 'object':
+            _skip_bit_walk(item.get('fields'), track, own, notes)  # the same bytes go on
+            continue
+        if lower == 'repeat':
+            apart([item.get('element')] + [item.get('fields'), item.get('trailer')])
+            track.lose()
+            continue
+        if 'value' in item or 'compute' in item or 'template' in item \
+                or lower in ('string', 'number', 'boolean'):
+            continue
+        bit_field = lower == 'bool' or _BIT_RANGE.match(kind) is not None
+        if bit_field or (lower in _FIXED_TYPE_SIZES and item.get('consume') == 0):
+            member = item if bit_field else dict(item, type=lower)
+            if lower == 'bool' and 'bit' not in item:
+                member = dict(item, bit=0)
+            try:
+                positions = _skip_bit_positions(member, own)
+            except ValueError:
+                track.lose()
+                continue
+            for index, bit in positions:
+                track.read.setdefault(track.position + index, set()).add(bit)
+            consume = item.get('consume', 0 if bit_field else None)
+            if isinstance(consume, int) and not isinstance(consume, bool) and consume > 0:
+                advance(consume, f"{label}, with consume: {consume},")
+            continue
+        if lower in _FIXED_TYPE_SIZES:
+            for offset in range(track.position, track.position + _FIXED_TYPE_SIZES[lower]):
+                track.read.pop(offset, None)  # read whole
+            track.position += _FIXED_TYPE_SIZES[lower]
+            continue
+        track.lose()
+
+
+def skip_bit_notes(schema: Dict[str, Any]) -> List[str]:
+    """The information note PS-607 allows (CR-2026-184, amended 2026-10-15), in the spec
+    prototype's words: a byte some of whose bits are read by fields that consume nothing,
+    and which a skip or a `consume` then advances past with other bits read by no field on
+    the same decode path. It is information only, never a warning or an error, and never
+    rejects the schema. A byte_group is not checked: PS-553 lets a member leave reserved
+    bits unnamed. A note repeated on several paths is given once."""
+    schema = expand_refs(schema)[0]
+    endian = schema.get('endian', 'big')
+    notes: List[str] = []
+    ports = schema.get('ports')
+    if isinstance(ports, dict) and ports:
+        for port, entry in ports.items():
+            fields = entry.get('fields', []) if isinstance(entry, dict) else entry
+            found: List[str] = []
+            _skip_bit_walk(fields if isinstance(fields, list) else [], _BitTrack(True),
+                           endian, found)
+            notes.extend(f"port {port}: {w}" for w in found)
+    else:
+        header = schema.get('header')
+        fields = schema.get('fields')
+        _skip_bit_walk((header if isinstance(header, list) else [])
+                       + (fields if isinstance(fields, list) else []),
+                       _BitTrack(True), endian, notes)
+    return list(dict.fromkeys(notes))
+
+
 def has_semantic(schema: Dict[str, Any]) -> bool:
     """Whether any message of the schema declares a `semantic` (PS-598)."""
     def walk(fields):
@@ -5526,18 +5790,15 @@ def _measurement_plan(fields) -> List[Dict[str, Any]]:
     return plan
 
 
-def _top_level_names(fields) -> Tuple[set, bool]:
-    """The keys a field list can report at the top of its output, and whether it can report
-    a key that is not declared (a `name_from` template)."""
-    names, open_ = set(), False
+def _top_level_names(fields) -> set:
+    """The keys a field list reports at the top of its output. A `name_from` key has no
+    static name, so it is not among them (PS-609, as the spec prototype reads it)."""
+    names = set()
 
     def walk(items):
-        nonlocal open_
         for item in items or []:
             if not isinstance(item, dict):
                 continue
-            if 'name_from' in item:
-                open_ = True
             name = item.get('name')
             if isinstance(name, str) and name and not name.startswith('_'):
                 names.add(name)
@@ -5557,32 +5818,27 @@ def _top_level_names(fields) -> Tuple[set, bool]:
                     for group in spec.get('groups') or []:
                         walk(group.get('fields') if isinstance(group, dict) else None)
     walk(fields)
-    return names, open_
+    return names
 
 
 def normalize_plan(schema: Dict[str, Any]) -> Dict[str, Any]:
     """The whole normalizeUplink() plan of a schema (PS-598, PS-599): per message (a port
     key, or '' for a schema without ports) its measurement plan, its repeats' element plans,
-    and the keys it can report, by which a decoded payload with no FPort finds its message.
-    The generated codec embeds it as JSON and normalize() runs it, so both give one result."""
+    and the keys it reports, by which a decoded payload with no FPort finds its candidate
+    messages (PS-609). The generated codec embeds it as JSON and normalize() runs it, so
+    both give one result."""
     schema = expand_refs(schema)[0]
     messages = []
-    shapes: Dict[str, int] = {}
     for port, fields in _uplink_field_lists(schema):
         _, repeats = _semantic_groups(fields)
-        names, open_ = _top_level_names(fields)
         messages.append({
             'port': port,
             'plan': _measurement_plan(fields),
             'repeats': [{'at': list(out), 'element': _repeat_element_fields(r)[1],
                          'plan': _measurement_plan(_repeat_element_fields(r)[0])}
                         for out, r in repeats],
-            'names': sorted(names),
-            'open': open_,
+            'names': sorted(_top_level_names(fields)),
         })
-        # Messages with one plan place alike, so a payload either fits needs no choosing.
-        shape = json.dumps([messages[-1]['plan'], messages[-1]['repeats']], sort_keys=True)
-        messages[-1]['shape'] = shapes.setdefault(shape, len(shapes))
     return {'ports': isinstance(schema.get('ports'), dict) and bool(schema.get('ports')),
             'messages': messages}
 
@@ -5631,30 +5887,42 @@ def run_normalize_plan(plan: Dict[str, Any], decoded: Dict[str, Any],
     """Run a normalize_plan() over decoded data: {data, warnings}. `data` is one measurement,
     or a list of them where a repeat gives one per element.
 
-    TTN calls normalizeUplink() with the decoded data and no FPort, so for a schema with
-    `ports` the message is the one given by `fport` where known, else the one whose reported
-    keys hold every key of the data that some message declares; where that is not one
-    message (or several with one plan), nothing is placed and a warning says so."""
-    warnings: List[str] = []
+    PS-609 (CR-2026-185): TTN calls normalizeUplink() with the decoded data and no FPort.
+    For a schema with `ports`, an FPort in the input selects the message. Otherwise the
+    candidates are the uplink messages whose reported top-level names include every key of
+    the data (a `_` metadata key such as `_quality` aside); where every candidate places the same values at the same paths, that placement
+    is used, and otherwise nothing is placed, with a warning naming the candidate FPorts or
+    saying none fits - the spec prototype's normalize() and its words."""
     messages = plan['messages']
-    chosen = None
     if not plan['ports']:
-        chosen = messages[0] if messages else None
-    elif fport is not None:
+        return _run_message(messages[0], decoded) if messages else \
+            {'data': {}, 'warnings': []}
+    if fport is not None:
         chosen = next((m for m in messages if m['port'] == str(fport)), None)
         if chosen is None:
             chosen = next((m for m in messages if m['port'] == 'default'), None)
+        return _run_message(chosen, decoded) if chosen is not None else \
+            {'data': {}, 'warnings': []}
+    # A `_` key is interpreter metadata (`_quality`, `_warnings`; PS-433), not a reported
+    # field, so it says nothing of the message.
+    keys = {k for k in decoded if not str(k).startswith('_')} if isinstance(decoded, dict) \
+        else set()
+    results = [(m['port'], _run_message(m, decoded)) for m in messages
+               if keys <= set(m['names'])]
+    placements = [r['data'] for _, r in results]
+    if placements and all(p == placements[0] for p in placements):
+        return results[0][1]
+    if not results:
+        why = "no uplink port entry reports every key of the data"
     else:
-        declared = set().union(*(m['names'] for m in messages)) if messages else set()
-        keys = {k for k in decoded if k in declared}
-        fits = [m for m in messages if m['open'] or keys <= set(m['names'])]
-        if len({m['shape'] for m in fits}) == 1:
-            chosen = fits[0]
-        elif fits:
-            warnings.append("normalizeUplink cannot tell which port entry decoded this "
-                            "data; nothing is placed (PS-598)")
-    if chosen is None:
-        return {'data': {}, 'warnings': warnings}
+        why = (f"FPorts {', '.join(port for port, _ in results)} would place the values "
+               f"differently")
+    return {'data': {}, 'warnings': [f"no FPort given and {why}; nothing is placed (PS-609)"]}
+
+
+def _run_message(chosen: Dict[str, Any], decoded: Dict[str, Any]) -> Dict[str, Any]:
+    """normalizeUplink() for one message of a normalize_plan() (PS-598, PS-599)."""
+    warnings: List[str] = []
     base = _run_measurement(chosen['plan'], decoded, warnings)
     measurements = []
     for repeat in chosen['repeats']:
@@ -5677,7 +5945,7 @@ def normalize(decoded: Dict[str, Any], schema: Dict[str, Any],
               fport: Optional[int] = None) -> Dict[str, Any]:
     """TTN normalizeUplink() output for a decoded uplink, from the schema's `semantic`
     (PS-598, PS-599): {data, warnings}. The spec prototype's normalize(), with the message
-    found from the data where no FPort is given (run_normalize_plan)."""
+    chosen by PS-609 where no FPort is given (run_normalize_plan)."""
     return run_normalize_plan(normalize_plan(schema), decoded, fport)
 
 
@@ -5706,6 +5974,7 @@ class SchemaInterpreter:
     _record_supplied = frozenset()  # PS-573: names the decode record supplied, per encode
     _encode_input_names = frozenset()  # the names the encode's input gives, per encode
     _ps564_depth = 1        # not checked outside encode()
+    _checksum_apart = 1     # no checksum is computed outside encode()
 
     def __init__(self, schema: Dict[str, Any]):
         # Every `$ref` is spliced before anything reads the schema (PS-346, PS-347), so
@@ -8650,6 +8919,7 @@ class SchemaInterpreter:
         self._encode_warnings = []
         self._ps564 = []            # PS-564: each `remaining` match's chosen case
         self._ps564_depth = 0       # inside a tlv or repeat, where it is not checked
+        self._checksum_apart = 0    # inside a tlv entry or repeat element (CR-2026-185)
         if self._load_errors:
             result.errors.extend(self._load_errors)
             return result
@@ -10133,9 +10403,11 @@ class SchemaInterpreter:
         """PS-587 (CR-2026-174): the checksum's bytes, zero until the frame is finished
         (`fill_checksums`). Bits a peek left pending would be ORed into it, so its range
         is not fully written: rejected, as the spec prototype rejects a pending overlay."""
-        # Inside a tlv entry or a repeat element or trailer, the bytes are encoded apart
-        # from the frame, so the bytes before them are not written when it is reached.
-        if out.pending or getattr(self, '_ps564_depth', 1):
+        # Inside a tlv entry or a repeat element the bytes are encoded apart from the
+        # frame, so the bytes before them are not written when it is reached; PS-608
+        # rejects both at load. A repeat's trailer is placed at its frame offset
+        # (CR-2026-185), as a decoder reads it.
+        if out.pending or getattr(self, '_checksum_apart', 1):
             raise FieldError(checksum_unwritten_message(field_def.get('name')))
         size = CHECKSUM_WIDTHS[field_def['type']] // 8
         endian = field_def.get('endian')
@@ -10146,6 +10418,7 @@ class SchemaInterpreter:
         return Frame(bytes(size), 0, None, [],
                      [(0, field_def, 'little' if little else 'big')])
 
+    @checksum_apart
     @tail_unchecked
     def _encode_repeat_elements(self, field_def: Dict[str, Any], data: Dict[str, Any],
                                 records: List[Any], count: Optional[int] = None) -> bytes:
@@ -10250,6 +10523,13 @@ class SchemaInterpreter:
         if field_def.get('trailer'):
             trailer = self._encode_field_list(field_def['trailer'], data)
             check_peeks(trailer)                                        # PS-551
+            placed = frame_checksums(trailer)
+            if placed:
+                # CR-2026-185 (PS-608): a checksum in the trailer is filled where the frame
+                # is finished, at its offset after the elements.
+                shift = len(out)
+                return Frame(bytes(out) + bytes(trailer), 0, None, [],
+                             [(c[0] + shift,) + tuple(c[1:]) for c in placed])
             out.extend(trailer)
         return bytes(out)
 
@@ -10504,6 +10784,7 @@ class SchemaInterpreter:
             forward = self._apply_transform(forward, field_def['transform'])
         return True, forward is not OMITTED and forward == given
 
+    @checksum_apart
     @tail_unchecked
     def _encode_tlv(self, field_def: Dict[str, Any], data: Dict[str, Any]) -> bytes:
         """Rebuild a TLV payload from decoded output.

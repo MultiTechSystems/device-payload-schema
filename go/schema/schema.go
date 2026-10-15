@@ -486,10 +486,9 @@ type EncodeContext struct {
 	enclosing []*enclosingList
 	// checksums holds each checksum placeholder written to the frame, filled in when the
 	// frame is finished (PS-587, CR-2026-174); nil in a branch, a tlv entry or a repeat
-	// element, whose bytes are encoded apart from the frame. checksumApart counts the
-	// repeat trailers being encoded, which are apart from it too.
-	checksums     *[]checksumPlace
-	checksumApart int
+	// element, whose bytes are encoded apart from the frame. A repeat trailer is written
+	// at its frame offset, so its checksum is placed here (CR-2026-185).
+	checksums *[]checksumPlace
 }
 
 // enclosingList is one field list on the stack, and the index of the entry being encoded.
@@ -1087,6 +1086,10 @@ func ParseSchema(data string) (*Schema, error) {
 	}
 	// CR-2026-161: a lookup's labels are of one type (PS-571).
 	if err := checkLookupTypes(raw, order); err != nil {
+		return nil, err
+	}
+	// CR-2026-185: a checksum field sits where `from` counts from the frame (PS-608).
+	if err := checkChecksumPlacement(raw, order); err != nil {
 		return nil, err
 	}
 
@@ -5464,10 +5467,8 @@ func encodeRepeat(field Field, data map[string]any, ctx *EncodeContext, siblings
 	ctx.mergeWarnings(elements)
 	// PS-385: the elements, then the trailer, whose values sit beside the repeat.
 	if len(field.Trailer) > 0 {
-		// PS-587: a trailer is encoded apart from the frame, as the reference's is, so a
-		// checksum in it is rejected.
-		ctx.checksumApart++
-		defer func() { ctx.checksumApart-- }()
+		// CR-2026-185 (PS-608): the trailer is written at its frame offset, so a checksum
+		// in it is placed and filled with the frame.
 		return encodeFieldsSealed(field.Trailer, data, ctx)
 	}
 	return nil

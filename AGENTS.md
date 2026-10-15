@@ -3629,11 +3629,8 @@ improved. The Go, Java and C# corpus runners write per-vector reports only when
     runs it, and the TS013 generator embeds the same plan as `NORMALIZE_PLAN` with
     `NORMALIZE_RUNTIME_JS` (slim codecs too), only where some field declares `semantic`. A value
     with no unit on a path that has one, an unconvertible unit, and every value on a duplicate
-    path are left out with a warning. **One addition the prototype lacks:** TTN calls
-    `normalizeUplink` with decodeUplink's output and no fPort, so for a `ports` schema the
-    message is the one given by `input.fPort` if present, else the port entries whose
-    reportable keys hold every declared key of the data; where those disagree on placement,
-    nothing is placed, with a warning.
+    path are left out with a warning. Without an FPort, a `ports` schema's message is chosen by
+    PS-609 (CR-2026-185, below), which replaced the rule this CR added.
   - **Go, Java, C# and C** produce no normalized payload (the generated codec and the IL do).
     C has no `_meta`; `semantic` is an annotation C carries nothing for, so `schema_binary.py`
     does not refuse it.
@@ -3701,6 +3698,51 @@ improved. The Go, Java and C# corpus runners write per-vector reports only when
     round-tripping). **Floors:** decode 2801 -> 2815 in Go, Java and C#; re-encode +14
     everywhere (Python and Java 2199 -> 2213, C# 2200 -> 2214, Go 2217 -> 2231, plain 2189 ->
     2203), `plain fixed` 185 -> 199.
+
+- **CR-2026-184 (PS-607, amended 2026-10-15 to an INFO note; la-payload-schema branches
+  `cr/0.5.8-apply-184-185` and `cr/0.5.8-ps607-info` (e784da1), for 0.5.8): a validator may note bits a
+  skip discards.** Where a `skip`, or a bit range's `consume`, advances past a byte that bit
+  ranges or bools consuming nothing read only in part, the bits no field reads are lost
+  (decoded nowhere, encoded as 0). As amended, a validator MAY report it as information, as
+  PS-482 does, and MUST NOT report it as an error or warning or reject the schema. A byte
+  nothing reads in part, and a byte_group member's unnamed bits (PS-553), draw nothing.
+  - **Where:** Python `skip_bit_notes()` in `tools/schema_interpreter.py`, a port of the
+    prototype's function (`_skip_bit_walk`, `_BitTrack`, `_bit_list`) with its message
+    verbatim: `byte 0 is read in part (bits 0, 5-7) and the skip '_b0' advances past it; bits
+    1-4 are read by no field. A decoder discards them and an encoder writes them as 0 (PS-607)`,
+    prefixed `port N: ` per port. The walk follows one decode path (`_skip_bit_walk` over a
+    `_BitTrack`, the prototype's at e784da1): an object's members continue the same bytes, each
+    match case or flagged group starts from a copy of the state before it (an inline
+    discriminator read first), a repeat's or tlv's bodies are walked on their own from their
+    own start (saying `a byte`), tracking stops after a construct of unknown size, and a note
+    repeated on several paths is given once. The first version checked every nested list on
+    its own, so a bit a sibling object or the enclosing list read (dnt's `auto_time_sync_en`,
+    a case after its discriminator) was reported as unread; a runtime trace of the registry
+    vectors found that, and the prototype changed.
+    It runs over the `$ref`-spliced document. `validate_schema()` reports each note through
+    `ValidationResult.add_info` (level `INFO`, `schema_info`, printed `[INFO]` under `-v`),
+    never `add_warning`. PS-482 itself is not produced in this repository; that INFO level is
+    where it would go. One adaptation: a type alias (`uint8`, `int16`) is read as its
+    canonical type, where the prototype's size table knows only `i8`..`i64`.
+  - **Go, Java and C# have no validator-message surface** (no load-time warnings or notes;
+    PS-524 and PS-597 are Python-only too), so nothing was added there. C reads no YAML.
+    Decode and encode are unchanged everywhere.
+  - **Cases:** `tests/cr-2026-184-cases.yaml` (the prototype's eleven tests), read by
+    `test_cr_2026_184_skip_bits.py` (`skip_bit_notes()`; `validate_schema()` with the note as
+    info and no PS-607 warning; and the decode the note does not stop). A note cannot be a
+    corpus vector: no fixture, no floor moves.
+  - **Measured** (Python, read only). With the path walk: corpus 19 of 378 device schemas,
+    59 places (vobo 11, dnt lw-wsci 18, Milesight 23, five `_language-conformance` fixtures
+    7); private registry 280 of 543 schemas, 988 places at ddab991, and 260 of 543, 938 places
+    at bd5d398 and at 7976739 - the spec prototype's 938 in 260 exactly. The first,
+    per-list walk gave corpus 19 schemas, 98 places; registry 269 schemas, 1,523 places at
+    ddab991 and 1,495 at bd5d398 (after the Watteco `_fc` fix).
+  - **By what the vectors show, at 7976739** (each schema's decoding vectors traced over the
+    byte a note names): 189 notes the unread bits are 0 in every vector that reaches the
+    byte, 286 they are set and no field reads them, 398 they are set but a field on another
+    path reads them (tektelic `join_mode` across tlv entries 147, dnt 49, jooby 31, watteco
+    `batch` 29), 65 no vector reaches the byte. Most set-and-unread bits come from crafted
+    all-0xFF vectors (Dragino 55 schemas, Dingtek 13, Netvox 9).
 
 - **CR-2026-183 (PS-096 amended, PS-605, PS-606; la-payload-schema main, for 0.5.8): encoding
   a bitfield_string's segments.** Decode is unchanged. An encoder removes the declared `prefix`
@@ -3865,7 +3907,8 @@ improved. The Go, Java and C# corpus runners write per-vector reports only when
     Java and C# `FrameMeta` checksums with `fillChecksums`/`Fill`, C `schema_place_checksum`/
     `schema_fill_checksums`. Rejected as `Field '{name}': the bytes its checksum covers are
     not all written when it is reached (PS-587)` where peek bits are pending, where `from`
-    is past the field, and **inside a tlv entry or a repeat element or trailer**, which are
+    is past the field, and **inside a tlv entry or a repeat element** (a trailer too until
+    CR-2026-185, which lifts it and rejects the other two at load), which are
     encoded apart from the frame (the prototype's sub-context departure, applied to
     encoding). Measured before: Python, Go, Java, C#, the codec and C all ignored the key -
     a bad check value decoded with success, and encode took the value from the input
@@ -3874,8 +3917,9 @@ improved. The Go, Java and C# corpus runners write per-vector reports only when
     `schema_t` 52536 bytes, unchanged); the binary form refuses `checksum` (PS-446). The
     fixture is port-based, which the harness skips; split per port it passes 3 of 7, the
     rest failing on C's uppercase, 15-byte-capped `hex` (a C gap, not this CR's).
-  - **Not settled:** a checksum on a `byte_group` member is ignored by Python and refused by
-    C; the spec does not place one there.
+  - **Settled by CR-2026-185:** a checksum on a `byte_group` member (ignored by Python, refused
+    by C) is a load error everywhere (PS-608), and the encode refusal in a repeat trailer is
+    lifted; see its entry.
   - **Cases:** `tests/cr-2026-174-cases.yaml` (the prototype's `TestCR2026174Checksum` and
     the evidence's vendor frames: acrios sum8 from 6, emu crc8/smbus, jooby xor8 0x55, seeed
     crc16/kermit LE), read by `test_cr_2026_174_cases.py` (reference, validator, codec),
@@ -3888,6 +3932,63 @@ improved. The Go, Java and C# corpus runners write per-vector reports only when
     (185 -> 191); the Go, Java and C# text scans file it `match` (173 -> 179) because
     `on_mismatch:` contains `match:`. No corpus or registry schema declares the key, so no
     other vector changed (failing sets diffed in Go, Java and C#).
+
+- **CR-2026-185 (PS-585 amended, PS-608, PS-609; la-payload-schema branch
+  `cr/0.5.8-apply-184-185`, for 0.5.8): where a checksum may sit, and normalizeUplink() without
+  an FPort.**
+  - **PS-608 load:** a checksum field as a `byte_group` member, or within a `tlv` entry, a
+    `records` entry or a repeat's `fields`/`element`, is rejected in the prototype's text and
+    walk (`check_checksum_placement`, over the `$ref`-spliced header, fields and ports, first
+    violation): `Field 'c': a checksum field cannot sit within a tlv entry; its `from` counts
+    from the frame (PS-608)` (`a byte_group`, `a records entry`, `a repeat element`). Python
+    `checksum_placement_errors` (in `schema_iterator_errors`: interpreter, validator, TS013
+    generator), Go `checkChecksumPlacement` (`cr185.go`, from `ParseSchema`), Java
+    `Checksum.checkPlacement`, C# `Checksum.CheckPlacement`. C has no load step for the struct
+    API: the same text comes from the byte_group check (it was a PS-446 refusal) and from the
+    tlv case loop when a decode reaches the field; `schema_binary.py` refuses `checksum`
+    already. Allowed: top level, port entry, match case, flagged group, after a construct
+    with `reserve`, and a repeat's `trailer`.
+  - **PS-608 empty range:** decode `Field 'c': the checksum range starts at byte 1, at or after
+    the field at byte 1, so it covers nothing (PS-608)` (was `from > p`, PS-585; `from == p`
+    compared the seed alone); encode `... starts at byte 1, where the field is, so it covers
+    nothing (PS-608)` where `from` equals the field's offset (past it stays PS-587, as the
+    prototype has it). All six.
+  - **Trailer encode lifted** (CR-2026-174 refused it): Python `checksum_apart` replaces the
+    `_ps564_depth` test (a tlv entry and a repeat element only) and `_encode_repeat` carries
+    the trailer's placeholders shifted past the elements; the runtime's `ctx.ckApart`; Go drops
+    `checksumApart` (its trailer is on the frame's context); Java and C# pass the trailer's
+    checksum slots through `prefixed`/`FrameMeta.Prefixed`. Measured before: every encoder
+    refused `trailer: [{checksum}]` with PS-587; decoders already read it at its frame offset.
+  - **PS-609:** Python `run_normalize_plan`/`_run_message`, runtime `normalizeUplink`/
+    `normMessage`/`normSame`. Two differences from #175 fixed: candidates agreed when their
+    static *plans* were equal, where PS-609 compares the *placements* of this data (an entry
+    with an extra semantic field the data lacks no longer blocks), and the warnings are the
+    prototype's: `no FPort given and FPorts 1, 2 would place the values differently; nothing is
+    placed (PS-609)` / `no FPort given and no uplink port entry reports every key of the data;
+    nothing is placed (PS-609)`, where #175 said `normalizeUplink cannot tell which port entry
+    decoded this data ... (PS-598)` and gave no warning with no candidate. Candidates now take
+    every key of the data, as the prototype does (#175 ignored a key no entry declares, and
+    treated a `name_from` entry as covering anything); **one departure:** a `_` key
+    (`_quality`) is interpreter metadata and is ignored, since the prototype's decode emits
+    none and counting it left 108 registry vectors with no candidate.
+  - **Measured** (Python, read only): no corpus, example or registry schema declares a misplaced
+    checksum (registry: none declares `checksum`); no decode or encode output changes outside
+    the fixtures. normalize() without an FPort over every decoded vector of a `ports` schema with
+    `semantic`: registry 180 schemas, 8312 vectors, 82 newly placed (7 schemas: lht65n,
+    lht65n-vib, trackerd, lw001-bgpro, scd18, filling-degree-sensor, soil-moisture-sensor), 287
+    warning texts changed, none lost;
+    corpus 4 schemas, 5 warning texts changed.
+  - **Cases:** `tests/cr-2026-185-cases.yaml` (`decode`, `cases`, `load` read by
+    `test_cr_2026_185_cases.py`, Go `cr185_test.go`, Java `CR2026185Test`, C# `CR2026_185Tests`;
+    `normalize` by the reference and the generated codec, full and slim) mirrors the
+    prototype's `TestCR2026185ChecksumPlacementAndNormalize`. `cr-2026-174-cases.yaml`'s empty
+    range and range-after cases now expect PS-608, and its repeat-element and tlv-entry encode
+    cases moved to the 185 load list. C: `test_a_checksum_range_that_covers_nothing`.
+  - **Floors:** fixture `checksum-placement.yaml` (7 vectors: match case, trailer x2, after a
+    reserving tlv, flagged group, and an `expected_error` PS-608): decode 2901 -> 2908 in Go, Java
+    and C#; re-encode +6, all `tlv` (Python and Java 2290 -> 2296, C# 2291 -> 2297, Go 2308 ->
+    2314, plain 2280 -> 2286). Every Go, Java and C# figure read from its own run. The vectors
+    pass on both paths of `tools/vector-verdicts.py`; mutation score 95%.
 
 - **CR-2026-181 (PS-601, PS-602; PS-081, PS-527 and PS-551 amended; la-payload-schema main, for
   0.5.8): an encoder writes a `bytes`, `hex` or `base64` value exactly as given.**

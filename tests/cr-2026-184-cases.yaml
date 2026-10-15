@@ -1,0 +1,155 @@
+# CR-2026-184 (PS-607, amended 2026-10-15): a validator MAY note, as information, where a
+# `skip`, or a bit range's `consume`, advances past a byte that bit ranges or bools consuming
+# nothing read only in part. The bits no field reads are lost: a decoder discards them and an
+# encoder writes them as 0.
+#
+# The note is information only - never a warning or an error, never a rejection: every
+# schema here loads and decodes. A byte that nothing reads in part draws none, and neither do
+# a byte_group member's unnamed bits (PS-553). Each field list is walked in order and the
+# walk goes silent once a field's size is unknown. One decode path is walked as one frame:
+# an object's members continue the same bytes, and each match case or flagged group starts
+# from the state before it (an inline discriminator read first). A repeat's or tlv's bodies
+# are checked on their own, from their own start, and name "a byte" rather than an offset.
+# A note repeated on several paths is given once.
+#
+# The cases are the spec prototype's TestCR2026184SkipOverPartlyReadBits, one for one
+# (eleven). They are read by tests/test_cr_2026_184_skip_bits.py, through
+# `skip_bit_notes()` and `validate_schema()` (at its INFO level). Go, Java and C# have no
+# validator-note surface, and C reads no YAML, so this is the Python validator's alone.
+#
+# Each case gives `schema` (YAML text) and `notes`, the whole list in order; `payload` and
+# `expected` (JSON text), where given, are a decode the note does not stop.
+
+cases:
+
+- name: the_cr_example
+  schema: |
+    name: t
+    version: 1
+    fields:
+      - {name: _std, type: "u8[0:0]"}
+      - {name: _ep_lo, type: "u8[5:7]"}
+      - {name: _b0, type: skip, length: 1}
+      - {name: x, type: u8}
+  notes:
+    - "byte 0 is read in part (bits 0, 5-7) and the skip '_b0' advances past it; bits 1-4 are read by no field. A decoder discards them and an encoder writes them as 0 (PS-607)"
+
+- name: the_watteco_header
+  schema: |
+    name: t
+    version: 1
+    fields:
+      - {name: _a, type: "u64[56:56]"}
+      - {name: _b, type: "u64[57:58]"}
+      - {name: _c, type: "u64[61:63]"}
+      - {type: skip, length: 1}
+      - {name: v, type: u8}
+  notes:
+    - "byte 0 is read in part (bits 0-2, 5-7) and a skip advances past it; bits 3-4 are read by no field. A decoder discards them and an encoder writes them as 0 (PS-607)"
+
+- name: naming_the_bits_silences_it
+  schema: |
+    name: t
+    version: 1
+    fields:
+      - {name: _std, type: "u8[0:0]"}
+      - {name: _fc, type: "u8[1:4]"}
+      - {name: _ep_lo, type: "u8[5:7]"}
+      - {name: _b0, type: skip, length: 1}
+  notes: []
+
+- name: a_consume_on_the_last_range
+  schema: |
+    name: t
+    version: 1
+    fields:
+      - {name: a, type: "u8[0:3]"}
+      - {name: b, type: "u8[4:5]", consume: 1}
+  notes:
+    - "byte 0 is read in part (bits 0-5) and 'b', with consume: 1, advances past it; bits 6-7 are read by no field. A decoder discards them and an encoder writes them as 0 (PS-607)"
+
+- name: a_bool_in_a_match_case_of_a_port
+  schema: |
+    name: t
+    version: 1
+    ports:
+      1:
+        fields:
+          - {name: k, type: u8}
+          - match:
+              field: $k
+              cases:
+                1:
+                  - {name: f, type: bool, bit: 7}
+                  - {type: skip, length: 1}
+  notes:
+    - "port 1: byte 1 is read in part (bit 7) and a skip advances past it; bits 0-6 are read by no field. A decoder discards them and an encoder writes them as 0 (PS-607)"
+
+- name: no_note_for_padding_read_whole
+  schema: |
+    name: t
+    version: 1
+    fields:
+      - {type: skip, length: 2}
+      - {name: a, type: u8}
+  notes: []
+
+- name: no_note_for_a_byte_read_whole_after
+  schema: |
+    name: t
+    version: 1
+    fields:
+      - {name: _k, type: "u8[0:3]"}
+      - {name: k, type: u8}
+  notes: []
+
+- name: no_note_for_a_byte_group_member
+  schema: |
+    name: t
+    version: 1
+    fields:
+      - byte_group:
+          - {name: a, type: "u8[0:3]"}
+  notes: []
+
+- name: a_bit_a_sibling_object_reads_is_read
+  schema: |
+    name: t
+    version: 1
+    fields:
+      - {name: _mode, type: "u8[0:6]"}
+      - name: auto_time_sync
+        type: object
+        fields:
+          - {name: en, type: bool, bit: 7}
+      - {type: skip, length: 1}
+  notes: []
+
+- name: a_match_case_continues_the_frame
+  schema: |
+    name: t
+    version: 1
+    fields:
+      - {name: _kind, type: "u8[0:3]"}
+      - match:
+          field: $_kind
+          cases:
+            1:
+              - {name: hi, type: "u8[4:7]"}
+              - {type: skip, length: 1}
+            2:
+              - {type: skip, length: 1}
+  notes:
+    - "byte 0 is read in part (bits 0-3) and a skip advances past it; bits 4-7 are read by no field. A decoder discards them and an encoder writes them as 0 (PS-607)"
+
+- name: the_schema_still_loads_and_decodes
+  schema: |
+    name: t
+    version: 1
+    fields:
+      - {name: std, type: "u8[0:0]"}
+      - {type: skip, length: 1}
+  notes:
+    - "byte 0 is read in part (bit 0) and a skip advances past it; bits 1-7 are read by no field. A decoder discards them and an encoder writes them as 0 (PS-607)"
+  payload: "11"
+  expected: '{"std": 1}'
