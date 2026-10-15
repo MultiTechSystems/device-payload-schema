@@ -1,0 +1,56 @@
+# CR-2026-183 (PS-096, PS-605, PS-606): a serial number of three hex parts, joined with no
+# delimiter and introduced by a prefix. A decoder joins the parts; an encoder removes the
+# prefix and splits the rest by each part's width. Each part is padded to two digits, which
+# is what makes the text splittable at all.
+#
+# Before CR-2026-183 the Python reference and the generated codec could not encode this
+# field (an empty delimiter has nothing to split on), Go decoded it with "." between the
+# parts, and every encoder took a value without the prefix as prefixed.
+name: probe_width_split
+version: 1
+endian: big
+fields:
+  - name: serial
+    type: bitfield_string
+    length: 3
+    prefix: "SN-"
+    delimiter: ""
+    parts:
+      - [16, 8, "hex:2"]
+      - [8, 8, "hex:2"]
+      - [0, 8, "hex:2"]
+test_vectors:
+  - name: three_parts_joined
+    description: "each byte is one two-digit part, most significant first"
+    payload: "0A1BFF"
+    source: generated
+    expected:
+      serial: "SN-0a1bff"
+  - name: small_parts_keep_their_padding
+    description: "0x01 is written 01, so the text keeps a fixed length"
+    payload: "010203"
+    source: generated
+    expected:
+      serial: "SN-010203"
+  - name: zero_parts
+    description: "every part 0"
+    payload: "000000"
+    source: generated
+    expected:
+      serial: "SN-000000"
+  - name: encode_without_the_prefix
+    description: "the value lacks SN-, which is rejected rather than taken as present (PS-605)"
+    input:
+      serial: "0a1bff"
+    source: generated
+    expected_error:
+      requirement: PS-605
+      at: serial
+  - name: encode_a_value_of_the_wrong_length
+    description: "four digits for parts of widths 2, 2 and 2 (PS-606)"
+    input:
+      serial: "SN-0a1b"
+    source: generated
+    expected_error:
+      requirement: PS-606
+      at: serial

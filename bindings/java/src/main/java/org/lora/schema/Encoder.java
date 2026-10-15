@@ -3383,31 +3383,31 @@ final class Encoder {
      * The hex parts are lowercase on output (PS-074), and parsing is case-insensitive.
      */
     private byte[] encodeBitfieldString(Field field, String value) {
-        String text = value;
-        String prefix = field.getPrefix() == null ? "" : field.getPrefix();
-        if (!prefix.isEmpty() && text.startsWith(prefix)) {
-            text = text.substring(prefix.length());
+        List<List<Object>> parts = new ArrayList<>();
+        if (field.getParts() != null) {
+            for (List<Object> part : field.getParts()) {
+                if (part.size() >= 2 && asLong(part.get(0)) != null && asLong(part.get(1)) != null) {
+                    parts.add(part);
+                }
+            }
         }
-        String delimiter = field.getDelimiter() == null ? "." : field.getDelimiter();
-        String[] segments = text.split(java.util.regex.Pattern.quote(delimiter), -1);
+        // PS-605, PS-606 (CR-2026-183): the prefix required, the segment count checked, an
+        // empty delimiter split by width.
+        List<String> segments = BitfieldParts.segments(field.getName(), field.getPrefix(),
+                field.getDelimiter(), parts, value);
 
         long packed = 0;
-        List<List<Object>> parts = field.getParts();
-        if (parts != null) {
-            for (int i = 0; i < parts.size(); i++) {
-                List<Object> part = parts.get(i);
-                if (part.size() < 2) continue;
-                Long bitOff = asLong(part.get(0));
-                Long bitLen = asLong(part.get(1));
-                if (bitOff == null || bitLen == null) continue;
-                Object format = part.size() >= 3 ? part.get(2) : "decimal";
-                String segment = i < segments.length ? segments[i] : "0";
-                // PS-096, PS-431, PS-583: parsed by the part's format; a value the width
-                // cannot hold is rejected, never masked.
-                long raw = BitfieldParts.parseSegment(segment, bitLen.intValue(), format, field.getName());
-                long mask = bitLen >= 64 ? -1L : (1L << bitLen) - 1;
-                packed |= (raw & mask) << bitOff;
-            }
+        for (int i = 0; i < parts.size(); i++) {
+            List<Object> part = parts.get(i);
+            Long bitOff = asLong(part.get(0));
+            Long bitLen = asLong(part.get(1));
+            Object format = part.size() >= 3 ? part.get(2) : "decimal";
+            String segment = segments.get(i);
+            // PS-096, PS-431, PS-583: parsed by the part's format; a value the width
+            // cannot hold is rejected, never masked.
+            long raw = BitfieldParts.parseSegment(segment, bitLen.intValue(), format, field.getName());
+            long mask = bitLen >= 64 ? -1L : (1L << bitLen) - 1;
+            packed |= (raw & mask) << bitOff;
         }
         int length = field.getLength() > 0 ? field.getLength() : 2;
         // PS-050a: the field's own byte order, as it is decoded; this wrote the schema's.
