@@ -119,6 +119,12 @@ type Field struct {
 	Encoding string `json:"encoding,omitempty" yaml:"encoding,omitempty"`
 	// Numeral is `decimal` or `hex` on an ascii field reported as an integer (PS-560).
 	Numeral string `json:"numeral,omitempty" yaml:"numeral,omitempty"`
+	// Nul is an ascii field's treatment of 0x00 bytes: trailing (default), stop or drop
+	// (PS-534). Terminator ends a variable-length ascii field in place of `length`
+	// (PS-593); HasTerminator tells byte 0 from none.
+	Nul           string `json:"nul,omitempty" yaml:"nul,omitempty"`
+	Terminator    int    `json:"terminator,omitempty" yaml:"terminator,omitempty"`
+	HasTerminator bool   `json:"-" yaml:"-"`
 	// GroupEndian is a byte_group's own byte order (PS-364), empty for the context's.
 	GroupEndian string `json:"-" yaml:"-"`
 	// IntegerResult marks a computed field written `type: integer` (PS-283); its Type
@@ -190,6 +196,8 @@ type Field struct {
 	Parts     [][]any `json:"parts,omitempty" yaml:"parts,omitempty"`
 	Delimiter string  `json:"delimiter,omitempty" yaml:"delimiter,omitempty"`
 	Prefix    string  `json:"prefix,omitempty" yaml:"prefix,omitempty"`
+	// DelimiterDeclared tells an empty delimiter (PS-606) from an absent one, which is ".".
+	DelimiterDeclared bool `json:"-" yaml:"-"`
 	// Semantic fields
 	ValidRange []float64 `json:"valid_range,omitempty" yaml:"valid_range,omitempty"` // [min, max] bounds for quality checks
 	Resolution *float64  `json:"resolution,omitempty" yaml:"resolution,omitempty"`   // Minimum detectable change
@@ -469,6 +477,12 @@ type EncodeContext struct {
 	// current reported object, each with its current entry (CR-2026-165: the names declared
 	// outside a recorded match). Reset for an object and for each repeat element.
 	enclosing []*enclosingList
+	// checksums holds each checksum placeholder written to the frame, filled in when the
+	// frame is finished (PS-587, CR-2026-174); nil in a branch, a tlv entry or a repeat
+	// element, whose bytes are encoded apart from the frame. checksumApart counts the
+	// repeat trailers being encoded, which are apart from it too.
+	checksums     *[]checksumPlace
+	checksumApart int
 }
 
 // enclosingList is one field list on the stack, and the index of the entry being encoded.
@@ -1250,6 +1264,13 @@ func parseFieldMap(fm map[string]any, node *yaml.Node) Field {
 	if numeral, ok := fm["numeral"].(string); ok {
 		f.Numeral = numeral
 	}
+	if nul, ok := fm["nul"].(string); ok {
+		f.Nul = nul
+	}
+	if term, ok := terminatorValue(fm["terminator"]); ok {
+		f.Terminator = term
+		f.HasTerminator = true
+	}
 	if typ, ok := fm["type"].(string); ok {
 		f.Type = canonicalFieldType(typ)
 		// `integer` is `number` declaring an integer result (PS-283), so it takes
@@ -1647,6 +1668,7 @@ func parseFieldMap(fm map[string]any, node *yaml.Node) Field {
 	// Bitfield string fields
 	if delimiter, ok := fm["delimiter"].(string); ok {
 		f.Delimiter = delimiter
+		f.DelimiterDeclared = true
 	}
 	if prefix, ok := fm["prefix"].(string); ok {
 		f.Prefix = prefix
@@ -2583,11 +2605,18 @@ func decodeField(field Field, ctx *DecodeContext) (any, error) {
 		value = v
 
 	case TypeByte, TypeUInt, TypeU8, TypeU16, TypeU32, TypeU64, TypeU24:
+		start := ctx.Offset
 		data, err := ctx.Read(length)
 		if err != nil {
 			return nil, err
 		}
 		value = decodeUint(data, endian)
+		if spec := checksumOf(field); spec != nil {
+			// PS-586 (CR-2026-174): the check value against the bytes it covers.
+			if err := ctx.verifyChecksum(field, spec, start, decodeUint(data, endian)); err != nil {
+				return nil, err
+			}
+		}
 		if field.Encoding != "" {
 			// The sentinel is compared on the bits read, before the code is decoded
 			// (PS-427) - a sentinel need not be a valid code word at all.
@@ -2688,6 +2717,13 @@ func decodeField(field Field, ctx *DecodeContext) (any, error) {
 		value = field.Value
 
 	case TypeAscii, TypeAsciiLower:
+		if field.HasTerminator {
+			span, err := terminatedSpan(&field, ctx) // PS-593
+			if err != nil {
+				return nil, err
+			}
+			length = span
+		}
 		start := ctx.Offset
 		data, err := ctx.Read(length)
 		if err != nil {
@@ -2695,8 +2731,10 @@ func decodeField(field Field, ctx *DecodeContext) (any, error) {
 		}
 		if isEcho(field) {
 			ctx.Offset = start // PS-588 (CR-2026-175): the span is read again
+		} else if field.HasTerminator {
+			ctx.Offset++ // consumed, not reported
 		}
-		value = decodeASCII(field.Name, data, ctx) // PS-534, PS-538
+		value = decodeASCII(field.Name, data, ctx, field.Nul) // PS-534, PS-538
 		if field.Numeral != "" {
 			n, err := decodeNumeral(field.Name, value.(string), field.Numeral) // PS-560
 			if err != nil {
@@ -2787,8 +2825,8 @@ func decodeField(field Field, ctx *DecodeContext) (any, error) {
 		}
 		intVal := decodeUint(data, endian)
 		delimiter := field.Delimiter
-		if delimiter == "" {
-			delimiter = "."
+		if delimiter == "" && !field.DelimiterDeclared {
+			delimiter = "." // an empty one joins the parts (PS-606)
 		}
 		prefix := field.Prefix
 		var partStrs []string
@@ -4316,6 +4354,7 @@ func (s *Schema) encodeToContextRecord(
 	ctx.Definitions = s.Definitions
 	ctx.order = s.keyOrder
 	ctx.ps564 = &[]remainingCheck{}
+	ctx.checksums = &[]checksumPlace{} // PS-587 (CR-2026-174)
 
 	// Encode header fields first
 	if len(s.Header) > 0 {
@@ -4357,6 +4396,9 @@ func (s *Schema) encodeToContextRecord(
 		return nil, err
 	}
 	if err := ctx.checkRemaining(); err != nil { // PS-564
+		return nil, err
+	}
+	if err := ctx.fillChecksums(); err != nil { // PS-587 (CR-2026-174)
 		return nil, err
 	}
 	if len(ctx.Buffer) == 0 {
@@ -5366,6 +5408,10 @@ func encodeRepeat(field Field, data map[string]any, ctx *EncodeContext, siblings
 	ctx.mergeWarnings(elements)
 	// PS-385: the elements, then the trailer, whose values sit beside the repeat.
 	if len(field.Trailer) > 0 {
+		// PS-587: a trailer is encoded apart from the frame, as the reference's is, so a
+		// checksum in it is rejected.
+		ctx.checksumApart++
+		defer func() { ctx.checksumApart-- }()
 		return encodeFieldsSealed(field.Trailer, data, ctx)
 	}
 	return nil
@@ -5752,6 +5798,15 @@ func encodeFieldList(fields []Field, data map[string]any, ctx *EncodeContext) er
 			continue
 		}
 
+		// PS-587 (CR-2026-174): a checksum is computed over the bytes written, never taken
+		// from the input; its value is filled in when the frame is finished.
+		if spec := checksumOf(field); spec != nil {
+			if err := ctx.placeChecksum(field, spec); err != nil {
+				return err
+			}
+			continue
+		}
+
 		// PS-589 (CR-2026-175): a byte string that does not consume re-reads bytes the
 		// other fields write, so it writes none and is not required; a value given for it
 		// is checked where the frame closes.
@@ -5906,18 +5961,18 @@ func encodeFlagged(fd *FlaggedDef, data map[string]any, ctx *EncodeContext) erro
 }
 
 func encodeBitfieldString(field Field, strVal string, ctx *EncodeContext) error {
-	parts := field.Parts
-	delimiter := field.Delimiter
-	if delimiter == "" {
-		delimiter = "."
+	var parts [][]any
+	for _, part := range field.Parts {
+		if len(part) >= 2 {
+			parts = append(parts, part)
+		}
 	}
-	prefix := field.Prefix
-
-	if prefix != "" && strings.HasPrefix(strVal, prefix) {
-		strVal = strVal[len(prefix):]
+	// PS-605, PS-606 (CR-2026-183): the prefix required, the segment count checked, an
+	// empty delimiter split by width.
+	segments, err := bitfieldSegments(field, parts, strVal)
+	if err != nil {
+		return err
 	}
-
-	segments := strings.Split(strVal, delimiter)
 	length := field.Length
 	if length == 0 {
 		length = 2
@@ -5929,32 +5984,15 @@ func encodeBitfieldString(field Field, strVal string, ctx *EncodeContext) error 
 
 	var intVal uint64
 	for i, part := range parts {
-		if len(part) < 2 {
-			continue
-		}
-		bitOff := 0
-		bitLen := 8
+		bitOff, _ := toInt(part[0])
+		bitLen, _ := toInt(part[1])
 		var format any = "decimal"
-		if f, ok := part[0].(float64); ok {
-			bitOff = int(f)
-		} else if f, ok := part[0].(int); ok {
-			bitOff = f
-		}
-		if f, ok := part[1].(float64); ok {
-			bitLen = int(f)
-		} else if f, ok := part[1].(int); ok {
-			bitLen = f
-		}
 		if len(part) > 2 {
 			format = part[2]
 		}
-		seg := "0"
-		if i < len(segments) {
-			seg = segments[i]
-		}
 		// PS-096, PS-431, PS-583: parsed by the part's format; a value the width cannot
 		// hold is rejected, never masked.
-		val, err := parseBitfieldSegment(seg, bitLen, format, field.Name)
+		val, err := parseBitfieldSegment(segments[i], bitLen, format, field.Name)
 		if err != nil {
 			return err
 		}
@@ -6235,6 +6273,10 @@ func encodeField(field Field, value any, ctx *EncodeContext) error {
 			if field.Length > 0 && field.LengthRef == "" {
 				fixed = field.Length
 			}
+			terminator := -1
+			if field.HasTerminator && (field.Type == TypeAscii || field.Type == TypeAsciiLower) {
+				terminator, fixed = field.Terminator, -1 // PS-593: no width
+			}
 			strVal, ok := value.(string)
 			if field.Numeral != "" {
 				if numVal, isNum := toFloat64(value); isNum {
@@ -6248,7 +6290,7 @@ func encodeField(field Field, value any, ctx *EncodeContext) error {
 			if !ok {
 				strVal = fmt.Sprintf("%v", value)
 			}
-			data, err := encodeASCII(field.Name, strVal, fixed, ctx)
+			data, err := encodeASCII(field.Name, strVal, fixed, ctx, field.Nul, terminator)
 			if err != nil {
 				return err
 			}

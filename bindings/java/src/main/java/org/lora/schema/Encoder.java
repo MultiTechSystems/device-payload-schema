@@ -112,6 +112,7 @@ final class Encoder {
         // (CR-2026-024), so the whole list is walked at once: a run cannot be found by
         // looking at one field in isolation.
         byte[] frame = encodeWithBitfieldRuns(fields, input, true);
+        FrameMeta topMeta = frameMeta.get(frame);
         if (errors.isEmpty()) {
             try {
                 checkPeeks(frame);                              // PS-551 (CR-2026-141)
@@ -129,6 +130,17 @@ final class Encoder {
                 }
             }
         }
+        if (errors.isEmpty()) {
+            // PS-587 (CR-2026-174): each checksum over the finished frame, earliest first,
+            // so an outer checksum covers an inner one's value. One a construct encoded
+            // apart from the frame - a tlv entry, a repeat element - did not reach it, since
+            // the bytes before it were not written when it was.
+            try {
+                frame = fillChecksums(frame, topMeta);
+            } catch (RuntimeException e) {
+                errors.add(e.getMessage());
+            }
+        }
         if (errors.isEmpty() && frame.length == 0) {
             // PS-442: the last line against a construct that wrote nothing and said so to
             // no one - a match with no case chosen, a tlv entry no case claimed.
@@ -140,6 +152,25 @@ final class Encoder {
         // A rejected input produces no payload: the bytes written before the error are a
         // frame short of the rest, as Go has always returned nothing.
         return new EncodeResult(errors.isEmpty() ? out.toArray() : EMPTY, warnings, errors);
+    }
+
+    /** {@code fill_checksums}: the frame with every checksum placeholder computed. */
+    private byte[] fillChecksums(byte[] frame, FrameMeta meta) {
+        if (placedChecksums.isEmpty()) return frame;
+        List<Placed> placed = new ArrayList<>(meta == null ? List.of() : meta.checksums());
+        placed.sort(java.util.Comparator.comparingInt(Placed::pos));
+        byte[] out = frame.clone();
+        Set<Field> filled = java.util.Collections.newSetFromMap(new java.util.IdentityHashMap<>());
+        for (Placed c : placed) {
+            Checksum.fill(out, c.pos(), c.field(), c.little());
+            filled.add(c.field());
+        }
+        for (Field f : placedChecksums) {
+            if (!filled.contains(f)) {
+                throw new SchemaException.FieldEncodeException(Checksum.unwritten(f.getName()));
+            }
+        }
+        return out;
     }
 
     /** PS-551: what every encoder says for a required value the input omits. */
@@ -620,6 +651,21 @@ final class Encoder {
                 byte[] savedPeek = peeked;
                 peeked = out.pending();
                 try {
+                    if (field.getChecksum() != null) {
+                        // PS-587 (CR-2026-174): computed over the bytes written, never taken
+                        // from the input; zero until the frame is finished. Bits a peek left
+                        // pending would be ORed into it, so its range is not all written.
+                        if (out.pendingLength() > 0) {
+                            throw new SchemaException.FieldEncodeException(
+                                    Checksum.unwritten(field.getName()));
+                        }
+                        String endian = field.getEndian();
+                        boolean le = endian != null ? "little".equalsIgnoreCase(endian) : little;
+                        placedChecksums.add(field);
+                        out.extend(new byte[Checksum.size(field.getChecksumType())], 0,
+                                new FrameMeta(null, List.of(), List.of(new Placed(0, field, le)), List.of()));
+                        continue;
+                    }
                     if (isDerivableAbsentBool(field, data)) {
                         // PS-551 (CR-2026-141): an absent bool that does not consume is
                         // fixed by the fields that write its bit, so it writes none.
@@ -766,10 +812,26 @@ final class Encoder {
         }
     }
 
-    /** Per byte, the bits some field wrote (null: all), and the peeks placed. */
-    private record FrameMeta(byte[] covered, List<Peek> peeks, List<Echo> echoes) {
-        FrameMeta(byte[] covered, List<Peek> peeks) { this(covered, peeks, List.of()); }
+    /**
+     * Per byte, the bits some field wrote (null: all), the peeks placed, and the checksums
+     * written as placeholders, to be computed where the whole frame is known (PS-587),
+     * and the non-consuming byte strings given a value (PS-589).
+     */
+    private record FrameMeta(byte[] covered, List<Peek> peeks, List<Placed> checksums,
+                             List<Echo> echoes) {
+        FrameMeta(byte[] covered, List<Peek> peeks) { this(covered, peeks, List.of(), List.of()); }
     }
+
+    /** PS-587 (CR-2026-174): a checksum's placeholder, at {@code pos} in its frame. */
+    private record Placed(int pos, Field field, boolean little) {
+        Placed shifted(int by) {
+            return new Placed(pos + by, field, little);
+        }
+    }
+
+    /** Every checksum field given a placeholder, by identity: one never filled did not
+     *  reach the top-level frame - a tlv entry's or a repeat element's (PS-587). */
+    private final List<Field> placedChecksums = new ArrayList<>();
 
     /**
      * CR-2026-175 (PS-589): a non-consuming byte string given a value - where a decoder
@@ -917,9 +979,11 @@ final class Encoder {
         }
         List<Peek> peeks = new ArrayList<>();
         for (Peek p : meta.peeks()) peeks.add(p.shifted(prefix));
-        List<Echo> echoes = new ArrayList<>();
+        List<Placed> checksums = new ArrayList<>();
+        for (Placed c : meta.checksums()) checksums.add(c.shifted(prefix));
+                List<Echo> echoes = new ArrayList<>();
         for (Echo e : meta.echoes()) echoes.add(e.shifted(prefix));
-        frameMeta.put(result, new FrameMeta(covered, peeks, echoes));
+        frameMeta.put(result, new FrameMeta(covered, peeks, checksums, echoes));
         return result;
     }
 
@@ -2381,6 +2445,10 @@ final class Encoder {
                 matchClaims(f.getMatchInline(), out);
                 continue;
             }
+            if (claimName(f) != null && f.getChecksum() != null) {
+                out.add(new Claim(f, true));        // PS-587: computed, never required
+                continue;
+            }
             if (claimName(f) != null && (isLiteral(f) || isComputed(f) || f.isEcho())) {
                 // A literal or computed field writes no bytes, but only this case reports
                 // it, so it claims its name, never required: a literal where the input gives
@@ -3247,6 +3315,7 @@ final class Encoder {
                 // PS-561: digits in the declared base, rounded as PS-552 requires.
                 Object declared = field.getRaw() != null ? field.getRaw().get("length") : null;
                 Integer fixed = declared instanceof Integer n && n >= 0 ? n : null;
+                if (field.getTerminator() != null) fixed = null;   // PS-593: no width
                 return encodeAscii(field, Numeral.encode(field.getName(),
                         (long) Math.rint(asDouble(value)), fixed, field.getNumeral()));
             }
@@ -3317,31 +3386,31 @@ final class Encoder {
      * The hex parts are lowercase on output (PS-074), and parsing is case-insensitive.
      */
     private byte[] encodeBitfieldString(Field field, String value) {
-        String text = value;
-        String prefix = field.getPrefix() == null ? "" : field.getPrefix();
-        if (!prefix.isEmpty() && text.startsWith(prefix)) {
-            text = text.substring(prefix.length());
+        List<List<Object>> parts = new ArrayList<>();
+        if (field.getParts() != null) {
+            for (List<Object> part : field.getParts()) {
+                if (part.size() >= 2 && asLong(part.get(0)) != null && asLong(part.get(1)) != null) {
+                    parts.add(part);
+                }
+            }
         }
-        String delimiter = field.getDelimiter() == null ? "." : field.getDelimiter();
-        String[] segments = text.split(java.util.regex.Pattern.quote(delimiter), -1);
+        // PS-605, PS-606 (CR-2026-183): the prefix required, the segment count checked, an
+        // empty delimiter split by width.
+        List<String> segments = BitfieldParts.segments(field.getName(), field.getPrefix(),
+                field.getDelimiter(), parts, value);
 
         long packed = 0;
-        List<List<Object>> parts = field.getParts();
-        if (parts != null) {
-            for (int i = 0; i < parts.size(); i++) {
-                List<Object> part = parts.get(i);
-                if (part.size() < 2) continue;
-                Long bitOff = asLong(part.get(0));
-                Long bitLen = asLong(part.get(1));
-                if (bitOff == null || bitLen == null) continue;
-                Object format = part.size() >= 3 ? part.get(2) : "decimal";
-                String segment = i < segments.length ? segments[i] : "0";
-                // PS-096, PS-431, PS-583: parsed by the part's format; a value the width
-                // cannot hold is rejected, never masked.
-                long raw = BitfieldParts.parseSegment(segment, bitLen.intValue(), format, field.getName());
-                long mask = bitLen >= 64 ? -1L : (1L << bitLen) - 1;
-                packed |= (raw & mask) << bitOff;
-            }
+        for (int i = 0; i < parts.size(); i++) {
+            List<Object> part = parts.get(i);
+            Long bitOff = asLong(part.get(0));
+            Long bitLen = asLong(part.get(1));
+            Object format = part.size() >= 3 ? part.get(2) : "decimal";
+            String segment = segments.get(i);
+            // PS-096, PS-431, PS-583: parsed by the part's format; a value the width
+            // cannot hold is rejected, never masked.
+            long raw = BitfieldParts.parseSegment(segment, bitLen.intValue(), format, field.getName());
+            long mask = bitLen >= 64 ? -1L : (1L << bitLen) - 1;
+            packed |= (raw & mask) << bitOff;
         }
         int length = field.getLength() > 0 ? field.getLength() : 2;
         // PS-050a: the field's own byte order, as it is decoded; this wrote the schema's.
@@ -3373,6 +3442,25 @@ final class Encoder {
         byte[] raw = text.getBytes(StandardCharsets.ISO_8859_1);
         Object declared = field.getRaw() != null ? field.getRaw().get("length") : null;
         Integer fixed = declared instanceof Integer n && n >= 0 ? n : null;
+        Integer terminator = field.getType() == FieldType.ASCII ? field.getTerminator() : null;
+        if (terminator != null) {                                   // PS-595
+            fixed = null;
+            for (byte b : raw) {
+                if ((b & 0xFF) == terminator) {
+                    throw new SchemaException.FieldEncodeException(String.format(
+                            "Field '%s': the value holds its terminator byte 0x%02X (PS-595)",
+                            name, terminator));
+                }
+            }
+        }
+        if ("stop".equals(field.getNul())) {                        // PS-595
+            for (byte b : raw) {
+                if (b == 0) {
+                    throw new SchemaException.FieldEncodeException("Field '" + name
+                            + "': a nul: stop value holds a 0x00 byte (PS-595)");
+                }
+            }
+        }
         if (fixed != null && raw.length > fixed) {
             throw new SchemaException.FieldEncodeException(String.format(
                     "Field '%s': an ascii value of %d bytes is longer than its length of %d (PS-537)",
@@ -3383,6 +3471,11 @@ final class Encoder {
                 warnings.add("Field '" + name + "': a character above U+007F in an ascii value (PS-537)");
                 break;
             }
+        }
+        if (terminator != null) {                                   // PS-595
+            byte[] out = java.util.Arrays.copyOf(raw, raw.length + 1);
+            out[raw.length] = (byte) (int) terminator;
+            return out;
         }
         return fixed == null ? raw : pad(raw, fixed);
     }
@@ -3693,6 +3786,7 @@ final class Encoder {
         // each bit range or bool placed.
         private byte[] covered = new byte[0];
         private final List<Peek> peeks = new ArrayList<>();
+        private final List<Placed> checksums = new ArrayList<>();     // PS-587
         private final List<Echo> echoes = new ArrayList<>();      // PS-589
 
         /**
@@ -3716,7 +3810,7 @@ final class Encoder {
         FrameMeta meta() {
             int total = buf.size + pending.length;
             return new FrameMeta(java.util.Arrays.copyOf(covered, total), new ArrayList<>(peeks),
-                    new ArrayList<>(echoes));
+                    new ArrayList<>(checksums), new ArrayList<>(echoes));
         }
 
         byte[] pending() {
@@ -3766,6 +3860,7 @@ final class Encoder {
                 cover(offset + i, dataCovered == null ? 0xFF : dataCovered[i] & 0xFF);
             }
             if (meta != null) for (Peek p : meta.peeks()) peeks.add(p.shifted(offset));
+            if (meta != null) for (Placed c : meta.checksums()) checksums.add(c.shifted(offset));
             if (pending.length > 0) {
                 data = data.clone();
                 int shared = Math.min(pending.length, data.length);
