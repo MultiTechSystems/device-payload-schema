@@ -998,23 +998,39 @@ func ParseSchema(data string) (*Schema, error) {
 	}
 	// First parse raw to handle TLV cases (which use map instead of array)
 	var raw map[string]any
-	if err := yaml.Unmarshal([]byte(data), &raw); err != nil {
+	var rootNode yaml.Node
+	if err := yaml.Unmarshal([]byte(data), &rootNode); err != nil {
 		if err := json.Unmarshal([]byte(data), &raw); err != nil {
+			return nil, fmt.Errorf("failed to parse schema: %w", err)
+		}
+		// A document only JSON reads has no source key order; its node tree is built
+		// from the value, so references resolve the one way.
+		rootNode = yaml.Node{}
+		if err := rootNode.Encode(raw); err != nil {
 			return nil, fmt.Errorf("failed to parse schema: %w", err)
 		}
 	}
 
-	// Also parse into yaml.Node tree to extract YAML key ordering for modifiers
-	var rootNode yaml.Node
-	_ = yaml.Unmarshal([]byte(data), &rootNode)
-	fieldNodes := findFieldNodes(&rootNode, "fields")
-
-	// CR-2026-045: splice every $ref first, rejecting what cannot be (PS-345 to PS-349).
-	expanded, err := expandRawRefs(raw)
+	// CR-2026-045, CR-2026-168: resolve every reference and lookup pointer first, on the
+	// node tree, rejecting what cannot be (PS-345 to PS-349, PS-578 to PS-580). The value
+	// and the key order are both read from the resolved tree.
+	resolvedRoot, err := resolveRefNodes(&rootNode)
 	if err != nil {
 		return nil, err
 	}
-	raw = expanded
+	raw = nil
+	if resolvedRoot.Kind == 0 {
+		// an empty document: nothing to decode
+	} else if err := resolvedRoot.Decode(&raw); err != nil {
+		if err := json.Unmarshal([]byte(data), &raw); err != nil {
+			return nil, fmt.Errorf("failed to parse schema: %w", err)
+		}
+	}
+	// A mapping with a non-string key (a case key, a port) decodes as map[any]any; every
+	// walk after this reads string keys, as the map-based resolver used to leave them.
+	raw = stringKeyedDocument(raw)
+	rootNode = *resolvedRoot
+	fieldNodes := findFieldNodes(&rootNode, "fields")
 
 	// CR-2026-037: an unknown or absent type is a schema error, reported before
 	// anything is decoded (PS-327, PS-328, PS-334). The same walk holds the per-field

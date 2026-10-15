@@ -135,7 +135,7 @@ DEVICES = REPO_ROOT / "schemas" / "devices"
 # literal-selects-branch (2), match, and tag-entry-constants (4), tlv, and
 # tlv-case-field-list's literal_only, tlv - an entry reporting only a constant, which
 # encoded to no bytes with no error.
-FLOOR_TOTAL = 2270  # +11: whole-number-read-in-place (CR-2026-182); +3: bitfield-string-width-split (CR-2026-183), plain fixed; +2: meta-semantic (CR-2026-179); +10: bytes-format-forms (all plain fixed; every vector round-trips); +11: byte-group-member-var (tlv); +4: bitfield-string-field-endian (two fixtures); +4: expected-error (CR-2026-167: its four successful decodes round-trip; the rejections are skipped); +1: repeat-sampled (CR-2026-156); earlier moves follow
+FLOOR_TOTAL = 2273  # +11: whole-number-read-in-place (CR-2026-182); +3: bitfield-string-width-split (CR-2026-183), plain fixed; +2: meta-semantic (CR-2026-179); +10: bytes-format-forms (all plain fixed; every vector round-trips); +11: byte-group-member-var (tlv); +4: bitfield-string-field-endian (two fixtures); +4: expected-error (CR-2026-167: its four successful decodes round-trip; the rejections are skipped); +1: repeat-sampled (CR-2026-156); earlier moves follow
 
 #: Per-shape floors, so a regression in a shape that works cannot hide behind the 948
 #: TLV vectors that do not. A shape absent here has no working round-trip to protect.
@@ -145,7 +145,7 @@ FLOOR_BY_SHAPE = {
     # for an internal field with no value. It now reports such a field instead.
     "tlv": 1589,  # +11: byte-group-member-var; +4: expected-error (CR-2026-167); +5: no silent empty (see FLOOR_TOTAL); +12: the tlv encode-gap fixtures; +2: tlv-name-object-and-scalar; -4: PS-169 (see FLOOR_TOTAL); +16: CR-2026-141 (see FLOOR_TOTAL); -26: CR-2026-136 with CR-2026-134 (see FLOOR_TOTAL); +264: CR-2026-136 (see FLOOR_TOTAL); +2: CR-2026-128; +3: CR-2026-125 fixtures; +1: tlv-repeat-merge (CR-2026-110)
     "flagged": 198,  # +1: CR-2026-134; +4: mask-reference-binding (see FLOOR_TOTAL)
-    "plain fixed": 243,  # +3: bitfield-string-width-split (CR-2026-183), plain fixed; +6: checksum-fields (CR-2026-174); +10: bytes-format-forms (all plain fixed; every vector round-trips); +22: minifloat-reference-binding (11 types x 2; plain fixed); +4: bitfield-string-field-endian (two fixtures); +1: negative-zero (CR-2026-154); +4: ascii-numeral (CR-2026-150); +6: bf16 (CR-2026-149); +1: CR-2026-135 (see FLOOR_TOTAL); +4: ascii-latin1 (CR-2026-114)
+    "plain fixed": 246,  # +3: definitions-field-and-lookup (CR-2026-168), plain fixed; +3: bitfield-string-width-split (CR-2026-183), plain fixed; +6: checksum-fields (CR-2026-174); +10: bytes-format-forms (all plain fixed; every vector round-trips); +22: minifloat-reference-binding (11 types x 2; plain fixed); +4: bitfield-string-field-endian (two fixtures); +1: negative-zero (CR-2026-154); +4: ascii-numeral (CR-2026-150); +6: bf16 (CR-2026-149); +1: CR-2026-135 (see FLOOR_TOTAL); +4: ascii-latin1 (CR-2026-114)
     # +1: CR-2026-132 enum port; +5: lookup-reference-binding (CR-2026-109);
     # +4: match-u32-inline-discriminator; +2: CR-2026-134; +1: both together (see
     # FLOOR_TOTAL); +5: match-fractional-discriminator

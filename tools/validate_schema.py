@@ -1542,6 +1542,10 @@ def validate_schema_structure(schema: Dict[str, Any]) -> List[str]:
     # PS-345, PS-348, PS-349, PS-461, PS-462: definitions and references, checked here
     # rather than at decode (PS-348). PS-358: malformed literals.
     errors = list(expand_refs(schema)[1]) if isinstance(schema, dict) else []
+    if isinstance(schema, dict) and not errors:
+        # Every check reads the schema with its references and lookup pointers resolved,
+        # so a template's field is held to the field rules where it is used (CR-2026-168).
+        schema = expand_refs(schema)[0]
     if isinstance(schema, dict):
         errors.extend(case_body_errors(schema))                  # PS-441
         for field_def in typed_field_dicts(schema):

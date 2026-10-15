@@ -1,0 +1,234 @@
+# CR-2026-168: reusable lookup tables and field templates.
+#
+# A definition carries exactly one of `fields` (a field group), `field` (one field) or
+# `lookup` (a table) (PS-345). A `$ref` in a field list substitutes a group's fields, or the
+# one field with each key the reference carries replacing the defined key whole (PS-346,
+# PS-578); a field's `lookup` may be the pointer `#/definitions/<name>` to a table (PS-579).
+# References resolve transitively (PS-580). The output is that of the written-out schema.
+#
+# One case list, read by the reference (tests/test_cr_2026_168_cases.py, which also runs the
+# validator, the TS013 generator and the binary converter for C over it), Go
+# (go/schema/cr168_test.go), Java (CR2026168Test.java) and C# (CR2026_168Tests.cs), mirroring
+# the spec prototype's TestCR2026168ReusableDefinitions.
+#
+# Each case gives `schema` (YAML text) and either `error` - the whole message the load
+# reports, the spec prototype's text - or `payload` (hex) and `expected` (JSON text): the
+# schema loads and decodes the payload (on `fport` where given) to exactly that object, and
+# unless `round_trip: false`, re-encodes it to the payload; a case with `encode` (JSON text)
+# also encodes that object to `encoded` (hex).
+#
+# A Python repr in a message lists `$ref` first; no case carries more than one other key, so
+# the text does not depend on a loader's key order.
+
+cases:
+
+# --- Loaded: the output is that of the written-out schema --------------------------------
+
+- name: the_cr_example
+  schema: |
+    name: t
+    endian: big
+    definitions:
+      alarm_codes:
+        lookup: {0: none, 1: low, 2: high, 3: sensor_fault, default: "alarm${value}"}
+      probe:
+        field: {type: s16, div: 10, unit: Cel, valid_range: [-40, 125]}
+    fields:
+      - {$ref: "#/definitions/probe", name: temp_1}
+      - {$ref: "#/definitions/probe", name: temp_2}
+      - {$ref: "#/definitions/probe", name: temp_ext, div: 100}
+      - {name: alarm_1, type: u8, lookup: "#/definitions/alarm_codes"}
+      - {name: alarm_2, type: u8, lookup: "#/definitions/alarm_codes"}
+  payload: "00d700d808350107"
+  expected: '{"temp_1": 21.5, "temp_2": 21.6, "temp_ext": 21.01, "alarm_1": "low", "alarm_2": "alarm7"}'
+  encode: '{"temp_1": 21.5, "temp_2": 21.6, "temp_ext": 21.01, "alarm_1": "low", "alarm_2": "alarm7"}'
+  encoded: "00d700d808350107"
+
+- name: an_override_replaces_a_key_whole
+  schema: |
+    name: t
+    definitions:
+      f: {field: {type: u8, lookup: {0: a, 1: b}}}
+    fields:
+      - {$ref: "#/definitions/f", name: x, lookup: {1: c}}
+  payload: "01"
+  expected: '{"x": "c"}'
+
+- name: an_override_is_not_merged
+  schema: |
+    name: t
+    definitions:
+      f: {field: {type: u8, lookup: {0: a, 1: b}}}
+    fields:
+      - {$ref: "#/definitions/f", name: x, lookup: {1: c}}
+  payload: "00"
+  expected: '{}'
+  round_trip: false
+
+- name: a_field_definition_may_use_a_lookup_pointer
+  schema: |
+    name: t
+    definitions:
+      codes: {lookup: ["off", "on"]}
+      state: {field: {type: u8, lookup: "#/definitions/codes"}}
+    fields:
+      - {$ref: "#/definitions/state", name: s}
+  payload: "01"
+  expected: '{"s": "on"}'
+
+- name: a_group_may_reference_a_field_definition
+  schema: |
+    name: t
+    endian: big
+    definitions:
+      probe: {field: {type: s16, div: 10}}
+      pair:
+        fields:
+          - {$ref: "#/definitions/probe", name: a}
+          - {$ref: "#/definitions/probe", name: b}
+    fields:
+      - {$ref: "#/definitions/pair"}
+  payload: "000a0014"
+  expected: '{"a": 1, "b": 2}'
+
+- name: a_group_keeps_its_other_keys
+  schema: |
+    name: t
+    definitions:
+      g: {description: x, fields: [{name: a, type: u8}]}
+    fields:
+      - {$ref: "#/definitions/g"}
+  payload: "05"
+  expected: '{"a": 5}'
+
+- name: a_field_definition_may_carry_its_name
+  schema: |
+    name: t
+    definitions:
+      battery: {field: {name: battery, type: u8, div: 10}}
+    fields:
+      - {$ref: "#/definitions/battery"}
+  payload: "21"
+  expected: '{"battery": 3.3}'
+
+- name: a_template_in_a_port_and_a_pointer_in_a_case
+  schema: |
+    name: t
+    definitions:
+      modes: {lookup: {1: eco, 2: boost}}
+      level: {field: {type: u8, mult: 2}}
+    ports:
+      5:
+        fields:
+          - {name: kind, type: u8}
+          - match:
+              field: $kind
+              cases:
+                1:
+                  - {$ref: "#/definitions/level", name: level}
+                2:
+                  - {name: mode, type: u8, lookup: "#/definitions/modes"}
+  fport: 5
+  payload: "0202"
+  expected: '{"kind": 2, "mode": "boost"}'
+
+- name: a_pointer_in_a_tlv_case
+  schema: |
+    name: t
+    definitions:
+      modes: {lookup: {1: eco, 2: boost}}
+    fields:
+      - tlv:
+          tag_size: 1
+          cases:
+            7:
+              - {name: mode, type: u8, lookup: "#/definitions/modes"}
+  payload: "0701"
+  expected: '{"mode": "eco"}'
+
+# --- Rejected at load ---------------------------------------------------------------------
+
+- name: two_kinds
+  schema: |
+    name: t
+    definitions:
+      d: {field: {type: u8}, lookup: [a]}
+    fields:
+      - {name: x, type: u8}
+  error: "definition 'd' must carry exactly one of `fields`, `field` or `lookup`, not ['field', 'lookup'] (PS-345)"
+
+- name: no_kind
+  schema: |
+    name: t
+    definitions:
+      d: {description: nothing}
+    fields:
+      - {name: x, type: u8}
+  error: "definition 'd' must carry exactly one of `fields`, `field` or `lookup`, not none (PS-345)"
+
+- name: a_kind_of_the_wrong_shape
+  schema: |
+    name: t
+    definitions:
+      d: {field: [{name: a, type: u8}]}
+    fields:
+      - {name: x, type: u8}
+  error: "definition 'd': `field` must be a field (PS-345)"
+
+- name: a_group_reference_with_keys
+  schema: |
+    name: t
+    definitions:
+      g: {fields: [{name: a, type: u8}]}
+    fields:
+      - {$ref: "#/definitions/g", name: b}
+  error: "a `$ref` to the field group 'g' carries nothing else: {'$ref': '#/definitions/g', 'name': 'b'} (PS-578)"
+
+- name: a_lookup_in_a_field_list
+  schema: |
+    name: t
+    definitions:
+      l: {lookup: [a, b]}
+    fields:
+      - {$ref: "#/definitions/l"}
+  error: "`$ref` to '#/definitions/l' in a field list names a lookup table, not a field or a field group (PS-346, PS-348)"
+
+- name: a_pointer_to_a_field
+  schema: |
+    name: t
+    definitions:
+      f: {field: {type: u8}}
+    fields:
+      - {name: x, type: u8, lookup: "#/definitions/f"}
+  error: "`lookup: #/definitions/f` names a definition that is not a lookup table (PS-579, PS-348)"
+
+- name: a_pointer_to_nothing
+  schema: |
+    name: t
+    definitions:
+      f: {field: {type: u8}}
+    fields:
+      - {name: x, type: u8, lookup: "#/definitions/z"}
+  error: "`$ref` to '#/definitions/z', which `definitions` does not define (PS-348)"
+
+- name: no_name
+  schema: |
+    name: t
+    definitions:
+      f: {field: {type: u8}}
+    fields:
+      - {$ref: "#/definitions/f"}
+  error: "the field resolved from '#/definitions/f' has no `name`; the definition or the reference declares one (PS-578, PS-553)"
+
+- name: a_cycle_through_a_template
+  schema: |
+    name: t
+    definitions:
+      f:
+        field:
+          type: object
+          fields:
+            - {$ref: "#/definitions/f", name: y}
+    fields:
+      - {$ref: "#/definitions/f", name: x}
+  error: "`$ref` cycle: f -> f (PS-349)"
