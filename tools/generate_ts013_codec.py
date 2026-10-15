@@ -285,6 +285,9 @@ function encNumeral(f, value, fixed) {
   var digits = f.numeral === "hex" ? Math.abs(n).toString(16).toUpperCase() : String(Math.abs(n));
   var sign = n < 0 ? "-" : "";
   var width = fixed !== null ? fixed : sign.length + digits.length;
+  if (fixed === null && n < 0 && f.numeral === "hex") {
+    encFail("Field '" + f.name + "': " + String(value) + " is negative, which a hex numeral cannot write (PS-168)");
+  }
   if ((n < 0 && f.numeral === "hex") || sign.length + digits.length > width) {
     encFail("Field '" + f.name + "': " + String(value) + " does not fit " + (fixed !== null ? fixed : digits.length) + " " + f.numeral + " digits (PS-168)");
   }
@@ -479,6 +482,8 @@ function encFieldInner(out, f, value, endian, ctx) {  // _encode_field_inner
   if (encIsLiteral(f)) return;                       // PS-359: a literal writes nothing
   if (type === "string" || type === "ascii") {        // encode_ascii (PS-537)
     var fixed = typeof f.length === "number" && f.length >= 0 ? f.length : null;
+    var term = type === "ascii" && f.terminator !== undefined && f.terminator !== null ? f.terminator : null;
+    if (term !== null) fixed = null;                  // PS-593: a terminated field has no width
     if (f.numeral && type === "ascii") value = encNumeral(f, value, fixed);   // encode_numeral (PS-561)
     var text = String(value), u = [], high = false;
     for (var c = 0; c < text.length; c++) {
@@ -489,10 +494,17 @@ function encFieldInner(out, f, value, endian, ctx) {  // _encode_field_inner
       if (code > 0x7F) high = true;
       u.push(code);                                  // PS-538: the byte of the same number
     }
+    if (term !== null && u.indexOf(term) >= 0) {      // PS-595
+      encFail("Field '" + f.name + "': the value holds its terminator byte 0x" + ("0" + term.toString(16).toUpperCase()).slice(-2) + " (PS-595)");
+    }
+    if (f.nul === "stop" && u.indexOf(0) >= 0) {       // PS-595
+      encFail("Field '" + f.name + "': a nul: stop value holds a 0x00 byte (PS-595)");
+    }
     if (fixed !== null && u.length > fixed) {
       encFail("Field '" + f.name + "': an ascii value of " + u.length + " bytes is longer than its length of " + fixed + " (PS-537)");
     }
     if (high) ctx.wa.push("Field '" + f.name + "': a character above U+007F in an ascii value (PS-537)");
+    if (term !== null) { for (var t = 0; t < u.length; t++) out.push(u[t]); out.push(term); return; }   // PS-595
     encPad(out, u, fixed !== null ? fixed : u.length);
     return;
   }
@@ -883,17 +895,45 @@ function encSegmentBits(segment, width, fmt, name) {  // parse_bitfield_segment
   return out;
 }
 
+function encSplitByWidth(text, parts, name, value) {  // split_by_width
+  // PS-606 (CR-2026-183): an empty delimiter splits by each part's `:N` width. A part with
+  // no width holding its largest value, or an sdecimal part, makes the field unencodable.
+  var widths = [], total = 0, i;
+  for (i = 0; i < parts.length; i++) {
+    var bits = Number(parts[i][1]), pf = partFormat(parts[i].length > 2 ? parts[i][2] : "decimal");
+    var largest = pf.base.indexOf("hex") === 0 ? Math.max(1, Math.ceil(bits / 4)) : encPow2Text(bits, true).length;
+    if (pf.base === "sdecimal" || !pf.width || largest > pf.width)
+      encFail("Field '" + name + "': with an empty delimiter every part needs a :N width that holds its largest value, and none may be sdecimal, so this field cannot be encoded (PS-606)");
+    widths.push(pf.width);
+    total += pf.width;
+  }
+  if (text.length !== total)
+    encFail("Field '" + name + "': " + encPyRepr(value) + " has " + text.length + " characters for parts of widths [" + widths.join(", ") + "] (PS-606)");
+  var segs = [], at = 0;
+  for (i = 0; i < widths.length; i++) { segs.push(text.slice(at, at + widths[i])); at += widths[i]; }
+  return segs;
+}
+
 function encBitfieldString(out, f, value, ctx) {      // _encode_bitfield_string
-  var parts = f.parts || [], delim = f.delimiter === undefined ? "." : f.delimiter;
+  var parts = (f.parts || []).filter(function (p) { return p.length >= 2; });
+  var delim = f.delimiter === undefined ? "." : f.delimiter;
   var prefix = f.prefix || "", length = f.length === undefined ? 2 : f.length;
   value = String(value);
-  if (prefix && value.indexOf(prefix) === 0) value = value.slice(prefix.length);
-  var segs = value.split(delim), packed = {};
+  var text = value;
+  // PS-605 (CR-2026-183): a value without the declared prefix is rejected, and a segment
+  // count other than the part count is never filled or cut.
+  if (prefix) {
+    if (text.indexOf(prefix) !== 0)
+      encFail("Field '" + f.name + "': " + encPyRepr(value) + " does not begin with its prefix " + encPyRepr(prefix) + " (PS-605)");
+    text = text.slice(prefix.length);
+  }
+  var segs = delim === "" ? encSplitByWidth(text, parts, f.name, value) : text.split(delim), packed = {};
+  if (segs.length !== parts.length)
+    encFail("Field '" + f.name + "': " + encPyRepr(value) + " has " + segs.length + " segment(s) for " + parts.length + " part(s) (PS-605)");
   for (var i = 0; i < parts.length; i++) {
     var p = parts[i];
-    if (p.length < 2) continue;
     var fmt = p.length > 2 ? p[2] : "decimal";
-    var seg = i < segs.length ? segs[i] : "0";
+    var seg = segs[i];
     var start = Number(p[0]), width = Number(p[1]);
     var bits = encSegmentBits(seg, width, fmt, f.name);
     for (var b = 0; b < width; b++) if (bits[b]) packed[start + b] = 1;
@@ -1867,16 +1907,63 @@ function encPeekDisagreement(peeks, frame) {          // peek_disagreement
   return "A field writes bits a peek before it set otherwise (PS-551)";
 }
 
-/* PS-588 (CR-2026-175): a bytes, hex or ascii field declaring `consume: 0` (is_echo). */
+/* PS-588 (CR-2026-175): a bytes, hex or ascii field declaring `consume: 0`, or a whole
+ * numeric one (PS-603, CR-2026-182) (is_echo). */
 function encIsEcho(f) {
-  return (f.type === "bytes" || f.type === "hex" || f.type === "ascii") && f.consume === 0;
+  return (f.type === "bytes" || f.type === "hex" || f.type === "ascii" || encIsPeekedNumber(f))
+    && f.consume === 0;
+}
+
+var ENC_WHOLE_SIZES = { f16: 2, bf16: 2, f32: 4, f64: 8, uflt16: 2, sflt16: 2, sflt24: 3, udec: 1, sdec: 1 };
+
+function encWholeSize(t) {                             // whole_number_size
+  if (has_(ENC_WORD_ORDERED, t)) return 4;
+  if (has_(ENC_TYPES, t)) return ENC_TYPES[t][0];
+  return has_(ENC_WHOLE_SIZES, t) ? ENC_WHOLE_SIZES[t] : null;
+}
+
+function encIsPeekedNumber(f) {                        // is_peeked_number
+  return f.consume === 0 && encWholeSize(String(f.type)) !== null;
+}
+
+/* PS-604 (CR-2026-182): what a whole number decodes from `span` - its type, arithmetic and
+ * lookup, as a decoder applies them; null where it has no value. */
+function encWholeValue(f, span, endian) {
+  var t = String(f.type), v;
+  if (f.endian === "big" || f.endian === "little") endian = f.endian;
+  try {
+    if (has_(ENC_WORD_ORDERED, t)) v = readWordOrdered(span, 0, ENC_WORD_ORDERED[t][0], ENC_WORD_ORDERED[t][1]);
+    else if (has_(ENC_TYPES, t)) {
+      v = ENC_TYPES[t][1] ? readS(span, 0, ENC_TYPES[t][0], endian) : readU(span, 0, ENC_TYPES[t][0], endian);
+      if (f.encoding) v = decodeEncoding(v, f.encoding, ENC_TYPES[t][0]);
+    }
+    else if (t === "f16") v = readF16(span, 0, endian);
+    else if (t === "bf16") v = readBf16(span, 0, endian);
+    else if (t === "f32") v = readF32(span, 0, endian);
+    else if (t === "f64") v = readF64(span, 0, endian);
+    else if (t === "udec" || t === "sdec") {
+      var hi = span[0] >> 4;
+      if (t === "sdec" && hi >= 8) hi -= 16;
+      v = hi + (span[0] & 0x0F) * 0.1;
+    } else v = decodeMinifloat(t, readU(span, 0, ENC_WHOLE_SIZES[t], endian));
+  } catch (e) { return null; }
+  if (typeof v !== "number" || !isFinite(v)) return null;
+  v = encForward(v, f);
+  if (typeof v !== "number" || !isFinite(v)) return null;
+  var lk = f.lookup;
+  if (lk === undefined || lk === null) return v + 0;
+  if (Array.isArray(lk)) return v >= 0 && v < lk.length && v === Math.floor(v) ? lk[v] : null;
+  if (has_(lk, String(v))) return lk[String(v)];
+  if (has_(f, "default") && typeof f["default"] === "string") return lookupTemplate(f["default"], v);
+  return null;
 }
 
 /* PS-589: each one given a value is listed in `ec` as {p, f, given, n} (Frame.echoes): n
  * its byte count from the input, null for `remaining`, which reaches the frame's end. */
-function encEchoShifted(ec, by) { return { p: ec.p + by, f: ec.f, given: ec.given, n: ec.n }; }
+function encEchoShifted(ec, by) { return { p: ec.p + by, f: ec.f, given: ec.given, n: ec.n, endian: ec.endian }; }
 
 function encEchoLength(f, data) {                     // echo_length
+  if (encIsPeekedNumber(f)) return encWholeSize(String(f.type));   // PS-604
   var raw = f.length === undefined ? 1 : f.length;
   if (typeof raw === "string") {
     var text = raw.trim();
@@ -1926,11 +2013,13 @@ function encCheckEchoes(arr) {                        // check_echoes
     var n = ec.n === null ? Math.max(0, arr.length - ec.p) : ec.n, written;
     if (ec.p + n > arr.length) written = "too few bytes";
     else {
-      var found = encEchoValue(ec.f, Array.prototype.slice.call(arr, ec.p, ec.p + n));
+      var span = Array.prototype.slice.call(arr, ec.p, ec.p + n);
+      var found = encIsPeekedNumber(ec.f) ? encWholeValue(ec.f, span, ec.endian) : encEchoValue(ec.f, span);
       if (found !== null && JSON.stringify(found) === JSON.stringify(ec.given)) return;
       written = found === null ? "too few bytes" : encEchoText(found);
     }
-    encFail("Field '" + ec.f.name + "' is given " + encEchoText(ec.given) + ", but the other fields write " + written + " over its span (PS-589)");
+    encFail("Field '" + ec.f.name + "' is given " + encEchoText(ec.given) + ", but the other fields write " + written +
+            " over its span (" + (encIsPeekedNumber(ec.f) ? "PS-604" : "PS-589") + ")");
   });
 }
 
@@ -2299,7 +2388,7 @@ function encListIn(out, fields, data, ctx, top, entry) {
     if (encIsEcho(f)) {
       // PS-589 (CR-2026-175): it re-reads bytes the other fields write, so it writes none
       // and is not required; a value given for it is checked where the frame closes.
-      if (name && encHas(data, name)) fr.ec.push({ p: fr.out.length, f: f, given: data[name], n: encEchoLength(f, data) });
+      if (name && encHas(data, name)) fr.ec.push({ p: fr.out.length, f: f, given: data[name], n: encEchoLength(f, data), endian: ctx.endian });
       return;
     }
     if (encIsLiteral(f)) return;
@@ -4100,6 +4189,15 @@ function writeS(buf, pos, size, value, endian) {
             self.indent -= 1
             lines.append(f'{i}  }}')
             return lines
+        from schema_interpreter import is_peeked_number
+        if is_peeked_number(field):
+            # PS-603 (CR-2026-182): a whole number declaring `consume: 0` is read as it
+            # would be, and the position put back, so the fields after it read it again.
+            uid = f'_pk{self._next_uid()}'
+            inner = dict(field)
+            del inner['consume']
+            return ([f'{self._i()}  var {uid} = pos;'] + self._gen_decode_field(inner)
+                    + [f'{self._i()}  pos = {uid};'])
         lines = []
         i = self._i()
         # PS-422, PS-426: `encoding` only on uN and only a named code; no `match_value`.
@@ -4754,7 +4852,16 @@ function writeS(buf, pos, size, value, endian) {
             # `length: remaining` consumes to the end of the payload (PS-014); a name is a
             # preceding field (PS-464).
             lines.append(f'{i}  var {js_name} = "";')
-            lines.append(f'{i}  var {js_name}_n = {length_to_js(field)};')
+            if ftype == 'ascii' and field.get('terminator') is not None:
+                # PS-593 (CR-2026-177): the text runs to the first terminator byte; a
+                # payload that ends first is an underflow naming the field.
+                term = int(field['terminator'])
+                lines.append(
+                    f'{i}  var {js_name}_n = (function () {{ var _e = buf.indexOf({term}, pos); '
+                    f'if (_e < 0) throw underflow("no terminator byte 0x{term:02X} before the '
+                    f'end of the payload (PS-593)"); return _e - pos; }})();')
+            else:
+                lines.append(f'{i}  var {js_name}_n = {length_to_js(field)};')
             # A declared length the payload cannot supply is an error, as in every
             # interpreter; the loops below stopped at the end and reported what was left.
             lines.append(f'{i}  need(buf, pos, {js_name}_n);')
@@ -4774,9 +4881,17 @@ function writeS(buf, pos, size, value, endian) {
                 from schema_interpreter import ASCII_HIGH_BYTE_WARNING
                 warning = json.dumps(ASCII_HIGH_BYTE_WARNING.format(field.get('name')))
                 lines.append(f'{i}  if (/[\\u0080-\\u00ff]/.test({js_name})) wn.push({warning});')
-                lines.append(f'{i}  {js_name} = {js_name}.replace(/\\u0000+$/, "");')
+                nul = field.get('nul', 'trailing')              # PS-534 (CR-2026-177)
+                if nul == 'stop':
+                    lines.append(f'{i}  {js_name} = {js_name}.split("\\u0000")[0];')
+                elif nul == 'drop':
+                    lines.append(f'{i}  {js_name} = {js_name}.replace(/\\u0000/g, "");')
+                else:
+                    lines.append(f'{i}  {js_name} = {js_name}.replace(/\\u0000+$/, "");')
                 if echo:
                     lines.append(f'{i}  pos = {js_name}_p0;')
+                elif field.get('terminator') is not None:
+                    lines.append(f'{i}  pos += 1;')              # PS-593: consumed, not reported
                 if field.get('numeral'):
                     # PS-560: the whole text is a numeral of the declared base, or an error
                     # naming the field; parseInt alone would take a prefix.

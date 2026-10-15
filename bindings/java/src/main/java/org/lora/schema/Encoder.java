@@ -844,6 +844,7 @@ final class Encoder {
 
     /** The byte count of a non-consuming byte string, read from the input. */
     private static Integer echoLength(Field field, Map<String, Object> data) {
+        if (field.isPeekedNumber()) return Field.wholeNumberSize(field.getType());   // PS-604
         if (field.getLengthRef() != null) {
             String ref = field.getLengthRef();
             if (ref.startsWith("$")) ref = ref.substring(1);
@@ -903,8 +904,9 @@ final class Encoder {
             } else {
                 Object found;
                 try {
-                    found = schema.echoValue(e.field(),
-                            java.util.Arrays.copyOfRange(frame, e.pos(), e.pos() + length));
+                    byte[] span = java.util.Arrays.copyOfRange(frame, e.pos(), e.pos() + length);
+                    found = e.field().isPeekedNumber() ? schema.peekedNumberValue(e.field(), span)
+                            : schema.echoValue(e.field(), span);
                 } catch (RuntimeException x) {
                     found = null;
                 }
@@ -913,7 +915,8 @@ final class Encoder {
             }
             throw new SchemaException.EncodeException("Field '" + e.field().getName()
                     + "' is given " + echoText(e.given()) + ", but the other fields write "
-                    + written + " over its span (PS-589)");
+                    + written + " over its span ("
+                    + (e.field().isPeekedNumber() ? "PS-604" : "PS-589") + ")");
         }
     }
 
@@ -3315,6 +3318,7 @@ final class Encoder {
                 // PS-561: digits in the declared base, rounded as PS-552 requires.
                 Object declared = field.getRaw() != null ? field.getRaw().get("length") : null;
                 Integer fixed = declared instanceof Integer n && n >= 0 ? n : null;
+                if (field.getTerminator() != null) fixed = null;   // PS-593: no width
                 return encodeAscii(field, Numeral.encode(field.getName(),
                         (long) Math.rint(asDouble(value)), fixed, field.getNumeral()));
             }
@@ -3385,31 +3389,31 @@ final class Encoder {
      * The hex parts are lowercase on output (PS-074), and parsing is case-insensitive.
      */
     private byte[] encodeBitfieldString(Field field, String value) {
-        String text = value;
-        String prefix = field.getPrefix() == null ? "" : field.getPrefix();
-        if (!prefix.isEmpty() && text.startsWith(prefix)) {
-            text = text.substring(prefix.length());
+        List<List<Object>> parts = new ArrayList<>();
+        if (field.getParts() != null) {
+            for (List<Object> part : field.getParts()) {
+                if (part.size() >= 2 && asLong(part.get(0)) != null && asLong(part.get(1)) != null) {
+                    parts.add(part);
+                }
+            }
         }
-        String delimiter = field.getDelimiter() == null ? "." : field.getDelimiter();
-        String[] segments = text.split(java.util.regex.Pattern.quote(delimiter), -1);
+        // PS-605, PS-606 (CR-2026-183): the prefix required, the segment count checked, an
+        // empty delimiter split by width.
+        List<String> segments = BitfieldParts.segments(field.getName(), field.getPrefix(),
+                field.getDelimiter(), parts, value);
 
         long packed = 0;
-        List<List<Object>> parts = field.getParts();
-        if (parts != null) {
-            for (int i = 0; i < parts.size(); i++) {
-                List<Object> part = parts.get(i);
-                if (part.size() < 2) continue;
-                Long bitOff = asLong(part.get(0));
-                Long bitLen = asLong(part.get(1));
-                if (bitOff == null || bitLen == null) continue;
-                Object format = part.size() >= 3 ? part.get(2) : "decimal";
-                String segment = i < segments.length ? segments[i] : "0";
-                // PS-096, PS-431, PS-583: parsed by the part's format; a value the width
-                // cannot hold is rejected, never masked.
-                long raw = BitfieldParts.parseSegment(segment, bitLen.intValue(), format, field.getName());
-                long mask = bitLen >= 64 ? -1L : (1L << bitLen) - 1;
-                packed |= (raw & mask) << bitOff;
-            }
+        for (int i = 0; i < parts.size(); i++) {
+            List<Object> part = parts.get(i);
+            Long bitOff = asLong(part.get(0));
+            Long bitLen = asLong(part.get(1));
+            Object format = part.size() >= 3 ? part.get(2) : "decimal";
+            String segment = segments.get(i);
+            // PS-096, PS-431, PS-583: parsed by the part's format; a value the width
+            // cannot hold is rejected, never masked.
+            long raw = BitfieldParts.parseSegment(segment, bitLen.intValue(), format, field.getName());
+            long mask = bitLen >= 64 ? -1L : (1L << bitLen) - 1;
+            packed |= (raw & mask) << bitOff;
         }
         int length = field.getLength() > 0 ? field.getLength() : 2;
         // PS-050a: the field's own byte order, as it is decoded; this wrote the schema's.
@@ -3441,6 +3445,25 @@ final class Encoder {
         byte[] raw = text.getBytes(StandardCharsets.ISO_8859_1);
         Object declared = field.getRaw() != null ? field.getRaw().get("length") : null;
         Integer fixed = declared instanceof Integer n && n >= 0 ? n : null;
+        Integer terminator = field.getType() == FieldType.ASCII ? field.getTerminator() : null;
+        if (terminator != null) {                                   // PS-595
+            fixed = null;
+            for (byte b : raw) {
+                if ((b & 0xFF) == terminator) {
+                    throw new SchemaException.FieldEncodeException(String.format(
+                            "Field '%s': the value holds its terminator byte 0x%02X (PS-595)",
+                            name, terminator));
+                }
+            }
+        }
+        if ("stop".equals(field.getNul())) {                        // PS-595
+            for (byte b : raw) {
+                if (b == 0) {
+                    throw new SchemaException.FieldEncodeException("Field '" + name
+                            + "': a nul: stop value holds a 0x00 byte (PS-595)");
+                }
+            }
+        }
         if (fixed != null && raw.length > fixed) {
             throw new SchemaException.FieldEncodeException(String.format(
                     "Field '%s': an ascii value of %d bytes is longer than its length of %d (PS-537)",
@@ -3451,6 +3474,11 @@ final class Encoder {
                 warnings.add("Field '" + name + "': a character above U+007F in an ascii value (PS-537)");
                 break;
             }
+        }
+        if (terminator != null) {                                   // PS-595
+            byte[] out = java.util.Arrays.copyOf(raw, raw.length + 1);
+            out[raw.length] = (byte) (int) terminator;
+            return out;
         }
         return fixed == null ? raw : pad(raw, fixed);
     }

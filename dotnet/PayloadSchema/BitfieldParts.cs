@@ -93,4 +93,57 @@ internal static class BitfieldParts
         if (number.Sign < 0) number += BigInteger.One << bits;
         return (ulong)number;
     }
+
+    /// <summary>CR-2026-183 (PS-096, PS-605, PS-606): a value's segments, one per part. The
+    /// declared prefix is required, the rest split on the delimiter, or by each part's `:N`
+    /// width where the delimiter is empty; a segment count other than the part count is
+    /// rejected, never filled or cut. Mirrors bitfield_segments and split_by_width.</summary>
+    internal static List<string> Segments(string? name, string? prefix, string? delimiter,
+        List<List<object>> parts, string value)
+    {
+        var text = value;
+        if (!string.IsNullOrEmpty(prefix))
+        {
+            if (!text.StartsWith(prefix, StringComparison.Ordinal))
+                throw new InvalidOperationException($"Field '{name}': {Meta.PyRepr(value)} does not "
+                    + $"begin with its prefix {Meta.PyRepr(prefix)} (PS-605)");
+            text = text[prefix.Length..];
+        }
+        var segments = delimiter == ""
+            ? SplitByWidth(text, parts, name, value)
+            : text.Split(delimiter ?? ".").ToList();
+        if (segments.Count != parts.Count)
+            throw new InvalidOperationException($"Field '{name}': {Meta.PyRepr(value)} has "
+                + $"{segments.Count} segment(s) for {parts.Count} part(s) (PS-605)");
+        return segments;
+    }
+
+    /// <summary>PS-606: split by width; a part lacking a width for its largest value, or an
+    /// sdecimal part, makes the field unencodable (it still decodes).</summary>
+    static List<string> SplitByWidth(string text, List<List<object>> parts, string? name, string value)
+    {
+        var widths = new List<int>();
+        foreach (var part in parts)
+        {
+            var (_, bits) = Helpers.ToInt(part[1]);
+            var (b, width) = Parse(part.Count > 2 ? part[2] : "decimal");
+            int largest = bits > 0 ? FormatNumber(false, (BigInteger.One << bits) - 1, b, 0).Length : 1;
+            if (b == "sdecimal" || width == 0 || largest > width)
+                throw new InvalidOperationException($"Field '{name}': with an empty delimiter every "
+                    + "part needs a :N width that holds its largest value, and none may be sdecimal, "
+                    + "so this field cannot be encoded (PS-606)");
+            widths.Add(width);
+        }
+        if (text.Length != widths.Sum())
+            throw new InvalidOperationException($"Field '{name}': {Meta.PyRepr(value)} has "
+                + $"{text.Length} characters for parts of widths [{string.Join(", ", widths)}] (PS-606)");
+        var segments = new List<string>();
+        int at = 0;
+        foreach (var w in widths)
+        {
+            segments.Add(text.Substring(at, w));
+            at += w;
+        }
+        return segments;
+    }
 }

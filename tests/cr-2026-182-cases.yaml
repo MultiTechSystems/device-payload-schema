@@ -1,0 +1,143 @@
+# CR-2026-182 (PS-453 amended, PS-603, PS-604; la-payload-schema branch cr/0.5.8-apply-182, for
+# 0.5.8): a whole numeric field - an integer, a float, a minifloat, `udec`/`sdec` or a
+# word-ordered variant - declaring `consume: 0` reads its value in place and leaves the read
+# position, so the fields after it read the same bytes again. An encoder writes nothing for
+# it and does not require it; the bytes fix it. A value given for it is compared with what
+# the bytes the other fields write over its span decode to, through its own type,
+# arithmetic and lookup, and a value that differs is rejected, naming the field. The check
+# is CR-2026-175's (PS-589), citing PS-604.
+#
+# Two lists, read by the reference and the generated codec (tests/test_cr_2026_182_cases.py),
+# Go (go/schema/cr182_test.go), Java (CR2026182Test.java) and C# (CR2026_182Tests.cs). C
+# has no field that reads in place, and tools/schema_binary.py refuses one (PS-446).
+#
+#   decode: `schema` (YAML text), `payload` (hex) and either `expected` (JSON text of the
+#           whole decoded data) or `error` (text one of the errors contains).
+#   cases:  `schema`, `input` (JSON text) and either `payload` (hex) or `error`.
+#
+# The first decode cases and the agreeing, omitted and differing encode cases mirror the
+# spec prototype's TestCR2026182ConsumeZeroWholeNumber.
+
+decode:
+
+- name: a_peeked_discriminator_reads_in_place
+  schema: "name: t\nendian: big\nfields:\n  - {name: _kind, type: u8, consume: 0}\n  - match:\n      field: $_kind\n      cases:\n        1: [{name: kind, type: u8}, {name: temperature, type: s16, div: 10}]\n        2: [{name: kind, type: u8}, {name: battery, type: u8}]\n"
+  payload: "0100d7"
+  expected: '{"kind": 1, "temperature": 21.5}'
+
+- name: a_peeked_discriminator_selects_the_other_case
+  schema: "name: t\nendian: big\nfields:\n  - {name: _kind, type: u8, consume: 0}\n  - match:\n      field: $_kind\n      cases:\n        1: [{name: kind, type: u8}, {name: temperature, type: s16, div: 10}]\n        2: [{name: kind, type: u8}, {name: battery, type: u8}]\n"
+  payload: "0250"
+  expected: '{"kind": 2, "battery": 80}'
+
+- name: u16_reads_in_place
+  schema: "name: t\nendian: big\nfields:\n  - {name: peek, type: u16, consume: 0}\n  - {name: raw, type: bytes, length: 2}\n"
+  payload: "1234"
+  expected: '{"peek": 4660, "raw": "1234"}'
+
+- name: s16_reads_in_place
+  schema: "name: t\nendian: big\nfields:\n  - {name: peek, type: s16, consume: 0}\n  - {name: raw, type: bytes, length: 2}\n"
+  payload: "fffe"
+  expected: '{"peek": -2, "raw": "fffe"}'
+
+- name: f32_reads_in_place
+  schema: "name: t\nendian: big\nfields:\n  - {name: peek, type: f32, consume: 0}\n  - {name: raw, type: bytes, length: 4}\n"
+  payload: "41200000"
+  expected: '{"peek": 10, "raw": "41200000"}'
+
+- name: a_named_peek_is_reported_and_matched_on
+  schema: "name: t\nendian: big\nfields:\n  - {name: kind, type: u8, consume: 0}\n  - match:\n      field: $kind\n      cases:\n        1: [{name: a, type: u8}, {name: b, type: u8}]\n        2: [{name: c, type: u8}]\n"
+  payload: "0105"
+  expected: '{"kind": 1, "a": 1, "b": 5}'
+
+- name: arithmetic_and_byte_order_apply
+  schema: "name: t\nendian: little\nfields:\n  - {name: peek, type: u16, consume: 0, div: 10}\n  - {name: lo, type: u8}\n  - {name: hi, type: u8}\n"
+  payload: "d700"
+  expected: '{"peek": 21.5, "lo": 215, "hi": 0}'
+
+- name: a_lookup_applies
+  schema: "name: t\nendian: big\nfields:\n  - {name: mode, type: u8, consume: 0, lookup: {1: eco, 2: boost}}\n  - {name: code, type: u8}\n"
+  payload: "02"
+  expected: '{"mode": "boost", "code": 2}'
+
+- name: mid_frame_peek
+  schema: "name: t\nendian: big\nfields:\n  - {name: a, type: u8}\n  - {name: peek, type: u16, consume: 0}\n  - {name: b, type: u8}\n  - {name: c, type: u8}\n"
+  payload: "010203"
+  expected: '{"a": 1, "peek": 515, "b": 2, "c": 3}'
+
+- name: a_minifloat_and_a_nibble_decimal_read_in_place
+  schema: "name: t\nendian: big\nfields:\n  - {name: d, type: udec, consume: 0}\n  - {name: raw, type: u8}\n"
+  payload: "25"
+  expected: '{"d": 2.5, "raw": 37}'
+
+- name: a_word_ordered_value_reads_in_place
+  schema: "name: t\nendian: big\nfields:\n  - {name: w, type: u32le16, consume: 0}\n  - {name: lo, type: u16}\n  - {name: hi, type: u16}\n"
+  payload: "00020001"
+  expected: '{"w": 65538, "lo": 2, "hi": 1}'
+
+- name: consume_one_still_advances
+  schema: "name: t\nendian: big\nfields:\n  - {name: a, type: u8, consume: 1}\n  - {name: b, type: u8}\n"
+  payload: "0102"
+  expected: '{"a": 1, "b": 2}'
+
+- name: a_peek_past_the_end_is_an_underflow
+  schema: "name: t\nendian: big\nfields:\n  - {name: peek, type: u16, consume: 0}\n  - {name: a, type: u8}\n"
+  payload: "01"
+  error: "Field 'peek': Buffer underflow: need 2 bytes at offset 0, but only 1 remaining (PS-535)"
+
+cases:
+
+- name: a_given_value_that_agrees
+  schema: "name: t\nendian: big\nfields:\n  - {name: peek, type: u16, consume: 0}\n  - {name: hi, type: u8}\n  - {name: lo, type: u8}\n"
+  input: '{"peek": 4660, "hi": 18, "lo": 52}'
+  payload: "1234"
+
+- name: an_omitted_value_is_fixed_by_the_bytes
+  schema: "name: t\nendian: big\nfields:\n  - {name: peek, type: u16, consume: 0}\n  - {name: hi, type: u8}\n  - {name: lo, type: u8}\n"
+  input: '{"hi": 18, "lo": 52}'
+  payload: "1234"
+
+- name: a_given_value_that_differs_is_rejected
+  schema: "name: t\nendian: big\nfields:\n  - {name: peek, type: u16, consume: 0}\n  - {name: hi, type: u8}\n  - {name: lo, type: u8}\n"
+  input: '{"peek": 39321, "hi": 18, "lo": 52}'
+  error: "Field 'peek' is given 39321, but the other fields write 4660 over its span (PS-604)"
+
+- name: the_cr_example_writes_the_kind_once
+  schema: "name: t\nendian: big\nfields:\n  - {name: _kind, type: u8, consume: 0}\n  - match:\n      field: $_kind\n      cases:\n        1: [{name: kind, type: u8}, {name: temperature, type: s16, div: 10}]\n        2: [{name: kind, type: u8}, {name: battery, type: u8}]\n"
+  input: '{"kind": 1, "temperature": 21.5}'
+  payload: "0100d7"
+
+- name: a_named_discriminator_given_and_agreeing
+  schema: "name: t\nendian: big\nfields:\n  - {name: kind, type: u8, consume: 0}\n  - match:\n      field: $kind\n      cases:\n        1: [{name: a, type: u8}, {name: b, type: u8}]\n        2: [{name: c, type: u8}]\n"
+  input: '{"kind": 1, "a": 1, "b": 5}'
+  payload: "0105"
+
+- name: a_named_discriminator_the_bytes_contradict
+  schema: "name: t\nendian: big\nfields:\n  - {name: kind, type: u8, consume: 0}\n  - match:\n      field: $kind\n      cases:\n        1: [{name: a, type: u8}, {name: b, type: u8}]\n        2: [{name: c, type: u8}]\n"
+  input: '{"kind": 1, "a": 2, "b": 5}'
+  error: "Field 'kind' is given 1, but the other fields write 2 over its span (PS-604)"
+
+- name: arithmetic_applies_before_comparing
+  schema: "name: t\nendian: little\nfields:\n  - {name: peek, type: u16, consume: 0, div: 10}\n  - {name: lo, type: u8}\n  - {name: hi, type: u8}\n"
+  input: '{"peek": 21.5, "lo": 215, "hi": 0}'
+  payload: "d700"
+
+- name: a_label_is_compared_as_a_label
+  schema: "name: t\nendian: big\nfields:\n  - {name: mode, type: u8, consume: 0, lookup: {1: eco, 2: boost}}\n  - {name: code, type: u8}\n"
+  input: '{"mode": "eco", "code": 2}'
+  error: "Field 'mode' is given 'eco', but the other fields write 'boost' over its span (PS-604)"
+
+- name: a_float_given_and_agreeing
+  schema: "name: t\nendian: big\nfields:\n  - {name: peek, type: f32, consume: 0}\n  - {name: raw, type: u32}\n"
+  input: '{"peek": 10, "raw": 1092616192}'
+  payload: "41200000"
+
+- name: a_float_that_differs_is_rejected
+  schema: "name: t\nendian: big\nfields:\n  - {name: peek, type: f32, consume: 0}\n  - {name: raw, type: u32}\n"
+  input: '{"peek": 11, "raw": 1092616192}'
+  error: "Field 'peek' is given 11, but the other fields write 10 over its span (PS-604)"
+
+- name: a_span_the_frame_does_not_reach
+  schema: "name: t\nendian: big\nfields:\n  - {name: peek, type: u16, consume: 0}\n  - {name: a, type: u8}\n"
+  input: '{"peek": 256, "a": 1}'
+  error: "Field 'peek' is given 256, but the other fields write too few bytes over its span (PS-604)"

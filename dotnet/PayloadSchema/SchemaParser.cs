@@ -21,30 +21,106 @@ public static partial class SchemaParser
 
     const string RefPrefix = "#/definitions/";
 
+    static readonly string[] DefinitionKinds = { "fields", "field", "lookup" };
+
     /// <summary>
-    /// Splice every `{$ref: '#/definitions/name'}` into the field list it sits in, before
-    /// anything is parsed, so a reference works in any field list - a port entry, an
-    /// object, a repeat, a case (PS-346, PS-347). Rejected at load: a definition that is
-    /// not a field group (PS-345), a reference that does not resolve (PS-348) or names
-    /// another document (PS-462, optional and not supported here), a pointer of another
-    /// form (PS-461), a cycle (PS-349). Mirrors expand_refs in tools/schema_interpreter.py.
+    /// CR-2026-045 and CR-2026-168: resolve every reference to `definitions` before anything
+    /// is parsed. A definition carries exactly one of `fields` (a group), `field` (one field)
+    /// or `lookup` (a table) (PS-345). A `{$ref: '#/definitions/name'}` in a field list is
+    /// replaced by the group's fields, or by the one field with each key the reference
+    /// carries replacing the defined key whole (PS-346, PS-578); a field's `lookup` given as
+    /// a pointer becomes the table (PS-579). References resolve transitively (PS-580), and
+    /// the definitions kept are themselves resolved. Rejected at load, in the spec
+    /// prototype's words: a definition of no kind, several or the wrong shape (PS-345), a
+    /// reference that does not resolve or names the wrong kind (PS-348) or another document
+    /// (PS-462, optional and not supported here), a group reference with keys or a nameless
+    /// result (PS-578), a pointer of another form (PS-461), a cycle (PS-349). Mirrors
+    /// expand_refs in tools/schema_interpreter.py.
     /// </summary>
     static YamlMappingNode ExpandRefs(YamlMappingNode root)
     {
-        var definitions = new Dictionary<string, YamlSequenceNode>();
-        if (root.TryGetValue("definitions", out var defsNode))
+        var definitions = new Dictionary<string, YamlNode>();
+        var order = new List<(YamlNode Key, string Name)>();
+        YamlMappingNode? defsMap = null;
+        if (root.TryGetValue("definitions", out var defsNode)
+            && !(defsNode is YamlScalarNode nul && (nul.Value is null or "" or "~" or "null")
+                 && nul.Style == YamlDotNet.Core.ScalarStyle.Plain))
         {
-            if (defsNode is not YamlMappingNode defsMap)
-                throw new InvalidOperationException("'definitions' must map names to field groups (PS-345)");
+            defsMap = defsNode as YamlMappingNode
+                ?? throw new InvalidOperationException("`definitions` must map names to definitions (PS-345)");
             foreach (var kv in defsMap.Children)
             {
                 var name = Scalar(kv.Key);
-                if (kv.Value is not YamlMappingNode group || !group.TryGetValue("fields", out var f)
-                    || f is not YamlSequenceNode fields)
-                    throw new InvalidOperationException(
-                        $"definition '{name}' is not a field group with a `fields` array (PS-345)");
-                definitions[name] = fields;
+                definitions[name] = kv.Value;
+                order.Add((kv.Key, name));
             }
+        }
+
+        string Kind(string name, List<string> chain)
+        {
+            if (chain.Contains(name))
+                throw new InvalidOperationException(
+                    $"`$ref` cycle: {string.Join(" -> ", chain.Append(name))} (PS-349)");
+            if (!definitions.TryGetValue(name, out var group))
+                throw new InvalidOperationException(
+                    $"`$ref` to '{RefPrefix}{name}', which `definitions` does not define (PS-348)");
+            var kinds = DefinitionKinds
+                .Where(k => group is YamlMappingNode g && g.TryGetValue(k, out _))
+                .ToList();
+            if (kinds.Count != 1)
+                throw new InvalidOperationException(
+                    $"definition '{name}' must carry exactly one of `fields`, `field` or `lookup`, not "
+                    + (kinds.Count == 0 ? "none" : "[" + string.Join(", ", kinds.Select(k => $"'{k}'")) + "]")
+                    + " (PS-345)");
+            ((YamlMappingNode)group).TryGetValue(kinds[0], out var body);
+            var ok = kinds[0] switch
+            {
+                "fields" => body is YamlSequenceNode,
+                "field" => body is YamlMappingNode,
+                _ => body is YamlMappingNode or YamlSequenceNode,
+            };
+            if (!ok)
+            {
+                var described = kinds[0] switch
+                {
+                    "fields" => "a list of fields",
+                    "field" => "a field",
+                    _ => "a lookup table",
+                };
+                throw new InvalidOperationException($"definition '{name}': `{kinds[0]}` must be {described} (PS-345)");
+            }
+            return kinds[0];
+        }
+
+        string Target(YamlNode refNode)
+        {
+            var isString = refNode is YamlScalarNode sc && sc.Value is not null;
+            var text = isString ? ((YamlScalarNode)refNode).Value! : "";
+            if (isString && text.StartsWith(RefPrefix, StringComparison.Ordinal))
+            {
+                var name = text[RefPrefix.Length..];
+                if (name.Length > 0 && !name.Contains('/')) return name;
+            }
+            if (isString && text.Contains('#') && !text.StartsWith('#'))
+                throw new InvalidOperationException($"$ref {Meta.PyRepr(text)} names another document; this "
+                    + "implementation resolves only #/definitions/<name> (PS-462)");
+            throw new InvalidOperationException(
+                $"$ref {NodeRepr(refNode)} is not of the form #/definitions/<name> (PS-461)");
+        }
+
+        List<string> Deeper(List<string> chain, string name) => new List<string>(chain) { name };
+
+        YamlNode LookupTable(YamlNode value, List<string> chain)
+        {
+            if (value is not YamlScalarNode pointer || pointer.Value is null) return Expand(value, chain);
+            if (pointer.Style == YamlDotNet.Core.ScalarStyle.Plain
+                && (pointer.Value is "" or "~" or "null")) return value;
+            var name = Target(pointer);
+            if (Kind(name, chain) != "lookup")
+                throw new InvalidOperationException(
+                    $"`lookup: {pointer.Value}` names a definition that is not a lookup table (PS-579, PS-348)");
+            ((YamlMappingNode)definitions[name]).TryGetValue("lookup", out var table);
+            return Expand(table, chain);
         }
 
         YamlNode Expand(YamlNode node, List<string> stack)
@@ -54,7 +130,9 @@ public static partial class SchemaParser
                 case YamlMappingNode map:
                 {
                     var outMap = new YamlMappingNode();
-                    foreach (var kv in map.Children) outMap.Add(kv.Key, Expand(kv.Value, stack));
+                    foreach (var kv in map.Children)
+                        outMap.Add(kv.Key, Scalar(kv.Key) == "lookup" ? LookupTable(kv.Value, stack)
+                            : Expand(kv.Value, stack));
                     return outMap;
                 }
                 case YamlSequenceNode seq:
@@ -62,8 +140,8 @@ public static partial class SchemaParser
                     var outSeq = new YamlSequenceNode();
                     foreach (var item in seq.Children)
                     {
-                        if (item is YamlMappingNode m && m.TryGetValue("$ref", out var refNode))
-                            foreach (var spliced in Resolve(refNode, stack)) outSeq.Add(spliced);
+                        if (item is YamlMappingNode m && m.TryGetValue("$ref", out _))
+                            foreach (var spliced in Resolve(m, stack)) outSeq.Add(spliced);
                         else
                             outSeq.Add(Expand(item, stack));
                     }
@@ -74,22 +152,43 @@ public static partial class SchemaParser
             }
         }
 
-        IEnumerable<YamlNode> Resolve(YamlNode refNode, List<string> stack)
+        IEnumerable<YamlNode> Resolve(YamlMappingNode item, List<string> stack)
         {
-            var text = refNode is YamlScalarNode sc ? sc.Value ?? "" : "";
-            if (!text.StartsWith(RefPrefix, StringComparison.Ordinal))
+            item.TryGetValue("$ref", out var refNode);
+            var name = Target(refNode);
+            var kind = Kind(name, stack);
+            var overrides = item.Children.Where(kv => Scalar(kv.Key) != "$ref").ToList();
+            var group = (YamlMappingNode)definitions[name];
+            if (kind == "lookup")
+                throw new InvalidOperationException($"`$ref` to '{RefPrefix}{name}' in a field list names a "
+                    + "lookup table, not a field or a field group (PS-346, PS-348)");
+            if (kind == "fields")
             {
-                if (text.Contains('#') && !text.StartsWith('#'))
-                    throw new InvalidOperationException($"$ref {text} names another document; this "
-                        + "implementation resolves only #/definitions/<name> (PS-462)");
-                throw new InvalidOperationException($"$ref {text} is not of the form #/definitions/<name> (PS-461)");
+                if (overrides.Count > 0)
+                    throw new InvalidOperationException($"a `$ref` to the field group '{name}' carries "
+                        + $"nothing else: {NodeRepr(item)} (PS-578)");
+                group.TryGetValue("fields", out var groupFields);
+                return ((YamlSequenceNode)Expand(groupFields, Deeper(stack, name))).Children;
             }
-            var name = text[RefPrefix.Length..];
-            if (stack.Contains(name))
-                throw new InvalidOperationException($"$ref cycle: {string.Join(" -> ", stack)} -> {name} (PS-349)");
-            if (!definitions.TryGetValue(name, out var fields))
-                throw new InvalidOperationException($"$ref {text} does not resolve to a field group (PS-348)");
-            return ((YamlSequenceNode)Expand(fields, new List<string>(stack) { name })).Children;
+            group.TryGetValue("field", out var defined);
+            var field = (YamlMappingNode)Expand(defined, Deeper(stack, name));
+            // each key the reference carries replaces the defined key whole (PS-578)
+            foreach (var kv in overrides)
+            {
+                var value = Scalar(kv.Key) == "lookup" ? LookupTable(kv.Value, stack) : Expand(kv.Value, stack);
+                var existing = field.Children.Keys.FirstOrDefault(k => k is YamlScalarNode ks && ks.Value == Scalar(kv.Key));
+                if (existing is not null) field.Children[existing] = value;
+                else field.Add(kv.Key, value);
+            }
+            var named = field.TryGetValue("name", out var nameNode)
+                && nameNode is YamlScalarNode ns && ns.Value is not null
+                && !(ns.Style == YamlDotNet.Core.ScalarStyle.Plain && IsPlainNonString(ns.Value));
+            var skip = field.TryGetValue("type", out var typeNode)
+                && Scalar(typeNode) == "skip";
+            if (!named && !skip)
+                throw new InvalidOperationException($"the field resolved from '{RefPrefix}{name}' has no "
+                    + "`name`; the definition or the reference declares one (PS-578, PS-553)");
+            return new[] { field };
         }
 
         var outRoot = new YamlMappingNode();
@@ -98,10 +197,43 @@ public static partial class SchemaParser
             var key = Scalar(kv.Key);
             outRoot.Add(kv.Key, key is "definitions" or "test_vectors" ? kv.Value : Expand(kv.Value, new List<string>()));
         }
-        foreach (var (name, fields) in definitions)
-            Expand(fields, new List<string> { name });
+        // Every definition is checked even where unreferenced; the kept ones are resolved.
+        if (defsMap is not null)
+        {
+            var resolved = new YamlMappingNode();
+            foreach (var (keyNode, name) in order)
+            {
+                var kind = Kind(name, new List<string>());
+                var entry = new YamlMappingNode();
+                foreach (var kv in ((YamlMappingNode)definitions[name]).Children)
+                    entry.Add(kv.Key, Scalar(kv.Key) == kind && kind != "lookup"
+                        ? Expand(kv.Value, new List<string> { name }) : kv.Value);
+                resolved.Add(keyNode, entry);
+            }
+            var definitionsKey = outRoot.Children.Keys.First(k => k is YamlScalarNode ks && ks.Value == "definitions");
+            outRoot.Children[definitionsKey] = resolved;
+        }
         return outRoot;
     }
+
+    /// <summary>A plain YAML 1.2 scalar that is not a string: a number, a boolean or null.</summary>
+    static bool IsPlainNonString(string text) =>
+        text is "" or "~" or "null" or "true" or "false"
+        || double.TryParse(text, NumberStyles.Float, CultureInfo.InvariantCulture, out _);
+
+    /// <summary>A node written as Python's repr writes the value it loads as.</summary>
+    static string NodeRepr(YamlNode node) => node switch
+    {
+        YamlMappingNode m => "{" + string.Join(", ", m.Children.Select(kv => NodeRepr(kv.Key) + ": " + NodeRepr(kv.Value))) + "}",
+        YamlSequenceNode q => "[" + string.Join(", ", q.Children.Select(NodeRepr)) + "]",
+        YamlScalarNode s when s.Style == YamlDotNet.Core.ScalarStyle.Plain && s.Value is "" or "~" or "null" or null => "None",
+        YamlScalarNode s when s.Style == YamlDotNet.Core.ScalarStyle.Plain && s.Value == "true" => "True",
+        YamlScalarNode s when s.Style == YamlDotNet.Core.ScalarStyle.Plain && s.Value == "false" => "False",
+        YamlScalarNode s when s.Style == YamlDotNet.Core.ScalarStyle.Plain
+            && double.TryParse(s.Value, NumberStyles.Float, CultureInfo.InvariantCulture, out _) => s.Value!,
+        YamlScalarNode s => Meta.PyRepr(s.Value),
+        _ => "None",
+    };
 
     static PayloadSchemaDefinition ParseRoot(YamlMappingNode root)
     {
@@ -332,6 +464,7 @@ public static partial class SchemaParser
         var name = fm.TryGetValue("name", out var n) ? Scalar(n) : "?";
         var type = fm.TryGetValue("type", out var t) ? Scalar(t) : "";
         Numeral.Check(fm);                                              // PS-560
+        AsciiText.Check(fm);                                            // PS-534, PS-593, PS-072
         if (fm.Children.ContainsKey(new YamlScalarNode("match_value")))
             throw new InvalidOperationException($"Field '{name}': match_value is withdrawn; write a signed "
                 + "type (sN), a signed bit range (sN[start:end]), encoding, match or guard instead (PS-426)");
@@ -899,6 +1032,9 @@ public static partial class SchemaParser
         // Byte group
         if (fm.TryGetValue("encoding", out var encodingNode)) f.Encoding = Scalar(encodingNode);
         if (fm.TryGetValue("numeral", out var numeralNode)) f.Numeral = Scalar(numeralNode);
+        if (fm.TryGetValue("nul", out var nulNode)) f.Nul = Scalar(nulNode);
+        if (fm.TryGetValue("terminator", out var termNode) && AsciiText.ParseInteger(termNode) is long tv)
+            f.Terminator = (int)tv;
         f.Checksum = PayloadSchema.Checksum.Parse(fm);                    // PS-585 (CR-2026-174)
         if (fm.TryGetValue("byte_group", out var bgNode))
         {

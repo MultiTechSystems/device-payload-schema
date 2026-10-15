@@ -15,6 +15,7 @@ Usage:
     payload = interpreter.encode(data_dict)
 """
 
+import copy
 import calendar
 import struct
 import re
@@ -360,12 +361,36 @@ def fill_checksums(frame: bytes, placed: list, written: Optional[list] = None) -
 NON_CONSUMING_TYPES = ('bytes', 'hex', 'ascii')
 
 
-def is_echo(field_def) -> bool:
-    """A `bytes`, `hex` or `ascii` field declaring `consume: 0` (PS-588): it reads and
-    reports its span and leaves the read position, so later fields read the bytes again."""
-    return (isinstance(field_def, dict) and field_def.get('type') in NON_CONSUMING_TYPES
-            and 'consume' in field_def and field_def.get('consume') == 0
+def _declares_consume_zero(field_def) -> bool:
+    return ('consume' in field_def and field_def.get('consume') == 0
             and not isinstance(field_def.get('consume'), bool))
+
+
+def whole_number_size(ftype) -> Optional[int]:
+    """The byte width of a whole numeric type (PS-453): an integer `uN`/`sN` or an alias,
+    a float, a minifloat, `udec`/`sdec` or a word-ordered variant; None for anything else."""
+    if not isinstance(ftype, str):
+        return None
+    if ftype in INTEGER_TYPE_INFO:
+        return INTEGER_TYPE_INFO[ftype][0]
+    return _FIXED_TYPE_SIZES.get(ftype)
+
+
+def is_peeked_number(field_def) -> bool:
+    """A whole numeric field declaring `consume: 0` (PS-603, CR-2026-182): it reads its
+    value in place and leaves the read position, so later fields read the bytes again."""
+    return (isinstance(field_def, dict) and whole_number_size(field_def.get('type')) is not None
+            and _declares_consume_zero(field_def))
+
+
+def is_echo(field_def) -> bool:
+    """A field that re-reads bytes the fields after it consume: a `bytes`, `hex` or `ascii`
+    field declaring `consume: 0` (PS-588), or a whole numeric one (PS-603). It writes no
+    bytes on encode, and a value given for it is checked against the frame (PS-589,
+    PS-604)."""
+    return (isinstance(field_def, dict)
+            and (field_def.get('type') in NON_CONSUMING_TYPES or is_peeked_number(field_def))
+            and _declares_consume_zero(field_def))
 
 
 def frame_echoes(data) -> list:
@@ -376,6 +401,8 @@ def frame_echoes(data) -> list:
 def echo_length(field_def, data) -> Optional[int]:
     """The byte count of a non-consuming byte string, read from the input it is encoded
     with: None for `remaining`, which reaches the end of the frame it is checked in."""
+    if is_peeked_number(field_def):
+        return whole_number_size(field_def.get('type'))     # PS-604
     raw = field_def.get('length', 1)
     if isinstance(raw, str):
         text = raw.strip()
@@ -423,21 +450,26 @@ def check_echoes(frame) -> None:
     string equals what the field decodes from the bytes the other fields wrote over its
     span, or the input is rejected naming the field."""
     data = bytes(frame)
-    for position, field_def, given, length in frame_echoes(frame):
+    for position, field_def, given, length, *decoder in frame_echoes(frame):
         if length is None:
             length = max(0, len(data) - position)
         if position + length > len(data):
             written = 'too few bytes'
         else:
             try:
-                found = echo_value(field_def, data[position:position + length])
+                span = data[position:position + length]
+                # A whole number decodes through its own type, arithmetic and lookup
+                # (PS-604); the interpreter hands its decoder in with the echo.
+                found = decoder[0](span) if decoder and decoder[0] else echo_value(
+                    field_def, span)
             except ValueError:
                 found = None
             if found is not None and normalize_output(found) == normalize_output(given):
                 continue
             written = echo_text(found) if found is not None else 'too few bytes'
+        rule = 'PS-604' if is_peeked_number(field_def) else 'PS-589'
         raise ValueError(f"Field '{field_def.get('name')}' is given {echo_text(given)}, but "
-                         f"the other fields write {written} over its span (PS-589)")
+                         f"the other fields write {written} over its span ({rule})")
 
 
 def peek_disagreement(peeks, frame: bytes) -> str:
@@ -500,14 +532,14 @@ class FrameBuffer:
         self.checksums = []         # PS-587 (CR-2026-174), as Frame
         self.echoes = []        # CR-2026-175 (PS-589): see Frame.echoes
 
-    def echo(self, field_def, data) -> None:
+    def echo(self, field_def, data, decoder=None) -> None:
         """PS-589: a non-consuming byte string writes nothing and is not required; a value
         given for it is checked where the frame closes. It reads from the position a
         decoder is at, which is the start of any bytes still pending."""
         name = field_def.get('name')
         if name and data.get(name) is not None:
             self.echoes.append((len(self.buf), field_def, data[name],
-                                echo_length(field_def, data)))
+                                echo_length(field_def, data), decoder))
 
     def cover(self, position: int, mask: bytes) -> None:
         if len(self.covered) < position + len(mask):
@@ -1098,6 +1130,8 @@ def fixed_element_size(fields):
             return None
         ftype = str(field.get('type', ''))
         base = INTEGER_TYPE_INFO.get(ftype)
+        if is_peeked_number(field):
+            continue                    # reads in place, advancing nothing (PS-603)
         if ftype in _FIXED_TYPE_SIZES or base:
             total += _FIXED_TYPE_SIZES.get(ftype) or base[0]
         elif (ftype in COMPUTED_TYPES or is_literal(field) or is_echo(field)
@@ -1509,55 +1543,119 @@ def object_key_withdrawn(field_def):
 REF_PREFIX = '#/definitions/'
 
 
+#: The three kinds of definition (PS-345, CR-2026-168): the key each carries, the shape its
+#: value takes and how a message describes that shape.
+DEFINITION_KINDS = (('fields', (list,), 'a list of fields'), ('field', (dict,), 'a field'),
+                    ('lookup', (dict, list), 'a lookup table'))
+
+
+def definition_kind(definitions, name, chain):
+    """The kind of definition `name` is (PS-345), or ValueError: a cycle (PS-349), an
+    undefined name (PS-348), or a definition carrying none or several kinds."""
+    if name in chain:
+        raise ValueError(f"`$ref` cycle: {' -> '.join(list(chain) + [name])} (PS-349)")
+    if name not in definitions:
+        raise ValueError(f"`$ref` to '{REF_PREFIX}{name}', which `definitions` does "
+                         f"not define (PS-348)")
+    group = definitions[name]
+    kinds = [k for k, _, _ in DEFINITION_KINDS if isinstance(group, dict) and k in group]
+    if len(kinds) != 1:
+        raise ValueError(f"definition '{name}' must carry exactly one of `fields`, "
+                         f"`field` or `lookup`, not {kinds or 'none'} (PS-345)")
+    for key, shape, described in DEFINITION_KINDS:
+        if key == kinds[0] and not isinstance(group[key], shape):
+            raise ValueError(f"definition '{name}': `{key}` must be {described} (PS-345)")
+    return kinds[0]
+
+
 def expand_refs(schema):
-    """Splice every `{$ref: '#/definitions/name'}` into the field list it sits in.
+    """Resolve every reference to `definitions` (CR-2026-045, CR-2026-168).
 
-    Returns (expanded schema, errors). The errors are the reasons the schema is invalid
-    and must be rejected rather than decoded:
+    Returns (expanded schema, errors). A `{$ref: '#/definitions/name'}` in a field list is
+    replaced by the group's fields, or by the one field with each key the reference
+    carries replacing the defined key whole (PS-346, PS-578); a field's `lookup` given as
+    `#/definitions/name` becomes that table (PS-579). References resolve transitively
+    (PS-580). The `definitions` kept on the result are themselves resolved, so no later
+    check sees a reference. The errors are the reasons the schema is invalid and must be
+    rejected rather than decoded, in the spec prototype's words:
 
-    - a definition that is not a field group `{fields: [...]}` (PS-345);
-    - a reference that does not resolve (PS-348), or names a file (PS-462: support is
-      optional, and this implementation rejects it rather than guess);
+    - a definition that carries none, or more than one, of `fields`, `field` and
+      `lookup`, or one of the wrong shape (PS-345);
+    - a reference that does not resolve, or names a definition of the wrong kind (PS-348);
+      or names a file (PS-462: support is optional, and this implementation rejects it);
+    - a group reference carrying other keys, or a nameless resolved field (PS-578);
     - a pointer not of the form `#/definitions/<name>` (PS-461);
     - a cycle, direct or transitive (PS-349).
 
-    `definitions` and `test_vectors` are carried over as they are.
+    `test_vectors` are carried over as they are.
     """
     if not isinstance(schema, dict):
         return schema, []
     definitions = schema.get('definitions') or {}
     errors = []
     if not isinstance(definitions, dict):
-        return schema, ["'definitions' must map names to field groups (PS-345)"]
-    for name, group in definitions.items():
-        if not (isinstance(group, dict) and isinstance(group.get('fields'), list)):
-            errors.append(
-                f"definition '{name}' is not a field group with a `fields` array (PS-345)")
+        return schema, ["`definitions` must map names to definitions (PS-345)"]
 
-    def resolve(ref, stack):
-        if not isinstance(ref, str) or not ref.startswith(REF_PREFIX):
+    def target(ref):
+        if not isinstance(ref, str) or not ref.startswith(REF_PREFIX) \
+                or '/' in ref[len(REF_PREFIX):] or not ref[len(REF_PREFIX):]:
             if isinstance(ref, str) and '#' in ref and not ref.startswith('#'):
                 raise ValueError(f"$ref {ref!r} names another document; this implementation "
                                  f"resolves only #/definitions/<name> (PS-462)")
             raise ValueError(f"$ref {ref!r} is not of the form #/definitions/<name> (PS-461)")
-        name = ref[len(REF_PREFIX):]
-        if name in stack:
-            raise ValueError(f"$ref cycle: {' -> '.join(stack + [name])} (PS-349)")
-        group = definitions.get(name)
-        if not (isinstance(group, dict) and isinstance(group.get('fields'), list)):
-            raise ValueError(f"$ref {ref!r} does not resolve to a field group (PS-348)")
-        return expand(group['fields'], stack + [name])
+        return ref[len(REF_PREFIX):]
 
-    def expand(node, stack):
+    def group_fields(name, chain):
+        definition_kind(definitions, name, chain)
+        return expand(definitions[name]['fields'], chain + [name])
+
+    def field_definition(name, chain):
+        return expand(copy.deepcopy(definitions[name]['field']), chain + [name])
+
+    def reference(item, chain):
+        name = target(item['$ref'])
+        found = definition_kind(definitions, name, chain)
+        overrides = {key: value for key, value in item.items() if key != '$ref'}
+        if found == 'lookup':
+            raise ValueError(f"`$ref` to '{REF_PREFIX}{name}' in a field list names a lookup "
+                             f"table, not a field or a field group (PS-346, PS-348)")
+        if found == 'fields':
+            if overrides:
+                raise ValueError(f"a `$ref` to the field group '{name}' carries nothing "
+                                 f"else: {item!r} (PS-578)")
+            return group_fields(name, chain)
+        field = field_definition(name, chain)
+        field.update(expand(overrides, chain))         # each key replaced whole (PS-578)
+        if not isinstance(field.get('name'), str) and field.get('type') != 'skip':
+            raise ValueError(f"the field resolved from '{REF_PREFIX}{name}' has no `name`; "
+                             f"the definition or the reference declares one (PS-578, PS-553)")
+        return [field]
+
+    def lookup_table(pointer, chain):
+        name = target(pointer)
+        if definition_kind(definitions, name, chain) != 'lookup':
+            raise ValueError(f"`lookup: {pointer}` names a definition that is not a lookup "
+                             f"table (PS-579, PS-348)")
+        return copy.deepcopy(definitions[name]['lookup'])
+
+    def expand(node, chain):
         if isinstance(node, dict):
-            return {k: expand(v, stack) for k, v in node.items()}
+            out = {}
+            for key, value in node.items():
+                if key == 'lookup' and isinstance(value, str):
+                    out[key] = lookup_table(value, chain)        # PS-579
+                elif key == 'lookup':
+                    out[key] = value                             # a table's keys are data
+                else:
+                    out[key] = expand(value, chain)
+            return out
         if isinstance(node, list):
             out = []
             for item in node:
                 if isinstance(item, dict) and '$ref' in item:
-                    out.extend(resolve(item['$ref'], stack))
+                    out.extend(reference(item, chain))
                 else:
-                    out.append(expand(item, stack))
+                    out.append(expand(item, chain))
             return out
         return node
 
@@ -1571,14 +1669,24 @@ def expand_refs(schema):
         except ValueError as exc:
             errors.append(str(exc))
             expanded[key] = value
-    # A definition no field list reaches is still checked for cycles and dangling refs.
+    # Every definition is checked even where unreferenced, so a malformed library is
+    # reported; the definitions kept on the result are the resolved ones.
+    resolved = {}
     for name, group in definitions.items():
-        if isinstance(group, dict) and isinstance(group.get('fields'), list):
-            try:
-                expand(group['fields'], [name])
-            except ValueError as exc:
-                if str(exc) not in errors:
-                    errors.append(str(exc))
+        try:
+            found = definition_kind(definitions, name, [])
+            if found == 'fields':
+                resolved[name] = dict(group, fields=group_fields(name, []))
+            elif found == 'field':
+                resolved[name] = dict(group, field=field_definition(name, []))
+            else:
+                resolved[name] = copy.deepcopy(group)
+        except ValueError as exc:
+            if str(exc) not in errors:
+                errors.append(str(exc))
+            resolved[name] = group
+    if 'definitions' in schema:
+        expanded['definitions'] = resolved
     return expanded, errors
 
 
@@ -2359,13 +2467,39 @@ _NAMED_CHECKSUM = re.compile(r"^Field '.*\(PS-58[56]\)$", re.S)
 ASCII_HIGH_BYTE_WARNING = "Field '{}': a byte above 0x7F in an ascii value (PS-073, PS-538)"
 
 
-def decode_ascii(name: Any, raw: bytes, warnings: List[str]) -> str:
+#: PS-534 (CR-2026-177): what an ascii field does with its 0x00 bytes.
+NUL_MODES = ('trailing', 'stop', 'drop')
+
+
+def apply_nul_mode(text: str, mode: str) -> str:
+    """PS-534: `trailing` drops trailing NULs and keeps the rest; `stop` ends the text at the
+    first NUL; `drop` removes every NUL. Whitespace is never trimmed."""
+    if mode == 'stop':
+        return text.split('\x00', 1)[0]
+    if mode == 'drop':
+        return text.replace('\x00', '')
+    return text.rstrip('\x00')
+
+
+def decode_ascii(name: Any, raw: bytes, warnings: List[str], nul: str = 'trailing') -> str:
     """PS-534, PS-538: each byte is the ISO 8859-1 character of the same number, so the
-    value is lossless and re-encodes to the same bytes (PS-537); trailing 0x00 padding
-    only is dropped. A byte above 0x7F is reported with PS-073's warning."""
+    value is lossless and re-encodes to the same bytes (PS-537); the field's `nul` mode
+    (trailing 0x00 padding by default) is applied. A byte above 0x7F is reported with
+    PS-073's warning."""
     if any(byte > 0x7F for byte in raw):
         warnings.append(ASCII_HIGH_BYTE_WARNING.format(name))
-    return raw.decode('latin-1').rstrip('\x00')
+    return apply_nul_mode(raw.decode('latin-1'), nul)
+
+
+def terminated_span(field_def: Dict[str, Any], buf: bytes, pos: int) -> int:
+    """PS-593: the number of bytes of text before the field's terminator; a payload that
+    ends before one is an underflow, which the field names (PS-535)."""
+    terminator = field_def['terminator']
+    end = buf.find(bytes([terminator]), pos)
+    if end < 0:
+        raise BufferUnderflow(f"no terminator byte 0x{terminator:02X} before the end of "
+                              f"the payload (PS-593)")
+    return end - pos
 
 
 #: PS-560: the whole text of a `numeral` field, by base.
@@ -2387,6 +2521,9 @@ def encode_numeral(name: Any, value: Any, length: Optional[int], numeral: str) -
     digits = format(abs(n), 'd' if numeral == 'decimal' else 'X')
     sign = '-' if n < 0 else ''
     width = len(sign) + len(digits) if length is None else length
+    if length is None and n < 0 and numeral == 'hex':                  # PS-168, PS-595
+        raise FieldError(f"Field '{name}': {format_lookup_value(value)} is negative, which a "
+                         f"hex numeral cannot write (PS-168)")
     if (n < 0 and numeral == 'hex') or len(sign) + len(digits) > width:
         raise FieldError(f"Field '{name}': {format_lookup_value(value)} does not fit "
                          f"{length if length is not None else len(digits)} {numeral} digits (PS-168)")
@@ -2466,6 +2603,53 @@ def parse_bitfield_segment(segment: str, bits: int, fmt: Any, name: Any) -> int:
     return number & ((1 << bits) - 1)
 
 
+def split_by_width(text: str, parts: List[Any], name: Any, value: Any) -> List[str]:
+    """PS-606 (CR-2026-183): with an empty delimiter, split by each part's `:N` width. Every
+    part must declare a width that holds its largest value, and none may be sdecimal, or the
+    field cannot be encoded (it still decodes); a value of any other length is rejected."""
+    widths = []
+    for part in parts:
+        bits = int(part[1])
+        base, width = parse_part_format(part[2] if len(part) > 2 else 'decimal')
+        largest = len(format_part_number((1 << bits) - 1, base, None)) if bits else 1
+        if base == 'sdecimal' or width is None or largest > width:
+            raise FieldError(f"Field '{name}': with an empty delimiter every part needs a "
+                             f":N width that holds its largest value, and none may be "
+                             f"sdecimal, so this field cannot be encoded (PS-606)")
+        widths.append(width)
+    if len(text) != sum(widths):
+        raise FieldError(f"Field '{name}': {value!r} has {len(text)} characters for parts "
+                         f"of widths {widths} (PS-606)")
+    segments, at = [], 0
+    for width in widths:
+        segments.append(text[at:at + width])
+        at += width
+    return segments
+
+
+def bitfield_segments(field_def: Dict[str, Any], value: str) -> List[str]:
+    """A bitfield_string value's segments, one per part (PS-096 steps 1 and 2): the declared
+    prefix removed - a value without it is rejected (PS-605) - then split on the delimiter,
+    or by width where it is empty (PS-606). A segment count other than the part count is
+    rejected, never filled or cut (PS-605)."""
+    name = field_def.get('name')
+    parts = [p for p in field_def.get('parts', []) if len(p) >= 2]
+    text = value
+    prefix = field_def.get('prefix', '')
+    if prefix:
+        if not text.startswith(prefix):
+            raise FieldError(f"Field '{name}': {value!r} does not begin with its prefix "
+                             f"{prefix!r} (PS-605)")
+        text = text[len(prefix):]
+    delimiter = field_def.get('delimiter', '.')
+    segments = (split_by_width(text, parts, name, value) if delimiter == ''
+                else text.split(delimiter))
+    if len(segments) != len(parts):
+        raise FieldError(f"Field '{name}': {value!r} has {len(segments)} segment(s) for "
+                         f"{len(parts)} part(s) (PS-605)")
+    return segments
+
+
 def bitfield_part_errors(node, _top=True):
     """PS-430: every bitfield_string part's format, walked over the whole schema."""
     errors = []
@@ -2487,7 +2671,8 @@ def bitfield_part_errors(node, _top=True):
 
 
 def encode_ascii(name: Any, value: Any, length: Optional[int],
-                 warnings: List[str]) -> bytes:
+                 warnings: List[str], nul: str = 'trailing',
+                 terminator: Optional[int] = None) -> bytes:
     """PS-537: a character above U+00FF, or a value longer than a fixed `length`, is
     rejected naming the field; U+0080..U+00FF is written as the byte of the same number
     with a warning; a short value is padded with 0x00. `length` is None where the field's
@@ -2497,12 +2682,21 @@ def encode_ascii(name: Any, value: Any, length: Optional[int],
         raise FieldError(f"Field '{name}': an ascii value holds a character above "
                          f"U+00FF, which has no byte (PS-537)")
     encoded = text.encode('latin-1')
+    if terminator is not None and terminator in encoded:               # PS-595
+        raise FieldError(f"Field '{name}': the value holds its terminator byte "
+                         f"0x{terminator:02X} (PS-595)")
+    if nul == 'stop' and b'\x00' in encoded:                           # PS-595
+        raise FieldError(f"Field '{name}': a nul: stop value holds a 0x00 byte (PS-595)")
+    if terminator is not None:
+        length = None
     if length is not None and len(encoded) > length:
         raise FieldError(f"Field '{name}': an ascii value of {len(encoded)} bytes is "
                          f"longer than its length of {length} (PS-537)")
     if any(byte > 0x7F for byte in encoded):
         warnings.append(f"Field '{name}': a character above U+007F in an ascii value "
                         f"(PS-537)")
+    if terminator is not None:
+        return encoded + bytes([terminator])                           # PS-595
     if length is None:
         return encoded
     return encoded + b'\x00' * (length - len(encoded))
@@ -3492,6 +3686,44 @@ def numeral_errors(node, _top=True):
     return errors
 
 
+def ascii_text_errors(node, _top=True):
+    """PS-534, PS-593, PS-072: `nul` and `terminator` are defined on an ascii field only; `nul`
+    is trailing, stop or drop; a terminator is a byte 0 to 255 declared in place of `length`.
+    Walked over the whole schema, in the spec prototype's text."""
+    errors = []
+    if isinstance(node, list):
+        for item in node:
+            errors.extend(ascii_text_errors(item, False))
+    elif isinstance(node, dict):
+        if 'type' in node and ('nul' in node or 'terminator' in node):
+            name = node.get('name')
+            if str(node.get('type')).lower() != 'ascii':
+                errors.append(f"Field '{name}': nul and terminator are defined only on an "
+                              f"ascii field, not on {node.get('type')} (PS-534, PS-593)")
+            else:
+                if 'nul' in node and node['nul'] not in NUL_MODES:
+                    errors.append(f"Field '{name}': nul must be trailing, stop or drop, not "
+                                  f"{node['nul']!r} (PS-534)")
+                if 'terminator' in node:
+                    term = node['terminator']
+                    if (isinstance(term, bool) or not isinstance(term, int)
+                            or not 0 <= term <= 255):
+                        errors.append(f"Field '{name}': terminator must be a byte value 0 to "
+                                      f"255, not {term!r} (PS-593)")
+                    if 'length' in node:
+                        errors.append(f"Field '{name}': an ascii field declares length or "
+                                      f"terminator, not both (PS-593)")
+        if (str(node.get('type')).lower() == 'ascii' and 'length' not in node
+                and 'terminator' not in node):
+            errors.append(f"Field '{node.get('name')}': ascii type requires 'length' field, "
+                          f"or 'terminator' (PS-072)")
+        for key, value in node.items():
+            if _top and key == 'test_vectors':
+                continue
+            errors.extend(ascii_text_errors(value, False))
+    return errors
+
+
 #: PS-585 (CR-2026-174): each checksum algorithm and the bits its result needs.
 CHECKSUM_ALGOS = {'sum8': 8, 'xor8': 8, 'crc8/smbus': 8, 'crc16/kermit': 16}
 CHECKSUM_KEYS = ('algo', 'seed', 'from', 'on_mismatch')
@@ -3615,6 +3847,7 @@ def schema_iterator_errors(schema):
     errors = field_name_errors(schema)
     errors.extend(withdrawn_errors(schema))                          # CR-2026-159
     errors.extend(numeral_errors(schema))                            # PS-560
+    errors.extend(ascii_text_errors(schema))                         # PS-534, PS-593
     errors.extend(checksum_errors(schema))                           # PS-585
     errors.extend(bitfield_part_errors(schema))                      # PS-430
     errors.extend(string_template_errors(schema))                    # PS-590
@@ -5439,13 +5672,48 @@ class SchemaInterpreter:
                     return self._decode_field_endian(field_def, buf, pos)
                 finally:
                     self._meta_depth -= 1
-            return self._decode_field_endian(field_def, buf, pos)
+            value, end = self._decode_field_endian(field_def, buf, pos)
+            # PS-603 (CR-2026-182): a whole number declaring `consume: 0` reads in place.
+            return value, (pos if is_peeked_number(field_def) else end)
         except BufferUnderflow as exc:
             # PS-535: the innermost field that read past the end is named; an enclosing
             # object or repeat passes its member's error through unchanged.
             if exc.named:
                 raise
             raise name_underflow(exc, field_def.get('name'), field_def.get('type')) from exc
+
+    def _echo_decoder(self, field_def: Dict[str, Any]):
+        """PS-604 (CR-2026-182): what a whole number that does not consume decodes from
+        the bytes over its span, as a decoder reads it; None for a byte string, which
+        echo_value decodes. A span that does not decode is no value."""
+        if not is_peeked_number(field_def):
+            return None
+        endian = self.endian
+
+        def decode(span: bytes) -> Any:
+            saved = self.endian
+            # The decode's own tables are scratch here: what this records is no output.
+            tables = {k: getattr(self, k, None)
+                      for k in ('_lookup_numbers', '_pre_lookup', '_labels')}
+            self._lookup_numbers, self._pre_lookup = IdentityTable(), IdentityTable()
+            self.endian = endian
+            try:
+                value = self._decode_field_endian(field_def, span, 0)[0]
+                if value is None:
+                    return None
+                value = self._apply_modifiers(value, field_def)
+                return None if value is OMITTED else value
+            except (BufferUnderflow, ValueError, TypeError):
+                return None
+            finally:
+                self.endian = saved
+                for key, table in tables.items():
+                    if table is None:
+                        if hasattr(self, key):
+                            delattr(self, key)
+                    else:
+                        setattr(self, key, table)
+        return decode
 
     def _produced(self, field_def: Dict[str, Any], key: Optional[str] = None) -> None:
         """PS-490: record the declaration about to report `key` (its name by default).
@@ -5650,14 +5918,20 @@ class SchemaInterpreter:
             return field_def['value'], pos
 
         if field_type == 'ascii':
-            length = resolve_length(field_def, buf, pos, variables=self._variables)
+            terminated = field_def.get('terminator') is not None
+            if terminated:
+                length = terminated_span(field_def, buf, pos)            # PS-593
+            else:
+                length = resolve_length(field_def, buf, pos, variables=self._variables)
             if pos + length > len(buf):
                 raise BufferUnderflow.need(length, pos, len(buf))
             value = decode_ascii(field_def.get('name'), buf[pos:pos + length],
-                                 self._nested_warnings)
-            if field_def.get('numeral'):
+                                 self._nested_warnings, field_def.get('nul', 'trailing'))
+            if field_def.get('numeral'):                                 # PS-594
                 value = decode_numeral(field_def.get('name'), value, field_def['numeral'])
-            return value, pos if is_echo(field_def) else pos + length          # PS-588
+            if is_echo(field_def):                                       # PS-588
+                return value, pos
+            return value, pos + length + (1 if terminated else 0)
         
         # `hex:upper` is a `bytes` format (PS-079), not a type (CR-2026-037), so it
         # falls through to the unknown-type error below.
@@ -7996,7 +8270,7 @@ class SchemaInterpreter:
             # it is checked where the frame closes.
             if is_echo(field_def):
                 try:
-                    output.echo(field_def, data)
+                    output.echo(field_def, data, self._echo_decoder(field_def))
                 except ValueError as e:
                     result.errors.append(error_text(f"Error encoding {name}: ", e))
                 continue
@@ -8524,24 +8798,17 @@ class SchemaInterpreter:
     
     def _encode_bitfield_string(self, field_def: Dict[str, Any], value: str) -> bytes:
         """Encode bitfield_string: parse string back into packed integer bytes."""
-        parts = field_def.get('parts', [])
-        delimiter = field_def.get('delimiter', '.')
-        prefix = field_def.get('prefix', '')
+        parts = [p for p in field_def.get('parts', []) if len(p) >= 2]
         length = field_def.get('length', 2)
-        
-        if prefix and value.startswith(prefix):
-            value = value[len(prefix):]
-        
-        segments = value.split(delimiter)
+        # PS-605, PS-606 (CR-2026-183): the prefix required, the segment count checked, an
+        # empty delimiter split by width.
+        segments = bitfield_segments(field_def, value)
         int_val = 0
         
-        for i, part in enumerate(parts):
-            if len(part) < 2:
-                continue
+        for part, seg in zip(parts, segments):
             bit_off = int(part[0])
             bit_len = int(part[1])
             fmt = part[2] if len(part) > 2 else 'decimal'
-            seg = segments[i] if i < len(segments) else '0'
             # PS-096, PS-431, PS-583: parsed by the part's format, a value the width cannot
             # hold rejected rather than masked.
             int_val |= parse_bitfield_segment(seg, bit_len, fmt, field_def.get('name')) << bit_off
@@ -9240,7 +9507,7 @@ class SchemaInterpreter:
                 out.extend(padding(length))             # CR-2026-141: no value
                 continue
             if is_echo(f):
-                out.echo(f, data)               # PS-589 (CR-2026-175): writes nothing
+                out.echo(f, data, self._echo_decoder(f))   # PS-589, PS-604: writes nothing
                 continue
             if is_literal(f) or is_string_template(f):
                 continue            # PS-359: a literal writes no bytes
@@ -10042,7 +10309,8 @@ class SchemaInterpreter:
                 value = encode_numeral(field_def.get('name'), value, fixed,
                                        field_def['numeral'])
             return encode_ascii(field_def.get('name'), value, fixed,
-                                self._encode_warnings)
+                                self._encode_warnings, field_def.get('nul', 'trailing'),
+                                field_def.get('terminator') if field_type == 'ascii' else None)
         
         if field_type == 'hex':
             length = encode_length(field_def, len(str(value)) // 2)

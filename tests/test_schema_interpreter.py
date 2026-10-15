@@ -962,7 +962,7 @@ class TestDefinitionsAndRef:
         
         result = interpreter.decode(bytes([0x01]))
         assert not result.success
-        assert 'does not resolve' in result.errors[0] and 'PS-348' in result.errors[0]
+        assert 'does not define' in result.errors[0] and 'PS-348' in result.errors[0]
 
 
 class TestEdgeCases:

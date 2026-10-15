@@ -25,7 +25,7 @@ from dataclasses import dataclass, field
 
 # Add tools to path
 sys.path.insert(0, str(Path(__file__).parent))
-from schema_interpreter import (SchemaInterpreter, semantic_warnings, YamlBooleanError, check_yaml_booleans, DecodeResult, byte_group_errors,
+from schema_interpreter import (SchemaInterpreter, semantic_warnings, whole_number_size, YamlBooleanError, check_yaml_booleans, DecodeResult, byte_group_errors,
                                 byte_group_endian,
                                 encoding_errors, expand_refs, fport_declaration_errors,
                                 annotation_schema_errors, reference_errors,
@@ -1542,6 +1542,10 @@ def validate_schema_structure(schema: Dict[str, Any]) -> List[str]:
     # PS-345, PS-348, PS-349, PS-461, PS-462: definitions and references, checked here
     # rather than at decode (PS-348). PS-358: malformed literals.
     errors = list(expand_refs(schema)[1]) if isinstance(schema, dict) else []
+    if isinstance(schema, dict) and not errors:
+        # Every check reads the schema with its references and lookup pointers resolved,
+        # so a template's field is held to the field rules where it is used (CR-2026-168).
+        schema = expand_refs(schema)[0]
     if isinstance(schema, dict):
         errors.extend(case_body_errors(schema))                  # PS-441
         for field_def in typed_field_dicts(schema):
@@ -2013,9 +2017,11 @@ def check_best_practices(schema: Dict[str, Any], result: ValidationResult) -> No
 
             # PS-453: `consume: 0` advances nothing, which is the point on a bit range
             # or a bool, and defined on a byte string (PS-588, CR-2026-175), which then
-            # reports its span again; anywhere else the next field reads the same bytes.
+            # reports its span again, and on a whole numeric field (PS-603, CR-2026-182),
+            # which reads in place; anywhere else the next field reads the same bytes.
             if (fld.get('consume') == 0 and isinstance(ftype, str)
-                    and '[' not in ftype and ftype not in ('bool', 'bytes', 'hex', 'ascii')):
+                    and '[' not in ftype and ftype not in ('bool', 'bytes', 'hex', 'ascii')
+                    and whole_number_size(ftype) is None):
                 result.add_warning(
                     "consume: 0 on a %s field is NOT RECOMMENDED (PS-453): the next "
                     "field reads the same bytes again" % ftype,

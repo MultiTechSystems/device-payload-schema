@@ -465,7 +465,7 @@ public static class SchemaEncoder
             // frame closes.
             if (field.IsEcho)
             {
-                frame?.AddEcho(field, data);
+                frame?.AddEcho(field, data, _endian);
                 return Array.Empty<byte>();
             }
             // PS-360: `value` on a field that reads bytes is the constant to write,
@@ -3231,19 +3231,20 @@ public static class SchemaEncoder
                 case FieldType.Ascii when field.Numeral != null && Helpers.ToFloat64(value).Item1:
                 {
                     // PS-561: digits in the declared base, rounded as PS-552 requires.
+                    int? fixedLen = field.Terminator == null && field.Length > 0 && field.LengthRef == null
+                        ? field.Length : null;                                  // PS-593: no width
                     var text = Numeral.Encode(field.Name, Helpers.ToFloat64(value).Item2,
-                        field.Length > 0 && field.LengthRef == null ? field.Length : null,
-                        field.Numeral);
-                    return Helpers.EncodeAscii(field.Name, text,
-                        field.Length > 0 && field.LengthRef == null ? field.Length : null,
-                        _result.Warnings);
+                        fixedLen, field.Numeral);
+                    return Helpers.EncodeAscii(field.Name, text, fixedLen,
+                        _result.Warnings, field.Nul, field.Terminator);
                 }
                 case FieldType.Ascii or FieldType.String:
                     // PS-537. A fixed `length` pads and bounds the value; `remaining` or a
                     // reference has no fixed count, so the value supplies it.
                     return Helpers.EncodeAscii(field.Name, value?.ToString() ?? "",
                         field.Length > 0 && field.LengthRef == null ? field.Length : null,
-                        _result.Warnings);
+                        _result.Warnings, field.Nul,
+                        field.Type == FieldType.Ascii ? field.Terminator : null);
             }
 
             throw new InvalidOperationException($"Cannot encode type: {field.Type}");
@@ -3301,23 +3302,21 @@ public static class SchemaEncoder
         /// </remarks>
         byte[] EncodeBitfieldString(SchemaField field, string value)
         {
-            var text = value;
-            var prefix = field.Prefix ?? "";
-            if (prefix.Length > 0 && text.StartsWith(prefix))
-                text = text[prefix.Length..];
-            var delimiter = field.Delimiter ?? ".";
-            var segments = text.Split(delimiter);
+            var parts = field.Parts
+                .Where(p => p.Count >= 2 && Helpers.ToInt(p[0]).Item1 && Helpers.ToInt(p[1]).Item1)
+                .ToList();
+            // PS-605, PS-606 (CR-2026-183): the prefix required, the segment count checked, an
+            // empty delimiter split by width.
+            var segments = BitfieldParts.Segments(field.Name, field.Prefix, field.Delimiter, parts, value);
 
             ulong packed = 0;
-            for (int i = 0; i < field.Parts.Count; i++)
+            for (int i = 0; i < parts.Count; i++)
             {
-                var part = field.Parts[i];
-                if (part.Count < 2) continue;
-                var (offOk, bitOff) = Helpers.ToInt(part[0]);
-                var (lenOk, bitLen) = Helpers.ToInt(part[1]);
-                if (!offOk || !lenOk) continue;
+                var part = parts[i];
+                var (_, bitOff) = Helpers.ToInt(part[0]);
+                var (_, bitLen) = Helpers.ToInt(part[1]);
                 object? format = part.Count >= 3 ? part[2] : "decimal";
-                string segment = i < segments.Length ? segments[i] : "0";
+                string segment = segments[i];
                 // PS-096, PS-431, PS-583: parsed by the part's format; a value the width
                 // cannot hold is rejected, never masked.
                 ulong raw = BitfieldParts.ParseSegment(segment, bitLen, format, field.Name);
@@ -3490,12 +3489,13 @@ internal sealed class FrameBuffer
     /// value given for it is recorded at the position a decoder is at - the start of any
     /// bytes still pending - with its length read from the input (null for
     /// <c>remaining</c>).</summary>
-    public void AddEcho(SchemaField field, Dictionary<string, object?> data)
+    public void AddEcho(SchemaField field, Dictionary<string, object?> data, string endian = "big")
     {
         if (string.IsNullOrEmpty(field.Name)
             || !data.TryGetValue(field.Name, out var given) || given == null) return;
         int? length;
-        if (field.LengthRef != null)
+        if (field.IsPeekedNumber) length = SchemaField.WholeNumberSize(field.Type);   // PS-604
+        else if (field.LengthRef != null)
         {
             if (!data.TryGetValue(field.LengthRef, out var n)
                 || Helpers.ToFloat64(n) is not (true, var d) || d < 0 || d != Math.Floor(d))
@@ -3505,7 +3505,7 @@ internal sealed class FrameBuffer
         else if (field.Length < 0) length = null;
         else length = field.Length != 0 || field.LengthDeclared
             ? field.Length : Helpers.InferLengthFromType(field.Type);
-        _echoes.Add(new Echo(_buf.Count, field, given, length));
+        _echoes.Add(new Echo(_buf.Count, field, given, length, endian));
     }
 
     void Cover(int position, byte[] mask)
@@ -3633,7 +3633,8 @@ internal sealed record Peek(int Position, int Size, bool Little, int Start, int 
 /// <summary>A non-consuming byte string given a value (CR-2026-175, PS-589): where a decoder
 /// reads it, its field, the value given, and its length (null for <c>remaining</c>, the end
 /// of the frame it is checked in).</summary>
-internal sealed record Echo(int Position, SchemaField Field, object? Given, int? Length);
+internal sealed record Echo(int Position, SchemaField Field, object? Given, int? Length,
+    string Endian = "big");
 
 /// <summary>
 /// A frame's PS-551 metadata (CR-2026-141): per byte, the bits some field wrote, and each
@@ -3743,13 +3744,19 @@ internal sealed class FrameMeta
             else
             {
                 object? found;
-                try { found = EchoValue(e.Field, frame.AsSpan(e.Position, length)); }
+                try
+                {
+                    found = e.Field.IsPeekedNumber
+                        ? SchemaDecoder.PeekedNumberValue(e.Field, frame.AsSpan(e.Position, length).ToArray(), e.Endian)
+                        : EchoValue(e.Field, frame.AsSpan(e.Position, length));
+                }
                 catch (Exception) { found = null; }
                 if (found != null && EchoEquals(found, e.Given)) continue;
                 written = found != null ? EchoText(found) : "too few bytes";
             }
             throw new FieldErrorException($"Field '{e.Field.Name}' is given {EchoText(e.Given)}, "
-                + $"but the other fields write {written} over its span (PS-589)");
+                + $"but the other fields write {written} over its span "
+                + (e.Field.IsPeekedNumber ? "(PS-604)" : "(PS-589)"));
         }
     }
 

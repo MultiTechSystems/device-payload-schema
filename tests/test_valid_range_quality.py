@@ -44,8 +44,10 @@ def run_codec(schema, payload_hex):
         + f"\nvar _r = decodeUplink({{ bytes: {octets}, fPort: 1 }});"
         + "\nconsole.log(JSON.stringify({data: _r.data, warnings: _r.warnings}));"
     )
+    # Through stdin: one argv string is capped at 128 KiB, and a full codec for a
+    # schema the size of vicki's passes that.
     out = subprocess.run(
-        ["node", "-e", driver], capture_output=True, text=True, timeout=60
+        ["node"], input=driver, capture_output=True, text=True, timeout=60
     )
     assert out.returncode == 0, out.stderr
     return json.loads(out.stdout)

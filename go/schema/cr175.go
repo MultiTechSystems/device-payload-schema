@@ -21,15 +21,17 @@ type echoRecord struct {
 	field  Field
 	given  any
 	length int
+	endian string // the encode's byte order, for a whole number (CR-2026-182)
 }
 
-// isEcho is the reference's is_echo: a byte string declaring `consume: 0` (PS-588).
+// isEcho is the reference's is_echo: a byte string declaring `consume: 0` (PS-588), or a
+// whole numeric one (PS-603, CR-2026-182).
 func isEcho(f Field) bool {
 	switch f.Type {
 	case TypeBytes, TypeBytesLower, TypeHex, TypeHexLower, TypeAscii, TypeAsciiLower:
 		return f.ConsumeDeclared && f.Consume == 0
 	}
-	return false
+	return isPeekedNumber(f)
 }
 
 // recordEcho queues a given value for the check where the frame closes. The decoder reads
@@ -41,6 +43,8 @@ func (ctx *EncodeContext) recordEcho(field Field, data map[string]any) error {
 	}
 	length := field.Length
 	switch {
+	case isPeekedNumber(field):
+		length = wholeNumberSize(field.Type) // PS-604
 	case field.LengthRef != "":
 		n, ok := toInt(data[field.LengthRef])
 		if !ok || n < 0 {
@@ -52,7 +56,7 @@ func (ctx *EncodeContext) recordEcho(field Field, data map[string]any) error {
 	case length == 0 && !declaresZeroLength(field):
 		length = 1
 	}
-	ctx.echoes = append(ctx.echoes, echoRecord{len(ctx.Buffer), field, given, length})
+	ctx.echoes = append(ctx.echoes, echoRecord{len(ctx.Buffer), field, given, length, ctx.Endian})
 	return nil
 }
 
@@ -140,7 +144,13 @@ func (ctx *EncodeContext) checkEchoes(from int) error {
 		}
 		written := "too few bytes"
 		if e.pos+length <= len(frame) {
-			found, ok := echoValue(e.field, frame[e.pos:e.pos+length])
+			var found any
+			var ok bool
+			if isPeekedNumber(e.field) {
+				found, ok = peekedNumberValue(e.field, frame[e.pos:e.pos+length], e.endian)
+			} else {
+				found, ok = echoValue(e.field, frame[e.pos:e.pos+length])
+			}
 			if ok && reflect.DeepEqual(echoNormal(found), echoNormal(e.given)) {
 				continue
 			}
@@ -148,8 +158,12 @@ func (ctx *EncodeContext) checkEchoes(from int) error {
 				written = echoText(found)
 			}
 		}
-		return fmt.Errorf("Field '%s' is given %s, but the other fields write %s over its span (PS-589)",
-			e.field.Name, echoText(e.given), written)
+		rule := "PS-589"
+		if isPeekedNumber(e.field) {
+			rule = "PS-604"
+		}
+		return fmt.Errorf("Field '%s' is given %s, but the other fields write %s over its span (%s)",
+			e.field.Name, echoText(e.given), written, rule)
 	}
 	return nil
 }

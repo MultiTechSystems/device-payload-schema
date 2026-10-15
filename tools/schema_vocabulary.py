@@ -101,6 +101,8 @@ VOCABULARY: Dict[str, Dict[str, Tuple[Tuple[str, ...], str]]] = {
         "name": (("py",), "label of a definition; documentation"),
         "description": (("py", "outschema"), "documentation"),
         "fields": (_DECODERS, "spliced in place of the `$ref`"),
+        "field": (_DECODERS, "one field, a `$ref` may rename it and replace keys (PS-345, PS-578)"),
+        "lookup": (_DECODERS, "a table a field's `lookup` points to (PS-345, PS-579)"),
     },
     "field": {
         "name": (_DECODERS, "output key"),
@@ -112,7 +114,7 @@ VOCABULARY: Dict[str, Dict[str, Tuple[Tuple[str, ...], str]]] = {
         "add": (_DECODERS, "bare modifier (PS-101)"),
         "mult": (_DECODERS, "bare modifier (PS-101)"),
         "div": (_DECODERS, "bare modifier (PS-101)"),
-        "lookup": (_DECODERS, "sequence or sparse mapping (PS-104/PS-268)"),
+        "lookup": (_DECODERS, "sequence, sparse mapping (PS-104/PS-268) or `#/definitions/<name>` (PS-579)"),
         "transform": (_DECODERS, "ordered modifier stages"),
         "polynomial": (_DECODERS, "fitted curve"),
         "compute": (_DECODERS, "two-operand computed field"),
@@ -163,6 +165,8 @@ VOCABULARY: Dict[str, Dict[str, Tuple[Tuple[str, ...], str]]] = {
         "prefix": (_DECODERS, "bitfield_string prefix"),
         "encoding": (_DECODERS, "sign_magnitude | bcd | gray on a uN (PS-422)"),
         "numeral": (_DECODERS, "decimal | hex: an ascii field reported as the integer its digits give (PS-560)"),
+        "nul": (_DECODERS, "trailing | stop | drop: how an ascii field treats its 0x00 bytes (PS-534)"),
+        "terminator": (_DECODERS, "a byte 0 to 255 that ends a variable-length ascii field, in place of length (PS-593)"),
         "checksum": (_DECODERS, "a check value over earlier bytes, verified on decode and computed on encode (PS-585)"),
         "template": (_DECODERS, "text joined from earlier values on a type: string field, ${name} or ${name:format} (PS-590)"),
         "valid_range": (("py", "go", "cs", "outschema"), "quality flag (_quality)"),
@@ -530,8 +534,15 @@ def iter_keys(schema: Any) -> Iterator[Tuple[str, str, str]]:
         for dk, entry in definitions.items():
             # A definition without fields or a type is a table of named constants
             # (lorawan `mtype_values`): its keys are data.
+            dpath = "definitions.%s" % dk
             if isinstance(entry, dict) and ("fields" in entry or "type" in entry):
-                yield from field(entry, "definitions.%s" % dk, "definition")
+                yield from field(entry, dpath, "definition")
+            elif isinstance(entry, dict) and isinstance(entry.get("field"), dict):
+                # One field (PS-345, CR-2026-168): the definition's keys, then the field's.
+                yield from rec("definition", entry, dpath)
+                yield from field(entry["field"], _p(dpath, "field"))
+            elif isinstance(entry, dict) and "lookup" in entry:
+                yield from rec("definition", entry, dpath)   # the table's keys are data
     for i, vector in enumerate(schema.get("test_vectors") or []):
         if isinstance(vector, dict):
             # Values are data; not descended into.
@@ -569,7 +580,8 @@ def referenced_definitions(schema: Any) -> set:
     def refs(node: Any) -> Iterator[str]:
         if isinstance(node, dict):
             for key, value in node.items():
-                if key == "$ref" and isinstance(value, str):
+                # a field's `lookup` may be a pointer too (PS-579)
+                if key in ("$ref", "lookup") and isinstance(value, str):
                     if value.startswith("#/definitions/"):
                         yield value[len("#/definitions/") :]
                 elif key != "definitions":
