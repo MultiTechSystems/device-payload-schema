@@ -232,10 +232,10 @@ implementation has a runner that reads the same YAML and the same vectors:
 
 | Implementation | Runner | Decode floor | Re-encode floor |
 |---|---|---|---|
-| Python | `tests/test_corpus_conformance.py` | every vector | 2294 |
-| Go | `go/schema/corpus_conformance_test.go` | 2906 | 2312 (plain API 2284) |
-| C# | `dotnet/PayloadSchema.Tests/CorpusConformanceTests.cs` | 2906 | 2295 |
-| Java | `bindings/java/.../CorpusConformanceTest.java` | 2906 | 2294 |
+| Python | `tests/test_corpus_conformance.py` | every vector | 2315 |
+| Go | `go/schema/corpus_conformance_test.go` | 2928 | 2333 (plain API 2305) |
+| C# | `dotnet/PayloadSchema.Tests/CorpusConformanceTests.cs` | 2928 | 2316 |
+| Java | `bindings/java/.../CorpusConformanceTest.java` | 2928 | 2315 |
 | C | `tools/c-corpus-harness.py` (builds each expressible schema through the struct API) | 575 of 575 attempted | n/a |
 
 These figures move with every schema added. `make check-floors` prints each floor beside
@@ -832,10 +832,10 @@ exercised to the best-covered part of the project:
 
 | | Runner | Round-trips |
 |---|---|---|
-| Python | `tests/test_encode_round_trip.py` | 2294 |
-| Go | `go/schema/corpus_encode_test.go` | 2312 (plain 2284) |
-| Java | `bindings/java/.../CorpusEncodeRoundTripTest.java` | 2294 |
-| C# | `dotnet/.../CorpusEncodeRoundTripTests.cs` | 2295 |
+| Python | `tests/test_encode_round_trip.py` | 2315 |
+| Go | `go/schema/corpus_encode_test.go` | 2333 (plain 2305) |
+| Java | `bindings/java/.../CorpusEncodeRoundTripTest.java` | 2315 |
+| C# | `dotnet/.../CorpusEncodeRoundTripTests.cs` | 2316 |
 | C | `src/test_encoder.c`, built by `make test-c` (unit tests, not a corpus round trip) | n/a |
 
 - **A name may be an object under one tag and a scalar under another, and a tlv encoder
@@ -4137,6 +4137,62 @@ improved. The Go, Java and C# corpus runners write per-vector reports only when
     the private registry (543 schemas at 00bd8cd) declares `time`, so none is rejected; decode
     and re-encode output of all 38802 vectors of the corpus and the registry is identical to
     master's (Python, diffed).
+- **CR-2026-189 (PS-621 to PS-623, PS-544 amended; la-payload-schema `cr/0.5.8-apply-189`, for
+  0.5.8): a repeat's elements packed in bits.** A repeat with `element` may declare
+  `packed_bits` (1 to 32) and `bit_offset` (0 to 7, default 0): one big-endian bit stream, MSB
+  first, the first element `bit_offset` bits into the byte at the read position, each element
+  the next `packed_bits` bits, sign-extended where the element type is signed (PS-353), then
+  decoded as the element type's integer, so its sentinel, modifiers and lookup apply. With
+  `byte_length` the count is floor((byte_length x 8 - bit_offset) / packed_bits); afterwards
+  the position moves to the next byte, or to the end of `byte_length` where that is further
+  (PS-622). An encoder inverts each element through its modifiers, rejects one that does not fit
+  (`Repeat 'v': element 0 is 16, which does not fit in 4 bits (PS-623)`), ORs the first byte
+  into the bits the fields before it left pending, and pads with 0 bits (PS-623).
+  - **How, in every language:** each element's bits are laid out as its type's bytes, big-endian
+    two's complement, and the ordinary element decoder reads them (the element is given
+    `endian: big`); encode runs the ordinary element encoder into its own buffer and packs the
+    integer it wrote. The repeat's frame marks the bits before `bit_offset` unwritten, so the
+    OR passes the PS-551 overlay check and a peek there is still checked. Python
+    `packed_element_width`/`packed_repeat_error`/`packed_layout`, the packed branch of
+    `_decode_repeat` and `_encode_packed_elements`; the generator's `packed` branch of the
+    repeat decode and the runtime's `encPackedElements`; Go `go/schema/cr189.go`
+    (`decodePacked`, `encodePackedRepeat`, `writeCovered`); Java `Packed`,
+    `Schema.decodePacked`, `Encoder.encodePacked` (a `FrameMeta` with the first byte's
+    covered mask); C# `Cr189.cs`, `DecodeRepeat`'s `Packed`, `SchemaEncoder.EncodePacked`
+    (`_frameMeta`).
+  - **Load (PS-621), the prototype's text** (`check_packed_repeats`), first rule broken:
+    `Field 'b': packed_bits and bit_offset belong to a repeat with `element` (PS-621)` (with
+    `; did you mean `bit`?` on a `bool`), `Repeat 'v': packed_bits is an integer from 1 to 32`,
+    `... bit_offset is an integer from 0 to 7`, `... a packed element is one field of an integer
+    type at least 9 bits wide`, `... a packed repeat declares count or byte_length`. Python
+    `packed_repeat_errors` (from `schema_iterator_errors`: interpreter, validator, generator),
+    Go `packedRepeatError` (from `checkFieldRules`), Java `Packed.check` (from `checkWave4`),
+    C# `Cr189.Check` (beside `Numeral.Check`), each over every field and every `element`.
+  - **`bit_offset` was a vocabulary hint** ("`bit_offset:` was never read"); it is now a key.
+    Java's and Go's legacy `BitOffset` slots carry it for the repeat. Both keys are in
+    `tools/schema_vocabulary.py`, `schemas/payload-schema.json` and the language reference.
+  - **byte_length on encode:** the elements are padded to a literal or given `byte_length`, as
+    the prototype does; a derived one is the elements' minimal span. The decoder reads as many
+    elements as fit whole, so a list shorter than that count does not round-trip - the prototype
+    accepts it, and so does this repository.
+  - **PS-544, measured before:** a null element's sentinel was already written raw by all five
+    (Python, the runtime, Go, Java, C#): each writes an absent value with a sentinel as the
+    sentinel's raw bits through the field list. The prototype's bug (0xFFFF through `div: 10`
+    as 0x2666) was not here. Cases pin it unpacked through `div` and `mult`, and packed.
+  - **C:** has no repeat; `tools/schema_binary.py` refuses both keys by name (PS-446).
+  - **Cases:** `tests/cr-2026-189-cases.yaml` (the prototype's twelve, a `bool` hint and two more
+    PS-544 cases), read by `test_cr_2026_189_cases.py` (reference and generated codec), Go
+    `cr189_test.go`, Java `CR2026189Test`, C# `CR2026_189Tests`. Fixture
+    `_language-conformance/repeat-packed-bits.yaml` (the Nexelec CO2 history with its null,
+    signed values by `byte_length`, and 3-bit codes through a lookup; six vectors, all
+    round-tripping, mutation score 100%). Floors: decode 2901 -> 2907 in Go, Java and C#;
+    re-encode +6 everywhere (Python and Java 2290 -> 2296, C# 2291 -> 2297, Go 2308 -> 2314,
+    plain 2280 -> 2286), `repeat` 28 -> 34. On top of CR-2026-185, -186 and -188: decode 2922 ->
+    2928, re-encode Python and Java 2309 -> 2315, C# 2310 -> 2316, Go 2327 -> 2333, plain 2299 ->
+    2305, `repeat` 41 -> 47.
+  - **Corpus and registry:** no schema in `schemas/devices`, `schemas/library`, `examples` or
+    the private registry declares `packed_bits` or `bit_offset`, and every new path is gated on
+    `packed_bits`, so no decode, encode or load result changes.
 
 ## Converting a vendor codec
 

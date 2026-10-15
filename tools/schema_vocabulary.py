@@ -133,6 +133,8 @@ VOCABULARY: Dict[str, Dict[str, Tuple[Tuple[str, ...], str]]] = {
         "index": (_DECODERS, "a repeat element's position, from index_base (PS-366)"),
         "index_base": (_DECODERS, "the number a repeat's index starts at (PS-530)"),
         "element": (_DECODERS, "a repeat's one field, reported as an array of values (PS-528)"),
+        "packed_bits": (_DECODERS + ("binary",), "a repeat's elements packed end to end in this many bits each (PS-621)"),
+        "bit_offset": (_DECODERS + ("binary",), "where a packed repeat's first element starts in its first byte (PS-621, PS-622)"),
         "count_as": (_DECODERS, "the number of elements a repeat reports (PS-367)"),
         "present_if": (_DECODERS, "drops an element whose condition is false (PS-386)"),
         "carry": (_DECODERS, "a computed field's value from the previous element (PS-378)"),
@@ -413,9 +415,6 @@ HINTS: Dict[Tuple[str, str], str] = {
     ("field", "enum_values"): "an enum's labels are `values:`",
     ("field", "labels"): "a label table is `lookup:` (or `values:` on an enum)",
     ("field", "bits"): "a bit range is spelled in the type: `type: u8[5:7]`",
-    ("field", "bit_offset"): (
-        "the bit range is spelled in the type (`u8[5:7]`); `bit_offset:` was never read"
-    ),
     ("field", "signed"): "signedness is in the type: `s16`, not `u16` + `signed:`",
     ("vector", "hex"): "the vector's bytes are `payload:`",
     ("schema", "header"): "declare header fields in `definitions` and use `$ref`",

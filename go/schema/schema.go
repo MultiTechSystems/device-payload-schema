@@ -245,6 +245,12 @@ type Field struct {
 	// of single values (PS-528): its one element field, named this, is Fields[0], and the
 	// repeat reports each element's value rather than a record holding it.
 	IndexBase   int    `json:"-" yaml:"-"`
+	// PackedBits is a packed repeat's element width in bits, 0 where it is not packed, and
+	// BitOffset where its first element starts; packedWidth and packedSigned are the
+	// element type's (PS-621, CR-2026-189).
+	PackedBits   int  `json:"-" yaml:"-"`
+	packedWidth  int
+	packedSigned bool
 	ElementName string `json:"-" yaml:"-"`
 	// Siblings are the repeats a `$name[i]` reference in this repeat names (PS-546): each
 	// must report as many values as this one.
@@ -4116,6 +4122,13 @@ func decodeRepeat(field Field, ctx *DecodeContext) ([]any, error) {
 		// PS-396: more elements than `max` is an error, not a silent truncation. The
 		// count was clamped here, so the next field read from inside an element the
 		// clamp had discarded.
+		if field.PackedBits > 0 {
+			// PS-621, PS-622 (CR-2026-189): the elements are read from one bit stream.
+			if err := decodePacked(field, elements, ctx, count, 0, maxIterations); err != nil {
+				return nil, err
+			}
+			count = 0
+		}
 		if count > maxIterations {
 			return nil, repeatLimitError(field, maxIterations, fmt.Sprintf("count %d", count),
 				ctx.Offset, len(ctx.Data))
@@ -4147,6 +4160,17 @@ func decodeRepeat(field Field, ctx *DecodeContext) ([]any, error) {
 		}
 
 		endOffset := ctx.Offset + byteLength
+		if field.PackedBits > 0 {
+			// PS-621: as many elements as fit whole after the bit offset (CR-2026-189).
+			count := (byteLength*8 - field.BitOffset) / field.PackedBits
+			if count < 0 {
+				count = 0
+			}
+			if err := decodePacked(field, elements, ctx, count, byteLength, maxIterations); err != nil {
+				return nil, err
+			}
+			endOffset = ctx.Offset
+		}
 
 		for ctx.Offset < endOffset && elements.iterations < maxIterations {
 			if err := elements.element(); err != nil {
@@ -5476,6 +5500,9 @@ func encodeRepeat(field Field, data map[string]any, ctx *EncodeContext, siblings
 	count := -1
 	if n, ok := repeatSize(field.Count, data, siblings); ok {
 		count = n
+	}
+	if field.PackedBits > 0 {
+		return encodePackedRepeat(field, records, data, ctx, siblings, count)
 	}
 	elements := ctx.branch()
 	if err := encodeRepeatRecords(field, records, elements, count); err != nil {

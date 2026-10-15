@@ -54,7 +54,7 @@ def decode_js(field, octets):
         + "\nconsole.log(JSON.stringify({v: _r.data.v, t: typeof _r.data.v}));"
     )
     out = subprocess.run(
-        ["node", "-e", driver], capture_output=True, text=True, timeout=60
+        ["node"], input=driver, capture_output=True, text=True, timeout=60
     )
     assert out.returncode == 0, out.stderr
     return json.loads(out.stdout)

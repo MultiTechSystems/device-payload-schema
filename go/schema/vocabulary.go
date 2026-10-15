@@ -321,6 +321,10 @@ func checkFieldRules(field map[string]any, at string) error {
 	if err := checkNumeral(field); err != nil {
 		return err
 	}
+	// PS-621 (CR-2026-189): packed_bits and bit_offset on a repeat of integers only.
+	if err := packedRepeatError(field); err != nil {
+		return err
+	}
 	// PS-534, PS-593 (CR-2026-177): nul and terminator on an ascii field.
 	if err := checkAsciiText(field); err != nil {
 		return err

@@ -106,7 +106,7 @@ def test_generated_normalize_uplink_agrees(case, slim):
     script = code + "\nvar d = decodeUplink(%s);\nconsole.log(JSON.stringify(" \
         "normalizeUplink(Object.assign({data: d.data}, %s))));" % (json.dumps(call),
                                                                   json.dumps(norm))
-    got = json.loads(subprocess.run([NODE, "-e", script], capture_output=True, text=True,
+    got = json.loads(subprocess.run([NODE], input=script, capture_output=True, text=True,
                                     check=True).stdout)
     assert got["data"] == want["data"]
     assert got["warnings"] == want["warnings"]

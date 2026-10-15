@@ -3850,6 +3850,75 @@ def numeral_errors(node, _top=True):
     return errors
 
 
+# --- CR-2026-189: repeat elements packed in bits (PS-621 to PS-623) ---------------------
+
+_PACKED_ELEMENT_TYPE = re.compile(r'([us])(8|16|24|32|64)')
+
+
+def packed_element_width(element):
+    """(width in bits, signed) of a packed element's integer type, else None (PS-621)."""
+    declared = element.get('type') if isinstance(element, dict) else None
+    if not isinstance(declared, str):
+        return None
+    match = _PACKED_ELEMENT_TYPE.fullmatch(_META_TYPE_ALIASES.get(declared, declared))
+    return (int(match.group(2)), match.group(1) == 's') if match else None
+
+
+def packed_repeat_error(node):
+    """PS-621 for one field declaring `packed_bits` or `bit_offset`, in the spec
+    prototype's text (`check_packed_repeats`), or None. The first rule broken is named."""
+    if 'packed_bits' not in node and 'bit_offset' not in node:
+        return None
+    where = f"Repeat '{node.get('name')}'"
+    bits, offset = node.get('packed_bits'), node.get('bit_offset', 0)
+    if node.get('type') != 'repeat' or 'packed_bits' not in node:
+        hint = "; did you mean `bit`?" if node.get('type') == 'bool' else ""
+        return (f"Field '{node.get('name')}': packed_bits and bit_offset belong to a repeat "
+                f"with `element` (PS-621){hint}")
+    if isinstance(bits, bool) or not isinstance(bits, int) or not 1 <= bits <= 32:
+        return f"{where}: packed_bits is an integer from 1 to 32 (PS-621)"
+    if isinstance(offset, bool) or not isinstance(offset, int) or not 0 <= offset <= 7:
+        return f"{where}: bit_offset is an integer from 0 to 7 (PS-621)"
+    width = packed_element_width(node.get('element')) if 'fields' not in node else None
+    if width is None or width[0] < bits:
+        return (f"{where}: a packed element is one field of an integer type at least "
+                f"{bits} bits wide (PS-621)")
+    if 'count' not in node and 'byte_length' not in node:
+        return f"{where}: a packed repeat declares count or byte_length (PS-621)"
+    return None
+
+
+def packed_repeat_errors(node, _top=True):
+    """PS-621, walked over the whole schema: `packed_bits` and `bit_offset` belong to a
+    repeat with `element` of an integer type at least that wide, which declares `count` or
+    `byte_length`; on any other field they are rejected."""
+    errors = []
+    if isinstance(node, list):
+        for item in node:
+            errors.extend(packed_repeat_errors(item, False))
+    elif isinstance(node, dict):
+        if 'type' in node:
+            error = packed_repeat_error(node)
+            if error:
+                errors.append(error)
+        for key, value in node.items():
+            if _top and key == 'test_vectors':
+                continue
+            errors.extend(packed_repeat_errors(value, False))
+    return errors
+
+
+def packed_layout(field_def, count, byte_length=None):
+    """(bits, offset, span in bytes) of a packed repeat of `count` elements (PS-622): the
+    elements end at the next byte boundary, or at the end of `byte_length` where that is
+    further."""
+    bits, offset = field_def['packed_bits'], field_def.get('bit_offset', 0)
+    span = (offset + count * bits + 7) // 8
+    if byte_length is not None:
+        span = max(span, byte_length)
+    return bits, offset, span
+
+
 def ascii_text_errors(node, _top=True):
     """PS-534, PS-593, PS-072: `nul` and `terminator` are defined on an ascii field only; `nul`
     is trailing, stop or drop; a terminator is a byte 0 to 255 declared in place of `length`.
@@ -4483,6 +4552,7 @@ def schema_iterator_errors(schema):
     errors = field_name_errors(schema)
     errors.extend(withdrawn_errors(schema))                          # CR-2026-159
     errors.extend(numeral_errors(schema))                            # PS-560
+    errors.extend(packed_repeat_errors(schema))                      # PS-621
     errors.extend(ascii_text_errors(schema))                         # PS-534, PS-593
     errors.extend(checksum_errors(schema))                           # PS-585
     errors.extend(checksum_placement_errors(schema))                 # PS-608
@@ -6957,7 +7027,46 @@ class SchemaInterpreter:
                               else element_value(scratch.data))
             return new_pos
 
-        if count is not None:
+        if 'packed_bits' in field_def:
+            # PS-621, PS-622 (CR-2026-189): the elements are read from one bit stream, most
+            # significant bit first, from `bit_offset` bits into the byte at the read
+            # position. Each is read as the element type's integer, sign-extended where
+            # it is signed, so its sentinel, modifiers and lookup apply as to any element.
+            def resolved(value, key):
+                if isinstance(value, str) and value.startswith('$'):
+                    if value[1:] not in self._variables:
+                        raise ValueError(f"repeat {key} variable not found: {value[1:]}")
+                    return int(self._variables[value[1:]])
+                return int(value)
+
+            width, signed = packed_element_width(field_def['element'])
+            bits, offset = field_def['packed_bits'], field_def.get('bit_offset', 0)
+            length = None
+            if count is not None:
+                count = resolved(count, 'count')
+            else:
+                length = resolved(byte_length, 'byte_length')
+                count = max(length * 8 - offset, 0) // bits
+            if count > max_iterations:
+                raise ValueError(repeat_limit_message(
+                    field_def, max_iterations, f"count {count}", pos, len(buf)))
+            bits, offset, span = packed_layout(field_def, count, length)
+            if pos + span > len(buf):
+                raise name_underflow(BufferUnderflow.need(span, pos, len(buf)),
+                                     field_def.get('name'), 'repeat')
+            stream = int.from_bytes(buf[pos:pos + span], 'big')
+            total = span * 8
+            # The element reads the integer from bytes of its own width, big-endian.
+            nested_fields = [dict(nested_fields[0], endian='big')]
+            for i in range(count):
+                start = offset + i * bits
+                raw = (stream >> (total - start - bits)) & ((1 << bits) - 1)
+                if signed and raw >> (bits - 1):
+                    raw -= 1 << bits                                    # PS-353
+                element(0, raw.to_bytes(width // 8, 'big', signed=signed))
+            pos += span
+
+        elif count is not None:
             # Count-based: fixed number of iterations
             if isinstance(count, str) and count.startswith('$'):
                 var_name = count[1:]
@@ -10485,6 +10594,8 @@ class SchemaInterpreter:
             # PS-551: the count and the list must agree; nothing is padded or cut.
             raise ValueError(f"Repeat '{name}' is given {len(records)} values for a count "
                              f"of {count} (PS-551)")
+        if 'packed_bits' in field_def:
+            return self._encode_packed_elements(field_def, record_fields, records)
         index = field_def.get('index')
         out = bytearray()
         for position, record in enumerate(records):
@@ -10507,6 +10618,49 @@ class SchemaInterpreter:
             check_peeks(element)            # PS-551: an element's bytes close with it
             out.extend(element)
         return bytes(out)
+
+    def _encode_packed_elements(self, field_def: Dict[str, Any],
+                                record_fields: List[Dict[str, Any]],
+                                records: List[Dict[str, Any]]) -> 'Frame':
+        """PS-623 (CR-2026-189): each element, inverted through its modifiers as any
+        element is, in `packed_bits` bits, most significant bit first, from `bit_offset`;
+        the last byte padded with 0 bits. A null is the first sentinel, raw (PS-544).
+
+        The bits before `bit_offset` are not this repeat's: the frame marks them
+        unwritten, so the bits the fields before it left pending are ORed into them
+        (PS-551, PS-622), and a peek there is checked against them as usual."""
+        name = field_def.get('name', '')
+        width, signed = packed_element_width(field_def['element'])
+        bits = field_def['packed_bits']
+        low, high = ((-(1 << (bits - 1)), (1 << (bits - 1)) - 1) if signed
+                     else (0, (1 << bits) - 1))
+        # The element writes its integer in bytes of its own width, big-endian.
+        record_fields = [dict(record_fields[0], endian='big')]
+        index = field_def.get('index')
+        stream = 0
+        for position, record in enumerate(records):
+            if index:
+                record = dict(record, **{index: position + index_base(field_def)})
+            pushed = (self._trace.push(field_def, 'repeat', position)
+                      if self._trace is not None else False)
+            try:
+                element = self._encode_object_members(record_fields, record)
+            finally:
+                if self._trace is not None:
+                    self._trace.pop(pushed)
+            number = int.from_bytes(bytes(element), 'big', signed=signed)
+            if not low <= number <= high:
+                raise FieldError(f"Repeat '{name}': element {position} is {number}, which "
+                                 f"does not fit in {bits} bits (PS-623)")
+            stream = (stream << bits) | (number & ((1 << bits) - 1))
+        byte_length = field_def.get('byte_length')
+        if isinstance(byte_length, bool) or not isinstance(byte_length, int):
+            byte_length = None
+        _, offset, span = packed_layout(field_def, len(records), byte_length)
+        stream <<= span * 8 - offset - len(records) * bits
+        data = stream.to_bytes(span, 'big')
+        covered = bytes([0xFF >> offset]) + b'\xff' * (span - 1) if span else b''
+        return Frame(data, 0, covered, [])
 
     @tail_unchecked
     def _encode_repeat(self, field_def: Dict[str, Any], data: Dict[str, Any],
@@ -10534,8 +10688,19 @@ class SchemaInterpreter:
             raise ValueError(missing_field_message(name))
         siblings = siblings or []
         count = self._repeat_size(field_def, 'count', data, siblings)
-        out = bytearray(self._encode_repeat_elements(field_def, data, records, count))
+        elements = self._encode_repeat_elements(field_def, data, records, count)
         byte_length = self._repeat_size(field_def, 'byte_length', data, siblings)
+        if 'packed_bits' in field_def:
+            # PS-623: the elements are padded to a byte_length the input gives as to a
+            # literal one; never cut short of them.
+            if byte_length is not None and len(elements) < byte_length:
+                elements = Frame(bytes(elements).ljust(byte_length, b'\0'), 0,
+                                 frame_covered(elements).ljust(byte_length, b'\xff'), [])
+            if byte_length is not None and len(elements) != byte_length:
+                raise ValueError(f"Repeat '{name}' encodes to {len(elements)} bytes for a "
+                                 f"byte_length of {byte_length} (PS-551)")
+            return elements
+        out = bytearray(elements)
         if byte_length is not None and len(out) != byte_length:
             raise ValueError(f"Repeat '{name}' encodes to {len(out)} bytes for a "
                              f"byte_length of {byte_length} (PS-551)")
