@@ -140,9 +140,14 @@ class TestTheClaimingPassPrefersSpecificity:
         return text[start:start + 2000]
 
     def test_it_sorts_by_required_width(self):
-        """Wider first; an object counts its members (CR-2026-129)."""
+        """Wider first; an object counts its members (CR-2026-129), a merged object its
+        leaves at every depth (CR-2026-173)."""
         window = self.window()
-        assert "claimWidth(entries[i].required) > claimWidth(entries[j].required)" in window, (
+        wider = (
+            "mergedClaimWidth(entries[i].required, repeat) > "
+            "mergedClaimWidth(entries[j].required, repeat)"
+        )
+        assert wider in window, (
             window[:400]
         )
 

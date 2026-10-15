@@ -1573,13 +1573,23 @@ function encTlvBody(out, f, data, ctx) {
   // tlv_encode_plan, resolved at generation time, with the cases' declaration order: an
   // object's integer-like keys iterate in ascending order, not the order written.
   var rep = tlv.__on_repeat || {};
-  var modes = rep.modes || {}, members = rep.members || {};
+  var modes = rep.modes || {}, members = rep.members || {}, mobjects = rep.objects || {};
   var keys = rep.order || Object.keys(cases);
-  // A supplied member of a merged object that no case declares has nowhere to go.
+  // CR-2026-173: a merged object is handled by leaf path, at every depth; a path is its
+  // names joined by "\u0001" here, and by "." in a message.
+  function pkey(p) { return p.join("\u0001"); }
+  function pdot(k) { return k.split("\u0001").join("."); }
+  var leafSet = {}, objSet = {}, givenLeaves = {};
   Object.keys(members).forEach(function (n) {
+    leafSet[n] = {}; objSet[n] = {};
+    members[n].forEach(function (p) { leafSet[n][pkey(p)] = true; });
+    (mobjects[n] || []).forEach(function (p) { objSet[n][pkey(p)] = true; });
     var v = data[n];
-    if (v === null || typeof v !== "object" || Array.isArray(v)) return;
-    var stray = Object.keys(v).filter(function (m) { return members[n].indexOf(m) < 0; }).sort();
+    if (v !== null && typeof v === "object" && !Array.isArray(v)) givenLeaves[n] = encLeafPaths(v, objSet[n], []);
+  });
+  // A supplied member of a merged object that no case declares has nowhere to go.
+  Object.keys(givenLeaves).forEach(function (n) {
+    var stray = givenLeaves[n].filter(function (k) { return !leafSet[n][k]; }).map(pdot).sort();
     if (stray.length) encFail("tlv: the merged object '" + n + "' is given [" + stray.map(function (m) { return "'" + m + "'"; }).join(", ") + "], which no case declares (PS-527)");
   });
   // Each value goes under the first case whose declared fields it supplies in full;
@@ -1592,8 +1602,9 @@ function encTlvBody(out, f, data, ctx) {
     entries.push({ key: key, body: cases[key], req: req, opt: opt, seq: entries.length });
   });
   // An object counts its members (CR-2026-129), so a merged {adr, dr} case outranks {dr}.
-  function width(list) {
+  function width(list) {             // a merged object counts its leaves (CR-2026-173)
     return list.reduce(function (n, c) {
+      if (c.type === "object" && modes[c.name] === "merge") return n + encMergedLeaves(c).length;
       return n + (c.type === "object" ? Math.max(1, encCaseClaims(c.fields || []).length) : 1);
     }, 0);
   }
@@ -1609,11 +1620,7 @@ function encTlvBody(out, f, data, ctx) {
       queues[n] = collected ? v.slice() : [v];
     });
   });
-  Object.keys(members).forEach(function (n) {
-    var v = data[n];
-    if (v !== null && typeof v === "object" && !Array.isArray(v)) pending[n] = Object.keys(v);
-  });
-  function membersOf(c) { return (c.fields || []).filter(function (m) { return m && m.name; }).map(function (m) { return m.name; }); }
+  Object.keys(givenLeaves).forEach(function (n) { pending[n] = givenLeaves[n].slice(); });
   function fits(c, v) {                              // fits, exact_only (CR-2026-148)
     if (c.type === "object" && v !== null && typeof v === "object" && !Array.isArray(v) && modes[c.name] !== "merge") {
       var claims = encCaseClaims(c.fields || []), every = {}, ok = true;
@@ -1645,11 +1652,10 @@ function encTlvBody(out, f, data, ctx) {
         for (var i = 0; i < e.req.length; i++) {
           var c = e.req[i], n = c.name;
           if (modes[n] === "merge") {
-            var ms = membersOf(c);
-            if (!has.call(pending, n) || ms.some(function (m) { return !has.call(data[n], m); })) { complete = false; break; }
-            var sub = {};
-            ms.forEach(function (m) { sub[m] = data[n][m]; });
-            values[n] = sub;
+            var ms = encMergedLeaves(c).map(pkey);
+            if (!has.call(pending, n) || ms.some(function (m) { return givenLeaves[n].indexOf(m) < 0; })) { complete = false; break; }
+            values[n] = encValueAt(data[n], ms);
+            values[n].__leaves = ms;
             if (ms.some(function (m) { return pending[n].indexOf(m) >= 0; })) taken++;
           } else {
             var q = queues[n];
@@ -1663,15 +1669,22 @@ function encTlvBody(out, f, data, ctx) {
           if (q && q.length && fits(c, q[0])) { values[c.name] = q[0]; taken++; }
         });
         if (!taken) break;
-        var entry = {}, pos = Infinity;
+        var entry = {}, pos = Infinity, sub = 0;
         for (var k in data) entry[k] = data[k];
         Object.keys(values).forEach(function (n) {
+          // Parts of one merged object go out in case declaration order (CR-2026-173),
+          // as the reference's `position`.
+          var at = order.indexOf(n), rank = 0;
+          if (modes[n] === "merge") {
+            var done = values[n].__leaves;
+            delete values[n].__leaves;
+            pending[n] = pending[n].filter(function (m) { return done.indexOf(m) < 0; });
+            rank = e.seq;
+          } else queues[n].shift();
+          if (at < pos || (at === pos && rank < sub)) { pos = at; sub = rank; }
           entry[n] = values[n];
-          pos = Math.min(pos, order.indexOf(n));
-          if (modes[n] === "merge") pending[n] = pending[n].filter(function (m) { return !has.call(values[n], m); });
-          else queues[n].shift();
         });
-        written.push({ key: e.key, body: e.body, data: entry, p: pos, seq: written.length });
+        written.push({ key: e.key, body: e.body, data: entry, p: pos, q: sub, seq: written.length });
         progress = true;
       }
     });
@@ -1681,7 +1694,7 @@ function encTlvBody(out, f, data, ctx) {
     if (queues[n].length) encFail("tlv: no case takes the value of '" + n + "' " + JSON.stringify(queues[n][0]) + " in full (PS-502, PS-527)");
   });
   Object.keys(pending).forEach(function (n) {
-    if (pending[n].length) encFail("tlv: no case takes the members [" + pending[n].slice().sort().map(function (m) { return "'" + m + "'"; }).join(", ") + "] of the merged object '" + n + "' in full (PS-527)");
+    if (pending[n].length) encFail("tlv: no case takes the members [" + pending[n].map(pdot).sort().map(function (m) { return "'" + m + "'"; }).join(", ") + "] of the merged object '" + n + "' in full (PS-527)");
   });
   // A `name_from` key no claim can name: where no field declares it by name, no case
   // takes it, and it was dropped with nothing reported.
@@ -1703,7 +1716,7 @@ function encTlvBody(out, f, data, ctx) {
     });
   });
   // Payload order, so a payload round-trips; entries of one name keep the order taken.
-  written.sort(function (a, b) { return a.p - b.p || a.seq - b.seq; });
+  written.sort(function (a, b) { return a.p - b.p || a.q - b.q || a.seq - b.seq; });
   written.forEach(function (w, entryIndex) {
     encTlvTag(out, w.key, tlv, ctx);
     var value = [];
@@ -1713,6 +1726,45 @@ function encTlvBody(out, f, data, ctx) {
     if (lsize > 0) encWriteInt(out, value.length, lsize, false, ctx.endian);
     for (var i = 0; i < value.length; i++) out.push(value[i]);
   });
+}
+
+// A merged object's leaves at every depth (merged_members, CR-2026-173): an object member
+// not declaring `last` is combined member by member; anything else is a leaf.
+function encMergedLeaves(c) {
+  var out = [];
+  (function walk(fields, path) {
+    (Array.isArray(fields) ? fields : []).forEach(function (m) {
+      if (!m || typeof m !== "object" || !m.name) return;
+      var here = path.concat([m.name]);
+      if (m.type === "object" && m.on_repeat !== "last") walk(m.fields, here);
+      else out.push(here);
+    });
+  })(c.fields, []);
+  return out;
+}
+/* leaf_paths: a value's leaf paths (joined by \u0001), descending only into declared objects. */
+function encLeafPaths(v, objects, path) {
+  var out = [];
+  Object.keys(v).forEach(function (k) {
+    var here = path.concat([k]), m = v[k];
+    if (objects[here.join("\u0001")] && m !== null && typeof m === "object" && !Array.isArray(m)) out = out.concat(encLeafPaths(m, objects, here));
+    else out.push(here.join("\u0001"));
+  });
+  return out;
+}
+/* value_at: the part of a nested value holding exactly the given leaf paths. */
+function encValueAt(v, keys) {
+  var out = {};
+  keys.forEach(function (k) {
+    var p = k.split("\u0001"), src = v, dst = out;
+    for (var i = 0; i < p.length - 1; i++) {
+      src = src[p[i]];
+      if (!Object.prototype.hasOwnProperty.call(dst, p[i])) dst[p[i]] = {};
+      dst = dst[p[i]];
+    }
+    dst[p[p.length - 1]] = src[p[p.length - 1]];
+  });
+  return out;
 }
 
 /* Group a field list so bit ranges sharing a span are packed together (_bitfield_runs). */
@@ -2458,7 +2510,8 @@ def _annotate_on_repeat(node):
         plan = tlv_encode_plan(tlv, modes, last_members)
         out['tlv'] = dict(out['tlv'], __on_repeat={
             'modes': {k: v for k, v in modes.items() if v != 'collect'},
-            'members': {k: sorted(v) for k, v in plan['members'].items()},
+            'members': {k: [list(p) for p in sorted(v)] for k, v in plan['members'].items()},
+            'objects': {k: [list(p) for p in sorted(v)] for k, v in plan['objects'].items()},
             'order': [str(key) for key in tlv['cases']],
         })
     return out
@@ -3175,16 +3228,7 @@ function tlvFold(outer, entry, modes, lastMembers, collected) {
     } else if (mode === "last") {
       outer[k] = v;
     } else if (mode === "merge") {
-      var combined = {}, before = outer[k];
-      for (var a in before) if (Object.prototype.hasOwnProperty.call(before, a)) combined[a] = before[a];
-      for (var m in v) {
-        if (!Object.prototype.hasOwnProperty.call(v, m)) continue;
-        if (Object.prototype.hasOwnProperty.call(combined, m) && !(lastMembers[k] && lastMembers[k][m])) {
-          throw new Error("tlv: the merged object '" + k + "' reports its member '" + m + "' twice (PS-525)");
-        }
-        combined[m] = v[m];
-      }
-      outer[k] = combined;
+      outer[k] = tlvMerge(k, outer[k], v, lastMembers[k] || {}, "");
     } else if (collected[k]) {
       outer[k].push(v);
     } else {
@@ -3192,6 +3236,28 @@ function tlvFold(outer, entry, modes, lastMembers, collected) {
       collected[k] = true;
     }
   }
+}
+
+// combine_repeated's merge: member by member, recursing where both reports carry an
+// object (CR-2026-173), and a leaf reported twice is an error unless its path declares
+// `last` (PS-525).
+function tlvMerge(k, before, v, last, path) {
+  var has = Object.prototype.hasOwnProperty, combined = {};
+  function isMap(x) { return x !== null && typeof x === "object" && !Array.isArray(x); }
+  for (var a in before) if (has.call(before, a)) combined[a] = before[a];
+  for (var m in v) {
+    if (!has.call(v, m)) continue;
+    var here = path ? path + "." + m : m;
+    if (has.call(combined, m) && !last[here] && isMap(combined[m]) && isMap(v[m])) {
+      combined[m] = tlvMerge(k, combined[m], v[m], last, here);
+      continue;
+    }
+    if (has.call(combined, m) && !last[here]) {
+      throw new Error("tlv: the merged object '" + k + "' reports its member '" + here + "' twice (PS-525)");
+    }
+    combined[m] = v[m];
+  }
+  return combined;
 }
 
 // --- Absent values ---
@@ -4993,7 +5059,9 @@ function writeS(buf, pos, size, value, endian) {
         repeat_modes, repeat_last, _ = _tlv_repeat_modes(tlv)
         fold_modes = json.dumps({to_js_name(k): v for k, v in repeat_modes.items()
                                  if v != 'collect'}, sort_keys=True)
-        fold_last = json.dumps({to_js_name(k): {to_js_name(m): True for m in sorted(ms)}
+        # A `last` leaf's path, at any depth (CR-2026-173), as staged names joined by `.`.
+        fold_last = json.dumps({to_js_name(k): {'.'.join(to_js_name(m) for m in path): True
+                                                for path in sorted(ms)}
                                 for k, ms in repeat_last.items() if ms}, sort_keys=True)
         fold_id = self._tlv_fold_seq = getattr(self, '_tlv_fold_seq', 0) + 1
         if not separate:

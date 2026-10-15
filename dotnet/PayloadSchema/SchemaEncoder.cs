@@ -2404,7 +2404,10 @@ public static class SchemaEncoder
             string ModeOf(string n) => modes.TryGetValue(n, out var md) ? md : "collect";
             var entries = new List<(string key, List<SchemaField> fields, List<SchemaField> required,
                 List<SchemaField> optional, int rank)>();
+            // CR-2026-173: a merged object's leaf paths, at every depth, and the paths it
+            // combines as objects.
             var declaredMembers = new Dictionary<string, HashSet<string>>();
+            var mergedObjects = new Dictionary<string, HashSet<string>>();
             foreach (var (caseKey, caseFields) in tlv.TLVCases)
             {
                 if (caseKey == "default") continue;
@@ -2415,25 +2418,29 @@ public static class SchemaEncoder
                     (isOptional ? optional : required).Add(f);
                     var n = f.Name;
                     if (ModeOf(n) != "merge") continue;
-                    foreach (var m in f.Fields)
-                    {
-                        if (string.IsNullOrEmpty(m.Name)) continue;
-                        if (!declaredMembers.TryGetValue(n, out var set)) declaredMembers[n] = set = new();
-                        set.Add(m.Name);
-                    }
+                    if (!declaredMembers.TryGetValue(n, out var set)) declaredMembers[n] = set = new();
+                    if (!mergedObjects.TryGetValue(n, out var objs)) mergedObjects[n] = objs = new();
+                    SchemaParser.TypedMembers(f.Fields, new List<string>(), set, objs);
                 }
                 entries.Add((caseKey, caseFields, required, optional, entries.Count));
             }
             // An object counts its members (CR-2026-129), so a merged {adr, dr} case outranks {dr}.
+            // A merged object counts its leaves, at every depth (CR-2026-173).
             int Width(List<SchemaField> fields) => fields.Sum(f =>
-                f.Type == FieldType.Object ? Math.Max(1, CaseClaims(f.Fields, false).Count) : 1);
+                f.Type == FieldType.Object && ModeOf(f.Name) == "merge"
+                    ? Math.Max(1, SchemaParser.MergedLeaves(f).Count)
+                    : f.Type == FieldType.Object ? Math.Max(1, CaseClaims(f.Fields, false).Count) : 1);
             entries = entries.OrderByDescending(e => Width(e.required)).ThenBy(e => e.rank).ToList();
 
             // A supplied member of a merged object that no case declares has nowhere to go.
+            var givenLeaves = new Dictionary<string, HashSet<string>>();
             foreach (var (n, members) in declaredMembers)
             {
                 if (!data.TryGetValue(n, out var value) || value is not Dictionary<string, object?> whole) continue;
-                var stray = whole.Keys.Where(k => !members.Contains(k)).Select(k => $"'{k}'")
+                var given = new HashSet<string>();
+                SchemaParser.LeafPaths(whole, mergedObjects[n], new List<string>(), given);
+                givenLeaves[n] = given;
+                var stray = given.Where(k => !members.Contains(k)).Select(k => $"'{SchemaParser.Dotted(k)}'")
                     .OrderBy(k => k, StringComparer.Ordinal).ToList();
                 if (stray.Count > 0)
                     throw new InvalidOperationException($"tlv: the merged object '{n}' is given "
@@ -2453,12 +2460,11 @@ public static class SchemaEncoder
                         : new Queue<object?>(new[] { v });
                 }
             var pending = new Dictionary<string, HashSet<string>>();
-            foreach (var n in declaredMembers.Keys)
-                if (data.TryGetValue(n, out var v) && v is Dictionary<string, object?> whole)
-                    pending[n] = whole.Keys.ToHashSet();
+            foreach (var (n, given) in givenLeaves)
+                pending[n] = new HashSet<string>(given);
 
             var written = new List<(string key, List<SchemaField> fields, Dictionary<string, object?> data,
-                int position, int seq)>();
+                int position, int sub, int seq)>();
             // CR-2026-148 (PS-527 amended): a first sweep places only values a case reproduces
             // exactly, a second the rest; the ranking applies within each.
             foreach (var exactOnly in new[] { true, false })
@@ -2484,17 +2490,15 @@ public static class SchemaEncoder
                                         complete = false;
                                         break;
                                     }
-                                    var sub = new Dictionary<string, object?>();
+                                    var leaves = SchemaParser.MergedLeaves(f);
                                     bool fresh = false;
-                                    foreach (var m in f.Fields)
+                                    foreach (var leaf in leaves)
                                     {
-                                        if (string.IsNullOrEmpty(m.Name)) continue;
-                                        if (!whole.TryGetValue(m.Name, out var mv)) { complete = false; break; }
-                                        sub[m.Name] = mv;
-                                        fresh |= pending[n].Contains(m.Name);
+                                        if (!givenLeaves[n].Contains(leaf)) { complete = false; break; }
+                                        fresh |= pending[n].Contains(leaf);
                                     }
                                     if (!complete) break;
-                                    values[n] = sub;
+                                    values[n] = SchemaParser.ValueAt(whole, leaves);
                                     if (fresh) taken++;
                                     continue;
                                 }
@@ -2518,18 +2522,31 @@ public static class SchemaEncoder
                             }
                             if (taken == 0) break;
                             var entryData = new Dictionary<string, object?>(data);
-                            int position = int.MaxValue;
+                            int position = int.MaxValue, sub = 0;
                             foreach (var (n, v) in values)
                             {
                                 entryData[n] = v;
                                 int index = order.ToList().IndexOf(n);
-                                position = Math.Min(position, index < 0 ? int.MaxValue : index);
+                                int at = index < 0 ? int.MaxValue : index, rank = 0;
                                 if (ModeOf(n) == "merge")
-                                    pending[n].ExceptWith(((Dictionary<string, object?>)v!).Keys);
+                                {
+                                    var done = new HashSet<string>();
+                                    SchemaParser.LeafPaths((Dictionary<string, object?>)v!, mergedObjects[n],
+                                        new List<string>(), done);
+                                    pending[n].ExceptWith(done);
+                                    // Parts of one merged object go out in case declaration
+                                    // order (CR-2026-173), as the reference's `position`.
+                                    rank = e.rank;
+                                }
                                 else
                                     queues[n].Dequeue();
+                                if (at < position || (at == position && rank < sub))
+                                {
+                                    position = at;
+                                    sub = rank;
+                                }
                             }
-                            written.Add((e.key, e.fields, entryData, position, written.Count));
+                            written.Add((e.key, e.fields, entryData, position, sub, written.Count));
                             progress = true;
                         }
                     }
@@ -2542,7 +2559,7 @@ public static class SchemaEncoder
             foreach (var (n, left) in pending)
                 if (left.Count > 0)
                     throw new InvalidOperationException("tlv: no case takes the members ["
-                        + string.Join(", ", left.Select(m => $"'{m}'").OrderBy(m => m, StringComparer.Ordinal))
+                        + string.Join(", ", left.Select(m => $"'{SchemaParser.Dotted(m)}'").OrderBy(m => m, StringComparer.Ordinal))
                         + $"] of the merged object '{n}' in full (PS-527)");
             // A `name_from` key no claim can name. Where the template reads a tag component
             // the tag is not in the data, so no case can take the value - and it was dropped
@@ -2569,7 +2586,7 @@ public static class SchemaEncoder
             // Payload order, so a payload round-trips; entries of one name keep the order taken.
             var output = new List<byte>();
             int entryIndex = 0;
-            foreach (var w in written.OrderBy(w => w.position).ThenBy(w => w.seq))
+            foreach (var w in written.OrderBy(w => w.position).ThenBy(w => w.sub).ThenBy(w => w.seq))
             {
                 var tag = EncodeTLVTag(w.key, tlv);
                 // PS-572: the entry's index in payload order, as its decode recorded it.

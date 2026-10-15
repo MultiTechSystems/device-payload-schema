@@ -20,7 +20,10 @@ final class OnRepeat {
     static final List<String> MODES = List.of("collect", "merge", "last");
     private static final List<String> REPORTING = List.of("match", "byte_group", "flagged", "tlv");
 
-    /** The resolved mode by name, and the members of each merged object declaring last. */
+    /**
+     * The resolved mode by name, and the leaf paths ({@link #pathKey}) of each merged object
+     * declaring last, at any depth (CR-2026-173).
+     */
     record Modes(Map<String, String> modes, Map<String, Set<String>> lastMembers) {
         String mode(String name) {
             return modes.getOrDefault(name, "collect");
@@ -49,6 +52,7 @@ final class OnRepeat {
         Map<String, String> modes = new LinkedHashMap<>();
         Map<String, Set<String>> lastMembers = new LinkedHashMap<>();
         Map<List<String>, List<Map<?, ?>>> shared = new LinkedHashMap<>();
+        Map<String, Set<String>> objects = new LinkedHashMap<>();   // paths combined as objects
         if (tlv.get("cases") instanceof Map<?, ?> cases) {
             for (Object body : cases.values()) {
                 if (!(body instanceof List<?> list)) continue;
@@ -74,26 +78,38 @@ final class OnRepeat {
                                 + " (PS-526)");
                     }
                     if ("merge".equals(mode)) {
+                        // CR-2026-173: a member that is an object is combined member by member
+                        // too. PS-526 concerns two cases declaring a leaf; one case naming a
+                        // member twice counts once.
                         Set<String> last = lastMembers.computeIfAbsent(name, k -> new LinkedHashSet<>());
-                        if (field.get("fields") instanceof List<?> members) {
-                            for (Object m : members) {
-                                if (!(m instanceof Map<?, ?> member)
-                                        || !(member.get("name") instanceof String mn) || mn.isEmpty()) continue;
-                                shared.computeIfAbsent(List.of(name, mn), k -> new java.util.ArrayList<>()).add(member);
-                                if ("last".equals(member.get("on_repeat"))) last.add(mn);
+                        Set<String> inCase = new java.util.HashSet<>();
+                        for (Member m : mergedMembers(field.get("fields"), List.of())) {
+                            String key = pathKey(m.path());
+                            if (m.isObject()) {
+                                objects.computeIfAbsent(name, k -> new LinkedHashSet<>()).add(key);
+                                continue;
                             }
+                            if (!inCase.add(key)) continue;
+                            shared.computeIfAbsent(List.of(name, key), k -> new java.util.ArrayList<>()).add(m.decl());
+                            if ("last".equals(m.decl().get("on_repeat"))) last.add(key);
                         }
                     }
                 }
             }
         }
-        // CR-2026-128: merged cases share a member only where it declares `last` (PS-526).
         for (Map.Entry<List<String>, List<Map<?, ?>>> e : shared.entrySet()) {
+            String name = e.getKey().get(0), dotted = dotted(e.getKey().get(1));
+            if (objects.getOrDefault(name, Set.of()).contains(e.getKey().get(1))) {
+                throw new SchemaException("tlv: the merged object '" + name + "' declares '" + dotted
+                        + "' as an object in one case and as a value in another (PS-526)");
+            }
+            // CR-2026-128: merged cases share a leaf only where it declares `last`, at any
+            // depth (CR-2026-173).
             if (e.getValue().size() < 2) continue;
             for (Map<?, ?> declaration : e.getValue()) {
                 if (!"last".equals(declaration.get("on_repeat"))) {
-                    throw new SchemaException("tlv: cases share the member '" + e.getKey().get(1)
-                            + "' of the merged object '" + e.getKey().get(0)
+                    throw new SchemaException("tlv: cases share the member '" + dotted
+                            + "' of the merged object '" + name
                             + "' without `on_repeat: last` (PS-526)");
                 }
             }
@@ -146,21 +162,122 @@ final class OnRepeat {
 
     /**
      * {@code last} keeps the later value; {@code merge} combines two objects member by
-     * member, and a member reported twice is an error unless it declares
-     * {@code on_repeat: last} (PS-525).
+     * member, recursing where both carry an object (CR-2026-173), and a leaf reported twice
+     * is an error unless it declares {@code on_repeat: last} (PS-525). {@code lastMembers}
+     * holds leaf paths.
      */
-    @SuppressWarnings("unchecked")
     static Object combine(String name, Object earlier, Object value, String mode, Set<String> lastMembers) {
         if ("last".equals(mode)) return value;
+        return merge(name, earlier, value, lastMembers, List.of());
+    }
+
+    @SuppressWarnings("unchecked")
+    private static Object merge(String name, Object earlier, Object value, Set<String> lastMembers,
+                                List<String> path) {
         Map<String, Object> combined = new LinkedHashMap<>((Map<String, Object>) earlier);
         for (Map.Entry<String, Object> e : ((Map<String, Object>) value).entrySet()) {
-            if (combined.containsKey(e.getKey()) && !lastMembers.contains(e.getKey())) {
+            List<String> here = new java.util.ArrayList<>(path);
+            here.add(e.getKey());
+            boolean twice = combined.containsKey(e.getKey()) && !lastMembers.contains(pathKey(here));
+            if (twice && combined.get(e.getKey()) instanceof Map && e.getValue() instanceof Map) {
+                combined.put(e.getKey(), merge(name, combined.get(e.getKey()), e.getValue(), lastMembers, here));
+                continue;
+            }
+            if (twice) {
                 throw new SchemaException.DecodeException("tlv: the merged object '" + name
-                        + "' reports its member '" + e.getKey() + "' twice (PS-525)");
+                        + "' reports its member '" + String.join(".", here) + "' twice (PS-525)");
             }
             combined.put(e.getKey(), e.getValue());
         }
         return combined;
+    }
+
+    /** One named member of a merged object, at any depth (CR-2026-173). */
+    record Member(List<String> path, Map<?, ?> decl, boolean isObject) {}
+
+    /**
+     * merged_members: each named member of a merged object with its path, where a member
+     * of {@code type: object} not declaring {@code on_repeat: last} is combined member by
+     * member and anything else is a leaf.
+     */
+    static List<Member> mergedMembers(Object fields, List<String> path) {
+        List<Member> out = new java.util.ArrayList<>();
+        if (!(fields instanceof List<?> list)) return out;
+        for (Object o : list) {
+            if (!(o instanceof Map<?, ?> m) || !(m.get("name") instanceof String n) || n.isEmpty()) continue;
+            List<String> here = new java.util.ArrayList<>(path);
+            here.add(n);
+            boolean isObject = "object".equals(m.get("type")) && !"last".equals(m.get("on_repeat"));
+            out.add(new Member(here, m, isObject));
+            if (isObject) out.addAll(mergedMembers(m.get("fields"), here));
+        }
+        return out;
+    }
+
+    /** A member path as one key; a name may hold a dot. */
+    static String pathKey(List<String> path) {
+        return String.join("\u0000", path);
+    }
+
+    /** A path key as {@code a.b}, as a message writes it. */
+    static String dotted(String key) {
+        return key.replace('\u0000', '.');
+    }
+
+    /** leaf_paths: a value's leaf paths, descending only into the declared objects. */
+    static void leafPaths(Map<?, ?> value, Set<String> objects, List<String> path, Set<String> out) {
+        for (Map.Entry<?, ?> e : value.entrySet()) {
+            List<String> here = new java.util.ArrayList<>(path);
+            here.add(String.valueOf(e.getKey()));
+            if (e.getValue() instanceof Map<?, ?> sub && objects.contains(pathKey(here))) {
+                leafPaths(sub, objects, here, out);
+            } else {
+                out.add(pathKey(here));
+            }
+        }
+    }
+
+    /** value_at: the part of a nested value holding exactly the given leaf paths. */
+    @SuppressWarnings("unchecked")
+    static Map<String, Object> valueAt(Map<?, ?> value, Set<String> keys) {
+        Map<String, Object> out = new LinkedHashMap<>();
+        for (String key : keys) {
+            String[] path = key.split("\u0000", -1);
+            Map<?, ?> src = value;
+            Map<String, Object> dst = out;
+            for (int i = 0; i < path.length - 1; i++) {
+                src = (Map<?, ?>) src.get(path[i]);
+                dst = (Map<String, Object>) dst.computeIfAbsent(path[i], k -> new LinkedHashMap<String, Object>());
+            }
+            dst.put(path[path.length - 1], src.get(path[path.length - 1]));
+        }
+        return out;
+    }
+
+    /**
+     * A merged object field's leaf paths and the paths it combines as objects, read from
+     * its typed members (CR-2026-173).
+     */
+    static void typedMembers(List<Field> fields, List<String> path, Set<String> leaves, Set<String> objects) {
+        if (fields == null) return;
+        for (Field m : fields) {
+            if (m.getName() == null || m.getName().isEmpty()) continue;
+            List<String> here = new java.util.ArrayList<>(path);
+            here.add(m.getName());
+            boolean last = m.getRaw() != null && "last".equals(m.getRaw().get("on_repeat"));
+            if (m.getType() == FieldType.OBJECT && !last) {
+                if (objects != null) objects.add(pathKey(here));
+                typedMembers(m.getFields(), here, leaves, objects);
+            } else if (leaves != null) {
+                leaves.add(pathKey(here));
+            }
+        }
+    }
+
+    static Set<String> leaves(Field f) {
+        Set<String> out = new LinkedHashSet<>();
+        typedMembers(f.getFields(), List.of(), out, null);
+        return out;
     }
 
     /** Python's repr of a scalar, as the reference's message writes it. */
@@ -210,12 +327,10 @@ final class OnRepeat {
                         for (Map.Entry<String, Map<?, ?>> e : reportedFields(fields).entrySet()) {
                             allowed.add(e.getValue());
                             if (!"merge".equals(modes.mode(e.getKey()))) continue;
-                            if (e.getValue().get("fields") instanceof List<?> members) {
-                                for (Object m : members) {
-                                    if (m instanceof Map<?, ?> member && "last".equals(member.get("on_repeat"))) {
-                                        allowed.add(member);
-                                    }
-                                }
+                            // A merged object's leaf may declare `last` at any depth
+                            // (PS-525, CR-2026-173).
+                            for (Member m : mergedMembers(e.getValue().get("fields"), List.of())) {
+                                if ("last".equals(m.decl().get("on_repeat"))) allowed.add(m.decl());
                             }
                         }
                     }

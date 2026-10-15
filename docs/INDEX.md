@@ -123,14 +123,14 @@ Generated inventory of this repository: what lives where, what each document cov
 
 ## Device schemas
 
-366 schemas under `schemas/devices/`.
-Mean quality score 82.5% (PLATINUM 43, GOLD 54, SILVER 249, BRONZE 5, REJECTED 15). Tiers follow the specification's Section 10: Platinum 95-100%, Gold 85-94%, Silver 70-84%, Bronze 60-69%, Rejected below 60%. Gold and Platinum also have gates (PS-239) -- see `../AGENTS.md`. A high score shows self-consistency with a schema's own test vectors, not that the vectors are right.
+367 schemas under `schemas/devices/`.
+Mean quality score 82.5% (PLATINUM 43, GOLD 54, SILVER 250, BRONZE 5, REJECTED 15). Tiers follow the specification's Section 10: Platinum 95-100%, Gold 85-94%, Silver 70-84%, Bronze 60-69%, Rejected below 60%. Gold and Platinum also have gates (PS-239) -- see `../AGENTS.md`. A high score shows self-consistency with a schema's own test vectors, not that the vectors are right.
 
 ### By vendor
 
 | Vendor | Schemas | Vectors | Tiers |
 |---|---|---|---|
-| _language-conformance | 154 | 412 | GOLD 1, SILVER 149, BRONZE 4 |
+| _language-conformance | 155 | 415 | GOLD 1, SILVER 150, BRONZE 4 |
 | milesight | 84 | 1427 | PLATINUM 31, GOLD 36, SILVER 14, REJECTED 3 |
 | decentlab | 58 | 204 | PLATINUM 9, GOLD 13, SILVER 31, BRONZE 1, REJECTED 4 |
 | _library-composed | 49 | 57 | SILVER 49 |
@@ -283,6 +283,7 @@ Mean quality score 82.5% (PLATINUM 43, GOLD 54, SILVER 249, BRONZE 5, REJECTED 1
 | `_language-conformance/tlv-float-reading` | 3 | 3 | fields | 73% | SILVER |
 | `_language-conformance/tlv-name-object-and-scalar` | 7 | 2 | fields | 81% | SILVER |
 | `_language-conformance/tlv-nameless-case` | 2 | 1 | fields | 81% | SILVER |
+| `_language-conformance/tlv-nested-merge` | 15 | 3 | ports | 85% | SILVER |
 | `_language-conformance/tlv-object-with-inner-branch` | 4 | 3 | fields | 81% | SILVER |
 | `_language-conformance/tlv-repeat-collect-first-case` | 2 | 1 | fields | 81% | SILVER |
 | `_language-conformance/tlv-repeat-collect` | 2 | 1 | fields | 81% | SILVER |

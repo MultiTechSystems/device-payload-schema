@@ -1779,9 +1779,64 @@ def reported_fields(fields):
     return found
 
 
+def merged_members(fields, path=()):
+    """The members of a merged object, at every depth (CR-2026-173): (path, member,
+    is_object) for each named member, where a member of `type: object` is itself
+    combined member by member and any other member - a scalar, a repeat, an array - is a
+    leaf. An object member declaring `on_repeat: last` is a leaf too: the later report
+    replaces it whole. The spec prototype's `merged_members`."""
+    found = []  # type: List[tuple]
+    for member in fields if isinstance(fields, list) else []:
+        if not isinstance(member, dict) or not member.get('name'):
+            continue
+        here = path + (member['name'],)
+        is_object = member.get('type') == 'object' and member.get('on_repeat') != 'last'
+        found.append((here, member, is_object))
+        if is_object:
+            found.extend(merged_members(member.get('fields'), here))
+    return found
+
+
+def merged_leaves(field_def):
+    """A merged object's leaf paths, at every depth (CR-2026-173)."""
+    return {path for path, _, is_object in merged_members(field_def.get('fields'))
+            if not is_object}
+
+
+def merged_objects(field_def):
+    """The paths a merged object combines as objects (CR-2026-173)."""
+    return {path for path, _, is_object in merged_members(field_def.get('fields'))
+            if is_object}
+
+
+def leaf_paths(value, objects, path=()):
+    """The leaf paths of a merged object's value, descending only into the members the
+    schema declares as objects to be combined (CR-2026-173)."""
+    paths = set()
+    for key, member in (value.items() if isinstance(value, dict) else ()):
+        here = path + (key,)
+        if here in objects and isinstance(member, dict):
+            paths |= leaf_paths(member, objects, here)
+        else:
+            paths.add(here)
+    return paths
+
+
+def value_at(value, paths):
+    """The part of a nested value holding exactly the given leaf paths."""
+    out = {}  # type: Dict[str, Any]
+    for path in sorted(paths):
+        source, target = value, out
+        for key in path[:-1]:
+            source = source[key]
+            target = target.setdefault(key, {})
+        target[path[-1]] = source[path[-1]]
+    return out
+
+
 def tlv_repeat_modes(tlv_def):
     """How each name a tlv reports combines when more than one entry reports it (PS-157,
-    PS-525, PS-526): (mode by name, the members of each merged object that declare
+    PS-525, PS-526): (mode by name, the leaf paths of each merged object that declare
     `last`, the schema errors).
 
     A field's own `on_repeat` takes precedence over the tlv's. A tlv's `merge` reaches
@@ -1794,6 +1849,7 @@ def tlv_repeat_modes(tlv_def):
     modes = {}  # type: Dict[str, str]
     last_members = {}  # type: Dict[str, set]
     shared = {}  # type: Dict[tuple, list]
+    objects = {}  # type: Dict[str, set]
     if not isinstance(tlv_def, dict):
         return modes, last_members, errors
     default = tlv_def.get('on_repeat', 'collect')
@@ -1821,18 +1877,32 @@ def tlv_repeat_modes(tlv_def):
                               f"`on_repeat`, {modes[name]} and {mode} (PS-526)")
                 continue
             if mode == 'merge':
-                last_members.setdefault(name, set()).update(
-                    member['name'] for member in field_def.get('fields') or []
-                    if isinstance(member, dict) and member.get('on_repeat') == 'last'
-                    and member.get('name'))
-                for member in field_def.get('fields') or []:
-                    if isinstance(member, dict) and member.get('name'):
-                        shared.setdefault((name, member['name']), []).append(member)
-    for (name, member), declarations in shared.items():
-        # CR-2026-128: merged cases share a member only where it declares `last`.
+                # CR-2026-173: a member that is an object is combined member by member
+                # too. PS-526 concerns two cases declaring a leaf; one case naming a
+                # member twice counts once.
+                in_case = set()
+                for path, member, member_is_object in merged_members(
+                        field_def.get('fields')):
+                    if member_is_object:
+                        objects.setdefault(name, set()).add(path)
+                        continue
+                    if path in in_case:
+                        continue
+                    in_case.add(path)
+                    shared.setdefault((name, path), []).append(member)
+                    if member.get('on_repeat') == 'last':
+                        last_members.setdefault(name, set()).add(path)
+    for (name, path), declarations in shared.items():
+        dotted = '.'.join(path)
+        if path in objects.get(name, set()):
+            errors.append(f"tlv: the merged object '{name}' declares '{dotted}' as an "
+                          f"object in one case and as a value in another (PS-526)")
+            continue
+        # CR-2026-128: merged cases share a leaf only where it declares `last`, at any
+        # depth (CR-2026-173).
         if len(declarations) > 1 and any(d.get('on_repeat') != 'last'
                                          for d in declarations):
-            errors.append(f"tlv: cases share the member '{member}' of the merged object "
+            errors.append(f"tlv: cases share the member '{dotted}' of the merged object "
                           f"'{name}' without `on_repeat: last` (PS-526)")
     return modes, last_members, errors
 
@@ -1868,9 +1938,10 @@ def on_repeat_schema_errors(node):
                         allowed.add(id(field_def))
                         if modes.get(name) != 'merge':
                             continue
-                        for member in field_def.get('fields') or []:
-                            if isinstance(member, dict) \
-                                    and member.get('on_repeat') == 'last':
+                        # A merged object's leaf may declare `last` at any depth
+                        # (PS-525, CR-2026-173).
+                        for _, member, _ in merged_members(field_def.get('fields')):
+                            if member.get('on_repeat') == 'last':
                                 allowed.add(id(member))
             for key, value in item.items():
                 if key not in _ON_REPEAT_OPAQUE:
@@ -1904,33 +1975,41 @@ def _reports_list(field_def):
 
 def tlv_encode_plan(tlv_def, modes, last_members):
     """What PS-527 needs of a tlv's cases: `members`, for each merged object, every
-    member some case declares - a supplied member outside it is an error. Shared
-    members are `last` ones, as PS-526 requires, so each written case carries them.
+    leaf path some case declares, at any depth (CR-2026-173) - a supplied leaf outside
+    it is an error - and `objects`, the paths it combines as objects. Shared leaves are
+    `last` ones, as PS-526 requires, so each written case carries them.
     `last_members` is accepted for the callers' symmetry with tlv_repeat_modes."""
     members = {}  # type: Dict[str, set]
+    objects = {}  # type: Dict[str, set]
     for case_key, body in (tlv_def.get('cases') or {}).items():
         if case_key == 'default' or not isinstance(body, list):
             continue
         for name, field_def in reported_fields(body).items():
             if modes.get(name) != 'merge':
                 continue
-            for member in field_def.get('fields') or []:
-                if isinstance(member, dict) and member.get('name'):
-                    members.setdefault(name, set()).add(member['name'])
-    return {'members': members}
+            members.setdefault(name, set()).update(merged_leaves(field_def))
+            objects.setdefault(name, set()).update(merged_objects(field_def))
+    return {'members': members, 'objects': objects}
 
 
-def combine_repeated(name, earlier, value, mode, last_members):
+def combine_repeated(name, earlier, value, mode, last_members, path=()):
     """`last` keeps the later value; `merge` combines two objects member by member,
-    and a member reported twice is an error unless it declares `on_repeat: last`
-    (PS-525)."""
+    recursing where both carry an object (CR-2026-173), and a leaf reported twice is an
+    error unless it declares `on_repeat: last` (PS-525). `last_members` holds leaf
+    paths."""
     if mode == 'last':
         return value
     combined = dict(earlier)
     for member, member_value in value.items():
-        if member in combined and member not in last_members:
+        here = path + (member,)
+        if member in combined and here not in last_members \
+                and isinstance(combined[member], dict) and isinstance(member_value, dict):
+            combined[member] = combine_repeated(name, combined[member], member_value,
+                                                mode, last_members, here)
+            continue
+        if member in combined and here not in last_members:
             raise ValueError(f"tlv: the merged object '{name}' reports its member "
-                             f"'{member}' twice (PS-525)")
+                             f"'{'.'.join(here)}' twice (PS-525)")
         combined[member] = member_value
     return combined
 
@@ -8954,9 +9033,12 @@ class SchemaInterpreter:
         plan = tlv_encode_plan(tlv_def, modes, last_members)
         # PS-527: a supplied member of a merged object that no case declares has
         # nowhere to be written.
+        # CR-2026-173: by leaf path, at every depth, as `a.b`.
+        given_leaves = {n: leaf_paths(data[n], plan['objects'].get(n, set()))
+                        for n in plan['members'] if isinstance(data.get(n), dict)}
         for n, members in plan['members'].items():
-            if isinstance(data.get(n), dict):
-                stray = sorted(set(data[n]) - members)
+            if n in given_leaves:
+                stray = sorted('.'.join(p) for p in given_leaves[n] - members)
                 if stray:
                     raise ValueError(f"tlv: the merged object '{n}' is given {stray}, "
                                      f"which no case declares (PS-527)")
@@ -8978,7 +9060,10 @@ class SchemaInterpreter:
         # em400-mud's [3, 103] (temperature) is declared before [131, 103]
         # (temperature, temperature_alarm), and taking temperature first strands the
         # alarm, which no case would then take in full (CR-2026-029).
-        entries.sort(key=lambda entry: -sum(self._claim_width(f) for f in entry[2]))
+        # A merged object counts its leaves, at every depth (CR-2026-173).
+        entries.sort(key=lambda entry: -sum(
+            len(merged_leaves(f)) if modes.get(f['name']) == 'merge'
+            and f.get('type') == 'object' else self._claim_width(f) for f in entry[2]))
 
         queues = {}  # type: Dict[str, list]
         for _, _, required, optional in entries:
@@ -8989,12 +9074,15 @@ class SchemaInterpreter:
                     collected = isinstance(value, list) and not _reports_list(f) \
                         and modes.get(n, 'collect') == 'collect'
                     queues[n] = list(value) if collected else [value]
-        pending = {n: set(data[n]) for n in plan['members']
-                   if isinstance(data.get(n), dict)}
+        pending = {n: set(paths) for n, paths in given_leaves.items()}
+        # The entries holding parts of one merged object go out in case declaration
+        # order (CR-2026-173): counting a nested object's leaves ranks the case filling
+        # it first, and the order the cases are tried in is no order for the payload.
+        declared_at = {key: i for i, key in enumerate(cases)}
 
-        def members_of(f):
-            return {m['name'] for m in f.get('fields') or []
-                    if isinstance(m, dict) and m.get('name')}
+        def position(n, case_key):
+            merged = modes.get(n) == 'merge'
+            return (order.index(n), declared_at[case_key] if merged else 0)
 
         def fits(f, value, exact_only):
             # An object element supplies exactly the members its case declares, and a
@@ -9037,11 +9125,11 @@ class SchemaInterpreter:
                         for f in required:
                             n = f['name']
                             if modes.get(n) == 'merge':
-                                members = members_of(f)
-                                if n not in pending or not members <= set(data[n]):
+                                members = merged_leaves(f)
+                                if n not in pending or not members <= given_leaves[n]:
                                     complete = False
                                     break
-                                values[n] = {m: data[n][m] for m in members}
+                                values[n] = value_at(data[n], members)
                                 if members & pending[n]:
                                     taken.append(n)
                             else:
@@ -9062,11 +9150,12 @@ class SchemaInterpreter:
                             break
                         for n in values:
                             if modes.get(n) == 'merge':
-                                pending[n] -= set(values[n])
+                                pending[n] -= leaf_paths(
+                                    values[n], plan['objects'].get(n, set()))
                             else:
                                 queues[n].pop(0)
                         written.append((case_key, case_fields, dict(data, **values),
-                                        min(order.index(n) for n in values)))
+                                        min(position(n, case_key) for n in values)))
                         progress = True
         for n, queue in queues.items():
             if queue:
@@ -9074,7 +9163,8 @@ class SchemaInterpreter:
                                  f"full (PS-502, PS-527)")
         for n, members in pending.items():
             if members:
-                raise ValueError(f"tlv: no case takes the members {sorted(members)} of "
+                raise ValueError(f"tlv: no case takes the members "
+                                 f"{sorted('.'.join(p) for p in members)} of "
                                  f"the merged object '{n}' in full (PS-527)")
         # A `name_from` field reports under a key built from its template, which no
         # claim above can name. Where the template reads a tag component (rakwireless's
