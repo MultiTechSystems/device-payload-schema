@@ -25,7 +25,7 @@ from dataclasses import dataclass, field
 
 # Add tools to path
 sys.path.insert(0, str(Path(__file__).parent))
-from schema_interpreter import (SchemaInterpreter, semantic_warnings, whole_number_size, YamlBooleanError, check_yaml_booleans, DecodeResult, byte_group_errors,
+from schema_interpreter import (SchemaInterpreter, semantic_warnings, skip_bit_notes, whole_number_size, YamlBooleanError, check_yaml_booleans, DecodeResult, byte_group_errors,
                                 byte_group_endian,
                                 encoding_errors, expand_refs, fport_declaration_errors,
                                 annotation_schema_errors, reference_errors,
@@ -2114,6 +2114,8 @@ def validate_schema(schema: Dict[str, Any], strict_keys: bool = True) -> Validat
         result.add_warning(warning)
     for warning in semantic_warnings(schema):                       # PS-597
         result.add_warning(warning)
+    for note in skip_bit_notes(schema):     # PS-607: information, never a warning
+        result.add_info(note)
 
     # Check best practices (warnings and info)
     check_best_practices(schema, result)
