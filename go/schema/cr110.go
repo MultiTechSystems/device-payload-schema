@@ -635,6 +635,13 @@ func caseTakes(f Field, value any) (bool, bool) {
 	if list, isList := value.([]any); isList && (f.Type == TypeRepeat || f.Type == TypeRepeatLower) {
 		return repeatTakes(f, list)
 	}
+	if isTimeField(f) {
+		seconds, err := timeInputSeconds(f, value) // PS-615 (CR-2026-186)
+		if err != nil {
+			return false, false
+		}
+		value = seconds
+	}
 	reversed, err := reverseLookupAnyCode(f, value)
 	if err != nil {
 		return false, false

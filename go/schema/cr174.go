@@ -181,11 +181,11 @@ func checksumOf(field Field) *checksumSpec {
 
 // verifyChecksum is PS-586 on decode: the checksum over the frame's bytes from `from` to
 // the byte before the field, which starts at pos, against the value read. A mismatch is
-// an error, or a warning with `on_mismatch: warn`; a range starting after the field is an
-// error (PS-585).
+// an error, or a warning with `on_mismatch: warn`; a range starting at or after the field
+// covers nothing and is an error (PS-608, CR-2026-185).
 func (ctx *DecodeContext) verifyChecksum(field Field, spec *checksumSpec, pos int, carried uint64) error {
-	if spec.from > pos {
-		return fmt.Errorf("Field '%s': the checksum range starts at byte %d, after the field at byte %d (PS-585)",
+	if spec.from >= pos {
+		return fmt.Errorf("Field '%s': the checksum range starts at byte %d, at or after the field at byte %d, so it covers nothing (PS-608)",
 			field.Name, spec.from, pos)
 	}
 	computed := computeChecksum(spec.algo, ctx.Data[spec.from:pos], spec.seed)
@@ -219,15 +219,20 @@ func checksumUnwritten(name string) error {
 // placeChecksum writes a checksum field's zero placeholder and records it. The input's
 // value, internal or not, is never read (PS-587). Rejected where bits a peek left pending
 // would be ORed into it, where the field sits in a tlv entry or a repeat element (encoded
-// in a branch, apart from the frame) or a repeat trailer, or where its range starts past
-// it.
+// in a branch, apart from the frame; PS-608 rejects both at load), or where its range
+// starts past it. A range starting where the field is covers nothing (PS-608). A repeat's
+// trailer is written at its frame offset, so a checksum there is placed (CR-2026-185).
 func (ctx *EncodeContext) placeChecksum(field Field, spec *checksumSpec) error {
-	if ctx.checksums == nil || ctx.checksumApart > 0 || len(ctx.pending) > 0 {
+	if ctx.checksums == nil || len(ctx.pending) > 0 {
 		return checksumUnwritten(field.Name)
 	}
 	pos := len(ctx.Buffer)
 	if spec.from > pos {
 		return checksumUnwritten(field.Name)
+	}
+	if spec.from == pos {
+		return fmt.Errorf("Field '%s': the checksum range starts at byte %d, where the field is, so it covers nothing (PS-608)",
+			field.Name, spec.from)
 	}
 	endian := field.Endian
 	if endian == "" {

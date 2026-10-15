@@ -72,6 +72,10 @@ final class Reports {
         if (decl.get("bit_labels") != null) {                               // PS-616 (CR-2026-187)
             return decl.containsKey("join") ? "string" : "array";
         }
+        if (decl.get("time") instanceof Map<?, ?> time) {          // PS-610 (CR-2026-186)
+            Object format = time.get("format");
+            return "unix".equals(format) ? "number" : "calendar".equals(format) ? "object" : "string";
+        }
         Object declared = decl.get("type");
         String t = declared == null ? "" : String.valueOf(declared).toLowerCase();
         boolean hasValue = decl.containsKey("value");

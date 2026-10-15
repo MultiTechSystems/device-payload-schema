@@ -151,8 +151,12 @@ public class Schema {
         Sampled.check(raw);
         // CR-2026-174: a checksum on an unsigned integer wide enough for its algorithm (PS-585).
         Checksum.check(raw);
+        // CR-2026-185: a checksum field sits where `from` counts from the frame (PS-608).
+        Checksum.checkPlacement(raw);
         // CR-2026-161: a lookup's labels are of one type (PS-571).
         Reports.check(raw);
+        // CR-2026-186: a `time` on a numeric field, with the keys of its format (PS-610 to PS-614).
+        TimeField.check(raw);
         Schema schema = new Schema();
         schema.pointers = DecodeRecord.pointerMap(raw);                // PS-572
         schema.repeatOnlyNames = Wave6a.repeatOnlyNames(raw);
@@ -722,6 +726,7 @@ public class Schema {
         String at = "Field '" + fm.get("name") + "': ";
         Numeral.check(fm);                                    // PS-560
         BitLabels.check(fm);                                  // PS-616, PS-617
+        Packed.check(fm);                                     // PS-621
         AsciiText.check(fm);                                  // PS-534, PS-593, PS-072
         if (fm.containsKey("match_value")) {
             throw new SchemaException(at + "match_value is withdrawn; write a signed type (sN), a "
@@ -1170,6 +1175,13 @@ public class Schema {
             // keeping `$_x` bound, so its value is reported.
             Map<String, Object> member = Wave6a.elementMember(element);
             String elementName = (String) member.get("name");
+            if (fm.get("packed_bits") instanceof Number bits) {
+                // PS-621 (CR-2026-189): the element reads its integer from bytes of its own
+                // width, big-endian, laid out from the bit stream (Packed.decode).
+                int[] width = Packed.width(element);
+                if (width != null) f.setPacked(bits.intValue(), width[0], width[1] == 1);
+                member.put("endian", "big");
+            }
             List<Map<String, Object>> one = new ArrayList<>();
             one.add(member);
             f.setFields(parseFields(one));
@@ -1247,6 +1259,8 @@ public class Schema {
         if (fm.get("numeral") instanceof String numeral) f.setNumeral(numeral);
         if (fm.get("nul") instanceof String nul) f.setNul(nul);
         f.setTerminator(AsciiText.terminatorOf(fm.get("terminator")));
+        f.setKeepTerminator(Boolean.FALSE.equals(fm.get("consume_terminator")));   // PS-619
+        f.setEndTerminates(Boolean.TRUE.equals(fm.get("end_terminates")));         // PS-619
         if (fm.get("checksum") instanceof Map<?, ?> checksum) {                 // PS-585
             f.setChecksum((Map<String, Object>) checksum, String.valueOf(fm.get("type")));
         }
@@ -1872,7 +1886,10 @@ public class Schema {
                 // later fields can reference, but is not reported. Without this an
                 // intermediate used to combine two words appeared in the output.
                 if (!field.getName().startsWith("_")) {
-                    Object reported = normalizeOutput(value);
+                    // PS-610 (CR-2026-186): reported as an instant in its format; a
+                    // reference still binds the number.
+                    Object reported = TimeField.isTimeField(field)
+                            ? TimeField.format(field, value) : normalizeOutput(value);
                     if (reported != null) {
                         String outputName = resolveFieldName(field, ctx);
                         if (!outputName.equals(field.getName())) {
@@ -2118,12 +2135,17 @@ public class Schema {
             }
             
             case ASCII -> {
-                if (field.getTerminator() != null) length = AsciiText.terminatedSpan(field, ctx);   // PS-593
+                int consumed = 0;
+                if (field.getTerminator() != null) {                     // PS-593, PS-619
+                    int[] span = AsciiText.terminatedSpan(field, ctx);
+                    length = span[0];
+                    consumed = span[1];
+                }
                 // PS-588 (CR-2026-175): `consume: 0` re-reads the span; the position stays.
                 int echoStart = ctx.getOffset();
                 byte[] data = ctx.read(length);
                 if (field.isEcho()) ctx.setOffset(echoStart);
-                else if (field.getTerminator() != null) ctx.setOffset(ctx.getOffset() + 1);   // consumed, not reported
+                else ctx.setOffset(ctx.getOffset() + consumed);   // consumed, not reported, or left
                 // PS-538: each byte is the ISO 8859-1 character of the same number, so the
                 // value is lossless and re-encodes to the same bytes (PS-537). US_ASCII
                 // decoded a byte above 0x7F as U+FFFD. PS-073's warning reports it.
@@ -2783,9 +2805,14 @@ public class Schema {
                 DecodeRecord rec = ctx.getRecord();
                 boolean pushed = rec != null && rec.push(field.getRaw(), "tlv", entryIndex);
                 Map<String, Object> caseResult;
+                // PS-486, PS-619: an entry with a length is decoded within it, so the end of
+                // the entry is the end of the data for its value.
+                int entryLimit = ctx.getLimit();
+                if (dataLength >= 0) ctx.setLimit(ctx.getOffset() + dataLength);
                 try {
                     caseResult = decodeFields(caseFields, ctx);
                 } finally {
+                    ctx.setLimit(entryLimit);
                     if (rec != null) rec.pop(pushed);
                 }
                 
@@ -3059,6 +3086,11 @@ public class Schema {
                 throw repeatLimitError(field, maxIterations, "count " + count,
                         ctx.getOffset(), ctx.getLimit());
             }
+            if (field.getPackedBits() > 0) {
+                // PS-621, PS-622 (CR-2026-189): the elements are read from one bit stream.
+                decodePacked(field, ctx, count, 0, iterations, carryState, result);
+                count = 0;
+            }
             
             for (int i = 0; i < count; i++) {
                 decodeElement(field, ctx, iterations, carryState, result);
@@ -3079,6 +3111,16 @@ public class Schema {
             }
             
             int endOffset = ctx.getOffset() + byteLen;
+            if (field.getPackedBits() > 0) {
+                // PS-621: as many elements as fit whole after the bit offset (CR-2026-189).
+                int count = Math.max(byteLen * 8 - field.getBitOffset(), 0) / field.getPackedBits();
+                if (count > maxIterations) {
+                    throw repeatLimitError(field, maxIterations, "count " + count,
+                            ctx.getOffset(), ctx.getLimit());
+                }
+                decodePacked(field, ctx, count, byteLen, iterations, carryState, result);
+                endOffset = ctx.getOffset();
+            }
 
             while (ctx.getOffset() < endOffset && iterations[0] < maxIterations) {
                 decodeElement(field, ctx, iterations, carryState, result);
@@ -3172,6 +3214,48 @@ public class Schema {
         }
 
         return result;
+    }
+
+    /**
+     * A packed repeat's elements (PS-621, PS-622, CR-2026-189): each element's bits, most
+     * significant first from the bit offset, sign-extended where its type is signed
+     * (PS-353), laid out as its type's bytes, big-endian, and decoded from those, so its
+     * sentinel, modifiers and lookup apply as to any element. The read position then moves
+     * to the next byte, or to the end of {@code byteLength} where that is further.
+     */
+    private void decodePacked(Field field, DecodeContext ctx, int count, int byteLength,
+                              int[] iterations, Map<String, Object> carryState, List<Object> result) {
+        int bits = field.getPackedBits(), offset = field.getBitOffset();
+        int span = Math.max((offset + count * bits + 7) / 8, byteLength);
+        int at = ctx.getOffset();
+        if (at + span > ctx.getLimit()) {
+            throw new SchemaException.BufferUnderflow(String.format(
+                    "Buffer underflow: need %d bytes at offset %d, but only %d remaining",
+                    span, at, Math.max(0, ctx.getLimit() - at))).named(field.getName(), "repeat");
+        }
+        byte[] data = ctx.getData();
+        int limit = ctx.getLimit();
+        int width = field.getPackedWidth() / 8;
+        try {
+            for (int i = 0; i < count; i++) {
+                long raw = 0;
+                for (int b = offset + i * bits; b < offset + (i + 1) * bits; b++) {
+                    raw = (raw << 1) | ((data[at + (b >> 3)] >> (7 - (b & 7))) & 1);
+                }
+                if (field.isPackedSigned() && raw >= (1L << (bits - 1))) raw -= 1L << bits;
+                byte[] element = new byte[width];
+                for (int k = width - 1; k >= 0; k--) {
+                    element[k] = (byte) raw;
+                    raw >>= 8;
+                }
+                ctx.setData(element, width);
+                ctx.setOffset(0);
+                decodeElement(field, ctx, iterations, carryState, result);
+            }
+        } finally {
+            ctx.setData(data, limit);
+            ctx.setOffset(at + span);
+        }
     }
 
     /**
@@ -3575,6 +3659,8 @@ public class Schema {
     }
 
     private Object decodeComputed(Field field, DecodeContext ctx) {
+        // PS-614 (CR-2026-186): the instant its parts name; null where a part has no value.
+        if (TimeField.hasParts(field)) return TimeField.fromParts(field, ctx);
         boolean computed = field.getRef() != null || field.getCompute() != null;
         if (computed && field.getGuard() != null && !guardPasses(field.getGuard(), ctx, false)) {
             // PS-444: a failing guard reports the declared fallback untouched - no

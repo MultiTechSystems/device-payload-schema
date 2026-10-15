@@ -196,6 +196,11 @@ func flaggedGroupGiven(group FlaggedGroup, data map[string]any) bool {
 // given. A supplied value is kept; the construct checks it agrees. A flagged mask that
 // disagrees with the groups given is rejected here. The input is not modified.
 func deriveInputs(fields []Field, data map[string]any, ctx *EncodeContext) (map[string]any, error) {
+	// PS-615 (CR-2026-186): a `parts` time field's value gives its part fields' values.
+	data, err := expandTimeParts(fields, data)
+	if err != nil {
+		return nil, err
+	}
 	derived, copied := data, false
 	set := func(name string, value any) {
 		if !copied {

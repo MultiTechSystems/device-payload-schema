@@ -232,10 +232,10 @@ implementation has a runner that reads the same YAML and the same vectors:
 
 | Implementation | Runner | Decode floor | Re-encode floor |
 |---|---|---|---|
-| Python | `tests/test_corpus_conformance.py` | every vector | 2290 |
-| Go | `go/schema/corpus_conformance_test.go` | 2901 | 2308 (plain API 2280) |
-| C# | `dotnet/PayloadSchema.Tests/CorpusConformanceTests.cs` | 2901 | 2291 |
-| Java | `bindings/java/.../CorpusConformanceTest.java` | 2901 | 2290 |
+| Python | `tests/test_corpus_conformance.py` | every vector | 2322 |
+| Go | `go/schema/corpus_conformance_test.go` | 2936 | 2340 (plain API 2312) |
+| C# | `dotnet/PayloadSchema.Tests/CorpusConformanceTests.cs` | 2936 | 2323 |
+| Java | `bindings/java/.../CorpusConformanceTest.java` | 2936 | 2322 |
 | C | `tools/c-corpus-harness.py` (builds each expressible schema through the struct API) | 575 of 575 attempted | n/a |
 
 These figures move with every schema added. `make check-floors` prints each floor beside
@@ -832,10 +832,10 @@ exercised to the best-covered part of the project:
 
 | | Runner | Round-trips |
 |---|---|---|
-| Python | `tests/test_encode_round_trip.py` | 2290 |
-| Go | `go/schema/corpus_encode_test.go` | 2308 (plain 2280) |
-| Java | `bindings/java/.../CorpusEncodeRoundTripTest.java` | 2290 |
-| C# | `dotnet/.../CorpusEncodeRoundTripTests.cs` | 2291 |
+| Python | `tests/test_encode_round_trip.py` | 2322 |
+| Go | `go/schema/corpus_encode_test.go` | 2340 (plain 2312) |
+| Java | `bindings/java/.../CorpusEncodeRoundTripTest.java` | 2322 |
+| C# | `dotnet/.../CorpusEncodeRoundTripTests.cs` | 2323 |
 | C | `src/test_encoder.c`, built by `make test-c` (unit tests, not a corpus round trip) | n/a |
 
 - **A name may be an object under one tag and a scalar under another, and a tlv encoder
@@ -3473,6 +3473,50 @@ improved. The Go, Java and C# corpus runners write per-vector reports only when
     schemas, declares `nul` or `terminator` or an `ascii` field without `length`, so none is
     rejected and no decode or encode output changes.
 
+- **CR-2026-188 (PS-593 amended, PS-619, PS-620; la-payload-schema `cr/0.5.8-apply-188`
+  80d8653, for 0.5.8): text to a terminator it does not consume, or to the end.** An `ascii`
+  field with `terminator` may declare `consume_terminator: false` (stop before the terminator
+  and leave it for the next field) and `end_terminates: true` (the end of the data also ends
+  the text; empty text is `""`; without it the end is still PS-593's error). Encode (PS-620):
+  with `consume_terminator: false` the terminator is never written; otherwise it is, also under
+  `end_terminates`, so a frame that ended without one re-encodes a byte longer; a value holding
+  the terminator is always PS-595's rejection. The yobiiq shape (an element of a channel byte
+  and a model running to the next 0xFF channel byte or the frame's end) decodes and round-trips.
+  - **Load (the prototype's text):** `Field 'a': consume_terminator and end_terminates belong to
+    a field with a terminator (PS-619)` and `Field 'a': end_terminates is true or false
+    (PS-619)`. Python `ascii_text_errors` (so the validator and the TS013 generator too), Go
+    `checkAsciiText`, Java `AsciiText.check`, C# `AsciiText.Check` (`BooleanOf` reads a plain
+    YAML 1.2 boolean).
+  - **Where:** Python `terminated_span` (now returns the span and the terminator bytes
+    consumed) and `encode_ascii(..., consume_terminator)`; the generator's ascii branch and the
+    runtime's string branch; Go `terminatedSpan` (`cr177.go`) with `Field.KeepTerminator`/
+    `EndTerminates`; Java `AsciiText.terminatedSpan` and `Encoder.encodeAscii`; C#
+    `AsciiText.TerminatedSpan` and `Helpers.EncodeAscii(..., writeTerminator)`.
+  - **"The end of the data" includes a tlv entry's declared length, and that needed a change
+    beyond the keys.** The prototype decodes an entry's value in a sub-context of its length
+    (`decode_tlv_value`); none of the five did, so a case body read the whole payload and an
+    `end_terminates` text in an entry ran into the next entry's tag. All five now cut the data
+    at the entry's end while its case body decodes (Python `entry_buf`, the codec's
+    `buf.slice`, Go `ctx.Data`, Java `setLimit`, C# `WithRegion`); a case body that reads past
+    its declared length is now PS-535 there, as PS-486 intends. Measured with Python over the
+    corpus and the registry (38902 vectors, decode output, errors and re-encoded bytes): no
+    vector changed.
+  - **Before:** every implementation ignored both keys - the terminator was always consumed
+    and the end was always PS-593's error - and the validator refused them as unknown keys.
+  - **C:** has no terminator; `tools/schema_binary.py` refuses both keys by name (PS-446) and
+    the C harness files them as C gaps.
+  - **Round trip:** `encode-round-trip.py` files a vector of an `end_terminates` field that
+    writes its terminator and does not re-encode as the inherent reason `end-terminated`.
+  - **Cases and fixture:** `tests/cr-2026-188-cases.yaml` (9 decode, 5 encode, 4 load; the
+    prototype's `TestCR2026188TerminatorOrEnd` and a reserve, a tlv entry, a found terminator
+    and `consume_terminator: true`) read by `test_cr_2026_188_cases.py` (reference and
+    generated codec), Go `cr188_test.go`, Java `CR2026188Test`, C# `CR2026_188Tests`. Fixture
+    `ascii-terminator-or-end` (5 vectors, `source: generated`): decode 2901 -> 2906 in Go, Java
+    and C#; re-encode +4 everywhere, all `repeat` 28 -> 32 (Python, Java 2290 -> 2294; C# 2291
+    -> 2295; Go 2308 -> 2312, plain 2280 -> 2284); port 2's frame the end ended does not.
+  - **Measured:** no corpus, library, example or registry schema declares either key, so none
+    is rejected and no decode or encode output changes.
+
 - **CR-2026-175 (PS-453 and PS-015 amended, PS-588, PS-589; la-payload-schema main 9e8957a, for
   0.5.7): a byte string that does not consume reports its span again.** A `bytes`, `hex` or
   `ascii` field declaring `consume: 0` reads and reports its span and leaves the read position,
@@ -3629,11 +3673,8 @@ improved. The Go, Java and C# corpus runners write per-vector reports only when
     runs it, and the TS013 generator embeds the same plan as `NORMALIZE_PLAN` with
     `NORMALIZE_RUNTIME_JS` (slim codecs too), only where some field declares `semantic`. A value
     with no unit on a path that has one, an unconvertible unit, and every value on a duplicate
-    path are left out with a warning. **One addition the prototype lacks:** TTN calls
-    `normalizeUplink` with decodeUplink's output and no fPort, so for a `ports` schema the
-    message is the one given by `input.fPort` if present, else the port entries whose
-    reportable keys hold every declared key of the data; where those disagree on placement,
-    nothing is placed, with a warning.
+    path are left out with a warning. Without an FPort, a `ports` schema's message is chosen by
+    PS-609 (CR-2026-185, below), which replaced the rule this CR added.
   - **Go, Java, C# and C** produce no normalized payload (the generated codec and the IL do).
     C has no `_meta`; `semantic` is an annotation C carries nothing for, so `schema_binary.py`
     does not refuse it.
@@ -3962,7 +4003,8 @@ improved. The Go, Java and C# corpus runners write per-vector reports only when
     Java and C# `FrameMeta` checksums with `fillChecksums`/`Fill`, C `schema_place_checksum`/
     `schema_fill_checksums`. Rejected as `Field '{name}': the bytes its checksum covers are
     not all written when it is reached (PS-587)` where peek bits are pending, where `from`
-    is past the field, and **inside a tlv entry or a repeat element or trailer**, which are
+    is past the field, and **inside a tlv entry or a repeat element** (a trailer too until
+    CR-2026-185, which lifts it and rejects the other two at load), which are
     encoded apart from the frame (the prototype's sub-context departure, applied to
     encoding). Measured before: Python, Go, Java, C#, the codec and C all ignored the key -
     a bad check value decoded with success, and encode took the value from the input
@@ -3971,8 +4013,9 @@ improved. The Go, Java and C# corpus runners write per-vector reports only when
     `schema_t` 52536 bytes, unchanged); the binary form refuses `checksum` (PS-446). The
     fixture is port-based, which the harness skips; split per port it passes 3 of 7, the
     rest failing on C's uppercase, 15-byte-capped `hex` (a C gap, not this CR's).
-  - **Not settled:** a checksum on a `byte_group` member is ignored by Python and refused by
-    C; the spec does not place one there.
+  - **Settled by CR-2026-185:** a checksum on a `byte_group` member (ignored by Python, refused
+    by C) is a load error everywhere (PS-608), and the encode refusal in a repeat trailer is
+    lifted; see its entry.
   - **Cases:** `tests/cr-2026-174-cases.yaml` (the prototype's `TestCR2026174Checksum` and
     the evidence's vendor frames: acrios sum8 from 6, emu crc8/smbus, jooby xor8 0x55, seeed
     crc16/kermit LE), read by `test_cr_2026_174_cases.py` (reference, validator, codec),
@@ -3985,6 +4028,63 @@ improved. The Go, Java and C# corpus runners write per-vector reports only when
     (185 -> 191); the Go, Java and C# text scans file it `match` (173 -> 179) because
     `on_mismatch:` contains `match:`. No corpus or registry schema declares the key, so no
     other vector changed (failing sets diffed in Go, Java and C#).
+
+- **CR-2026-185 (PS-585 amended, PS-608, PS-609; la-payload-schema branch
+  `cr/0.5.8-apply-184-185`, for 0.5.8): where a checksum may sit, and normalizeUplink() without
+  an FPort.**
+  - **PS-608 load:** a checksum field as a `byte_group` member, or within a `tlv` entry, a
+    `records` entry or a repeat's `fields`/`element`, is rejected in the prototype's text and
+    walk (`check_checksum_placement`, over the `$ref`-spliced header, fields and ports, first
+    violation): `Field 'c': a checksum field cannot sit within a tlv entry; its `from` counts
+    from the frame (PS-608)` (`a byte_group`, `a records entry`, `a repeat element`). Python
+    `checksum_placement_errors` (in `schema_iterator_errors`: interpreter, validator, TS013
+    generator), Go `checkChecksumPlacement` (`cr185.go`, from `ParseSchema`), Java
+    `Checksum.checkPlacement`, C# `Checksum.CheckPlacement`. C has no load step for the struct
+    API: the same text comes from the byte_group check (it was a PS-446 refusal) and from the
+    tlv case loop when a decode reaches the field; `schema_binary.py` refuses `checksum`
+    already. Allowed: top level, port entry, match case, flagged group, after a construct
+    with `reserve`, and a repeat's `trailer`.
+  - **PS-608 empty range:** decode `Field 'c': the checksum range starts at byte 1, at or after
+    the field at byte 1, so it covers nothing (PS-608)` (was `from > p`, PS-585; `from == p`
+    compared the seed alone); encode `... starts at byte 1, where the field is, so it covers
+    nothing (PS-608)` where `from` equals the field's offset (past it stays PS-587, as the
+    prototype has it). All six.
+  - **Trailer encode lifted** (CR-2026-174 refused it): Python `checksum_apart` replaces the
+    `_ps564_depth` test (a tlv entry and a repeat element only) and `_encode_repeat` carries
+    the trailer's placeholders shifted past the elements; the runtime's `ctx.ckApart`; Go drops
+    `checksumApart` (its trailer is on the frame's context); Java and C# pass the trailer's
+    checksum slots through `prefixed`/`FrameMeta.Prefixed`. Measured before: every encoder
+    refused `trailer: [{checksum}]` with PS-587; decoders already read it at its frame offset.
+  - **PS-609:** Python `run_normalize_plan`/`_run_message`, runtime `normalizeUplink`/
+    `normMessage`/`normSame`. Two differences from #175 fixed: candidates agreed when their
+    static *plans* were equal, where PS-609 compares the *placements* of this data (an entry
+    with an extra semantic field the data lacks no longer blocks), and the warnings are the
+    prototype's: `no FPort given and FPorts 1, 2 would place the values differently; nothing is
+    placed (PS-609)` / `no FPort given and no uplink port entry reports every key of the data;
+    nothing is placed (PS-609)`, where #175 said `normalizeUplink cannot tell which port entry
+    decoded this data ... (PS-598)` and gave no warning with no candidate. Candidates now take
+    every key of the data, as the prototype does (#175 ignored a key no entry declares, and
+    treated a `name_from` entry as covering anything); **one departure:** a `_` key
+    (`_quality`) is interpreter metadata and is ignored, since the prototype's decode emits
+    none and counting it left 108 registry vectors with no candidate.
+  - **Measured** (Python, read only): no corpus, example or registry schema declares a misplaced
+    checksum (registry: none declares `checksum`); no decode or encode output changes outside
+    the fixtures. normalize() without an FPort over every decoded vector of a `ports` schema with
+    `semantic`: registry 180 schemas, 8312 vectors, 82 newly placed (7 schemas: lht65n,
+    lht65n-vib, trackerd, lw001-bgpro, scd18, filling-degree-sensor, soil-moisture-sensor), 287
+    warning texts changed, none lost;
+    corpus 4 schemas, 5 warning texts changed.
+  - **Cases:** `tests/cr-2026-185-cases.yaml` (`decode`, `cases`, `load` read by
+    `test_cr_2026_185_cases.py`, Go `cr185_test.go`, Java `CR2026185Test`, C# `CR2026_185Tests`;
+    `normalize` by the reference and the generated codec, full and slim) mirrors the
+    prototype's `TestCR2026185ChecksumPlacementAndNormalize`. `cr-2026-174-cases.yaml`'s empty
+    range and range-after cases now expect PS-608, and its repeat-element and tlv-entry encode
+    cases moved to the 185 load list. C: `test_a_checksum_range_that_covers_nothing`.
+  - **Floors:** fixture `checksum-placement.yaml` (7 vectors: match case, trailer x2, after a
+    reserving tlv, flagged group, and an `expected_error` PS-608): decode 2901 -> 2908 in Go, Java
+    and C#; re-encode +6, all `tlv` (Python and Java 2290 -> 2296, C# 2291 -> 2297, Go 2308 ->
+    2314, plain 2280 -> 2286). Every Go, Java and C# figure read from its own run. The vectors
+    pass on both paths of `tools/vector-verdicts.py`; mutation score 95%.
 
 - **CR-2026-181 (PS-601, PS-602; PS-081, PS-527 and PS-551 amended; la-payload-schema main, for
   0.5.8): an encoder writes a `bytes`, `hex` or `base64` value exactly as given.**
@@ -4031,6 +4131,120 @@ improved. The Go, Java and C# corpus runners write per-vector reports only when
     decode +5 in Go, Java and C#; re-encode and `tlv` +5 everywhere (Python and Java 2239 ->
     2244, C# 2240 -> 2245, Go 2257 -> 2262, plain 2229 -> 2234). No other corpus vector's
     round trip changed (failing sets diffed against master).
+
+- **CR-2026-186 (PS-610 to PS-615; la-payload-schema `cr/0.5.8-apply-186`, for 0.5.8): a field
+  reports a time.** A numeric field (an integer, float, nibble-decimal or minifloat type, a bit
+  range, or a computed `number`/`integer`) may declare `time: {format, epoch, ...}`. Its value
+  after the modifiers counts seconds from `epoch` (1970 where absent), and the field is reported
+  as that UTC instant: `unix` (seconds, or integer `milliseconds`, since 1970 or `since`),
+  `iso8601` (`fraction: N` digits, else digits only where the value has them), `calendar`
+  (PS-410's object, `month_labels` and `keys` inside `time`) or `pattern` (`%Y %m %d %H %M %S %L
+  %b %a %%`). A `type: number` field may take the instant from `parts` decoded earlier (PS-614).
+  - **Spec session rulings beyond the draft, all implemented:** milliseconds, `fraction` and `%L`
+    truncate; `time` beside `lookup` is rejected; a part that is not whole, or parts naming no
+    date, is a decode error naming the field; `type: number` with `time` and neither `parts`
+    nor a computation is rejected at load; a part that reads no bytes (an `idiv`/`mod` part) and
+    a pattern lacking `%Y`, `%m`/`%b`, `%d`, `%H`, `%M` or `%S` decode but are refused for
+    encoding (as PS-606); `%a` is checked against the date on encode.
+  - **One rule decides the hooks:** the value is formatted where it is *reported*, so a
+    reference binds the number and `valid_range` compares it. Encode converts the input to the
+    seconds count at the one choke point before the modifiers invert (`_reverse_modifiers`,
+    `encReverseModifiers`, Go `encodeField`/`rawForField`/`caseTakes`, Java and C#
+    `reverseModifiers`), and `expand_time_parts` runs at the start of every field list's input
+    derivation (`_derive_inputs` and its ports) so the part fields get their values.
+  - **Instants are exact decimals**, as the prototype's `Decimal`: a double enters through its
+    shortest decimal text (Python `repr`, `String(v)`, Go `FormatFloat(-1)` into `big.Rat`, Java
+    `BigDecimal(Double.toString)`, C# `"R"`), and dates use days-from-civil arithmetic, never the
+    host's clock or zone. The generated codec avoids BigInt (whole seconds plus a fraction's
+    digit string), and carries the time runtime only where a schema declares `time`, so no
+    existing codec changed.
+  - **Where:** Python block "CR-2026-186" in `tools/schema_interpreter.py` (`time_field_error`,
+    `time_errors` from `schema_iterator_errors`, `format_time`, `time_from_parts`, `parse_time`,
+    `time_input_seconds`, `expand_time_parts`, `reports_of`); the generator's `TIME_RUNTIME_JS`
+    (`timeOut`, `timeParts`, `timeParse`, `encTimeParts`) and `time_report_js`; Go
+    `go/schema/cr186.go`; Java `TimeField`; C# `TimeFields.cs`. `generate_output_schema.py`
+    types the field by its format, and `validate_schema.py` accepts `parts` as a `number`'s
+    source. Vocabulary: `time` is a field key and a context of its own in
+    `tools/schema_vocabulary.py` and `schemas/payload-schema.json` (closed), with a section in
+    the language reference.
+  - **C:** has no such field; `tools/schema_binary.py` refuses `time` by name (PS-446).
+  - **Measured before:** all five ignored the key and reported the raw number (`54A48E12` from
+    the GPS epoch read 1420070401); a `parts` field was absent in Python, Java and C# and **0 in
+    the generated codec**; an encode of the ISO text failed in Python with `could not convert
+    string to float`. No load case was rejected anywhere.
+  - **Departures:** Go and C# accept a whole double (2015.0) as a calendar member, since their
+    decoders hand JSON numbers on as doubles; the "outside years 1 to 9999" text writes the
+    instant in each language's own decimal form (no test reaches it). A prototype message that
+    prints the parts mapping lists the parts in the order year to second.
+  - **Cases:** `tests/cr-2026-186-cases.yaml` (the prototype's 18 tests as 20 decode, 16 encode,
+    15 load and 4 `_meta` rows), read by `test_cr_2026_186_cases.py` (reference, validator,
+    generator, binary converter), Go `cr186_test.go`, Java `CR2026186Test`, C# `CR2026_186Tests`.
+  - **Fixture** `_language-conformance/time-field.yaml`: an RS1xx calendar per element, MCCI's
+    iso8601 `fraction: 3` from the GPS epoch, `toUTCString` as a pattern, milliseconds with
+    `since`, and date parts; 9 vectors, all round-tripping, mutation score 100%. Floors: decode
+    2901 -> 2910 in Go, Java and C#; re-encode +9 everywhere, all `repeat` (28 -> 37), since
+    port 1 files the schema there (Python and Java 2290 -> 2299, C# 2291 -> 2300, Go 2308 ->
+    2317, plain 2280 -> 2289).
+  - **Corpus and registry:** no schema in `schemas/devices`, `schemas/library`, `examples` or
+    the private registry (543 schemas at 00bd8cd) declares `time`, so none is rejected; decode
+    and re-encode output of all 38802 vectors of the corpus and the registry is identical to
+    master's (Python, diffed).
+- **CR-2026-189 (PS-621 to PS-623, PS-544 amended; la-payload-schema `cr/0.5.8-apply-189`, for
+  0.5.8): a repeat's elements packed in bits.** A repeat with `element` may declare
+  `packed_bits` (1 to 32) and `bit_offset` (0 to 7, default 0): one big-endian bit stream, MSB
+  first, the first element `bit_offset` bits into the byte at the read position, each element
+  the next `packed_bits` bits, sign-extended where the element type is signed (PS-353), then
+  decoded as the element type's integer, so its sentinel, modifiers and lookup apply. With
+  `byte_length` the count is floor((byte_length x 8 - bit_offset) / packed_bits); afterwards
+  the position moves to the next byte, or to the end of `byte_length` where that is further
+  (PS-622). An encoder inverts each element through its modifiers, rejects one that does not fit
+  (`Repeat 'v': element 0 is 16, which does not fit in 4 bits (PS-623)`), ORs the first byte
+  into the bits the fields before it left pending, and pads with 0 bits (PS-623).
+  - **How, in every language:** each element's bits are laid out as its type's bytes, big-endian
+    two's complement, and the ordinary element decoder reads them (the element is given
+    `endian: big`); encode runs the ordinary element encoder into its own buffer and packs the
+    integer it wrote. The repeat's frame marks the bits before `bit_offset` unwritten, so the
+    OR passes the PS-551 overlay check and a peek there is still checked. Python
+    `packed_element_width`/`packed_repeat_error`/`packed_layout`, the packed branch of
+    `_decode_repeat` and `_encode_packed_elements`; the generator's `packed` branch of the
+    repeat decode and the runtime's `encPackedElements`; Go `go/schema/cr189.go`
+    (`decodePacked`, `encodePackedRepeat`, `writeCovered`); Java `Packed`,
+    `Schema.decodePacked`, `Encoder.encodePacked` (a `FrameMeta` with the first byte's
+    covered mask); C# `Cr189.cs`, `DecodeRepeat`'s `Packed`, `SchemaEncoder.EncodePacked`
+    (`_frameMeta`).
+  - **Load (PS-621), the prototype's text** (`check_packed_repeats`), first rule broken:
+    `Field 'b': packed_bits and bit_offset belong to a repeat with `element` (PS-621)` (with
+    `; did you mean `bit`?` on a `bool`), `Repeat 'v': packed_bits is an integer from 1 to 32`,
+    `... bit_offset is an integer from 0 to 7`, `... a packed element is one field of an integer
+    type at least 9 bits wide`, `... a packed repeat declares count or byte_length`. Python
+    `packed_repeat_errors` (from `schema_iterator_errors`: interpreter, validator, generator),
+    Go `packedRepeatError` (from `checkFieldRules`), Java `Packed.check` (from `checkWave4`),
+    C# `Cr189.Check` (beside `Numeral.Check`), each over every field and every `element`.
+  - **`bit_offset` was a vocabulary hint** ("`bit_offset:` was never read"); it is now a key.
+    Java's and Go's legacy `BitOffset` slots carry it for the repeat. Both keys are in
+    `tools/schema_vocabulary.py`, `schemas/payload-schema.json` and the language reference.
+  - **byte_length on encode:** the elements are padded to a literal or given `byte_length`, as
+    the prototype does; a derived one is the elements' minimal span. The decoder reads as many
+    elements as fit whole, so a list shorter than that count does not round-trip - the prototype
+    accepts it, and so does this repository.
+  - **PS-544, measured before:** a null element's sentinel was already written raw by all five
+    (Python, the runtime, Go, Java, C#): each writes an absent value with a sentinel as the
+    sentinel's raw bits through the field list. The prototype's bug (0xFFFF through `div: 10`
+    as 0x2666) was not here. Cases pin it unpacked through `div` and `mult`, and packed.
+  - **C:** has no repeat; `tools/schema_binary.py` refuses both keys by name (PS-446).
+  - **Cases:** `tests/cr-2026-189-cases.yaml` (the prototype's twelve, a `bool` hint and two more
+    PS-544 cases), read by `test_cr_2026_189_cases.py` (reference and generated codec), Go
+    `cr189_test.go`, Java `CR2026189Test`, C# `CR2026_189Tests`. Fixture
+    `_language-conformance/repeat-packed-bits.yaml` (the Nexelec CO2 history with its null,
+    signed values by `byte_length`, and 3-bit codes through a lookup; six vectors, all
+    round-tripping, mutation score 100%). Floors: decode 2901 -> 2907 in Go, Java and C#;
+    re-encode +6 everywhere (Python and Java 2290 -> 2296, C# 2291 -> 2297, Go 2308 -> 2314,
+    plain 2280 -> 2286), `repeat` 28 -> 34. On top of CR-2026-185, -186 and -188: decode 2922 ->
+    2928, re-encode Python and Java 2309 -> 2315, C# 2310 -> 2316, Go 2327 -> 2333, plain 2299 ->
+    2305, `repeat` 41 -> 47.
+  - **Corpus and registry:** no schema in `schemas/devices`, `schemas/library`, `examples` or
+    the private registry declares `packed_bits` or `bit_offset`, and every new path is gated on
+    `packed_bits`, so no decode, encode or load result changes.
 
 ## Converting a vendor codec
 

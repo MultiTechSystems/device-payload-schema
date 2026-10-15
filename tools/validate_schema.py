@@ -1229,7 +1229,8 @@ def validate_field_list(fields: List[Dict], path: str, errors: List[str],
             
             # Computed field (type: number - supports ref, polynomial, compute, guard)
             if ftype == 'number':
-                has_valid_source = any(key in fld for key in ('ref', 'compute', 'value'))
+                has_valid_source = any(key in fld for key in ('ref', 'compute', 'value')) or (
+                    isinstance(fld.get('time'), dict) and 'parts' in fld['time'])  # PS-614
                 if not has_valid_source:
                     errors.append(f"{path}[{i}] ({name}): type 'number' requires 'ref', 'compute' or 'value'")
                 

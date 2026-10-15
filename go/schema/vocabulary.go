@@ -313,12 +313,20 @@ func checkFieldRules(field map[string]any, at string) error {
 	if err := checkStringTemplate(field); err != nil {
 		return err
 	}
+	// PS-610 to PS-614 (CR-2026-186): a numeric field's `time` mapping.
+	if err := checkTimeField(field); err != nil {
+		return err
+	}
 	// PS-560 (CR-2026-150): numeral is decimal or hex, on an ascii field only.
 	if err := checkNumeral(field); err != nil {
 		return err
 	}
 	// PS-616, PS-617 (CR-2026-187): bit_labels on an unsigned integer or bit range.
 	if err := checkBitLabels(field); err != nil {
+		return err
+	}
+	// PS-621 (CR-2026-189): packed_bits and bit_offset on a repeat of integers only.
+	if err := packedRepeatError(field); err != nil {
 		return err
 	}
 	// PS-534, PS-593 (CR-2026-177): nul and terminator on an ascii field.

@@ -200,6 +200,8 @@ C_UNSUPPORTED_KEYS = {
     "encoding": "the C interpreter has no sign_magnitude/bcd/gray encodings",
     "nul": "the C interpreter has no nul modes on ascii (PS-534)",
     "terminator": "the C interpreter has no terminator-delimited ascii (PS-593)",
+    "consume_terminator": "the C interpreter has no terminator-delimited ascii (PS-619)",
+    "end_terminates": "the C interpreter has no terminator-delimited ascii (PS-619)",
     "numeral": "the C interpreter holds ascii text, not the integer it spells (PS-560)",
     "bit_labels": "the C interpreter has no bit_labels; it reports a number, not the labels of its set bits (PS-616)",
     "join": "the C interpreter has no bit_labels (PS-616)",
@@ -209,6 +211,7 @@ C_UNSUPPORTED_KEYS = {
     # field record has no slot for its algorithm, seed, `from` or `on_mismatch`.
     "checksum": "this format has no checksum record (PS-585)",
     "template": "the C interpreter has no template string; a string joined from values is not built (PS-590)",
+    "time": "the C interpreter has no time field; an instant reported as text, an object or a converted count is not built (PS-610, PS-446)",
     "sentinel": "the C interpreter has no sentinel (PS-427)",
     "out_of_range": "the C interpreter has no out_of_range: omit (PS-428)",
     "default": ("the C interpreter has no enum default, and no field default to write "
@@ -227,6 +230,9 @@ C_UNSUPPORTED_KEYS = {
     "index_base": "this format has no repeat record (PS-530)",
     # CR-2026-156: a repeat's sample interval (PS-567).
     "sampled": "this format has no repeat record (PS-567)",
+    # CR-2026-189: a repeat's elements packed in bits (PS-621 to PS-623).
+    "packed_bits": "this format has no repeat record (PS-621)",
+    "bit_offset": "this format has no repeat record (PS-621)",
     # CR-2026-118: several records from one repeat element (PS-541).
     "records": "this format has no repeat record (PS-541)",
     "fields": "this format has no nested object record",

@@ -1179,6 +1179,26 @@ final class Encoder {
             throw new MissingFieldException(name);
         }
         Long count = repeatSize(field, field.getCount(), data, siblings);
+        if (field.getPackedBits() > 0) {
+            // PS-623 (CR-2026-189): padded to a byte_length the input gives, as to a literal
+            // one; the bits before bit_offset are the pending bits of the fields before it.
+            byte[] packed = encodeRepeatElements(field, data, list, count);
+            FrameMeta meta = frameMeta.remove(packed);
+            Long length = repeatSize(field, field.getByteLength(), data, siblings);
+            if (length != null && packed.length < length) {
+                byte[] padded = java.util.Arrays.copyOf(packed, length.intValue());
+                byte[] covered = java.util.Arrays.copyOf(meta.covered(), length.intValue());
+                java.util.Arrays.fill(covered, packed.length, covered.length, (byte) 0xFF);
+                packed = padded;
+                meta = new FrameMeta(covered, java.util.List.of());
+            }
+            if (length != null && packed.length != length) {
+                throw new SchemaException.EncodeException("Repeat '" + name + "' encodes to "
+                        + packed.length + " bytes for a byte_length of " + length + " (PS-551)");
+            }
+            frameMeta.put(packed, meta);
+            return packed;
+        }
         ByteBuf out = new ByteBuf();
         out.write(encodeRepeatElements(field, data, list, count));
         Long byteLength = repeatSize(field, field.getByteLength(), data, siblings);
@@ -1190,8 +1210,16 @@ final class Encoder {
         // PS-385: the elements, then the trailer, whose values sit beside the repeat.
         if (field.getTrailer() != null && !field.getTrailer().isEmpty()) {
             byte[] trailer = encodeFieldList(field.getTrailer(), data);
+            FrameMeta meta = frameMeta.get(trailer);
             checkPeeks(trailer);                                         // PS-551
+            int elements = out.toArray().length;
             out.write(trailer);
+            if (meta != null && !meta.checksums().isEmpty()) {
+                // CR-2026-185 (PS-608): a checksum in the trailer is filled with the frame,
+                // at its offset after the elements.
+                frameMeta.put(trailer, new FrameMeta(null, List.of(), meta.checksums(), List.of()));
+                return prefixed(elements, trailer, out.toArray());
+            }
         }
         return out.toArray();
     }
@@ -1305,6 +1333,7 @@ final class Encoder {
             throw new SchemaException.EncodeException("Repeat '" + name + "' is given "
                     + list.size() + " values for a count of " + count + " (PS-551)");
         }
+        if (field.getPackedBits() > 0) return encodePacked(field, list);
 
         String index = field.getIndex();
         ByteBuf out = new ByteBuf();
@@ -1334,6 +1363,60 @@ final class Encoder {
             out.write(encoded);
         }
         return out.toArray();
+    }
+
+    /**
+     * PS-623 (CR-2026-189): each element, inverted through its modifiers as any element is,
+     * in {@code packed_bits} bits, most significant bit first, from {@code bit_offset}, the
+     * last byte padded with 0 bits. A null is the element's first sentinel, raw (PS-544).
+     * The bits before {@code bit_offset} are marked unwritten, so the bits the fields before
+     * it left pending are ORed into them (PS-551, PS-622).
+     */
+    private byte[] encodePacked(Field field, List<Object> list) {
+        String name = field.getName();
+        int bits = field.getPackedBits(), offset = field.getBitOffset();
+        boolean signed = field.isPackedSigned();
+        long low = signed ? -(1L << (bits - 1)) : 0, high = signed ? (1L << (bits - 1)) - 1 : (1L << bits) - 1;
+        int span = (offset + list.size() * bits + 7) / 8;
+        if (field.getByteLength() instanceof Number n) span = Math.max(span, n.intValue());
+        byte[] out = new byte[span];
+        String index = field.getIndex();
+        for (int position = 0; position < list.size(); position++) {
+            Map<String, Object> element = stringKeyed((Map<?, ?>) list.get(position));
+            if (index != null) {
+                element = new LinkedHashMap<>(element);
+                element.put(index, (long) position + field.getIndexBase());   // PS-530
+            }
+            boolean pushed = rec != null && rec.push(field.getRaw(), "repeat", position);
+            byte[] encoded;
+            try {
+                encoded = encodeObjectMembers(field.getFields(), element);
+            } finally {
+                if (rec != null) rec.pop(pushed);
+            }
+            frameMeta.remove(encoded);
+            carriedTail.remove(encoded);
+            long number = 0;
+            for (int i = 0; i < encoded.length; i++) {
+                if (i == 0 && signed && (encoded[0] & 0x80) != 0) number = -1;
+                number = (number << 8) | (encoded[i] & 0xFF);
+            }
+            if (number < low || number > high) {
+                throw new SchemaException.FieldEncodeException("Repeat '" + name + "': element "
+                        + position + " is " + number + ", which does not fit in " + bits + " bits (PS-623)");
+            }
+            for (int b = 0; b < bits; b++) {
+                if (((number >> (bits - 1 - b)) & 1) != 0) {
+                    int at = offset + position * bits + b;
+                    out[at >> 3] |= (byte) (1 << (7 - (at & 7)));
+                }
+            }
+        }
+        byte[] covered = new byte[span];
+        java.util.Arrays.fill(covered, (byte) 0xFF);
+        if (span > 0) covered[0] = (byte) (0xFF >> offset);
+        frameMeta.put(out, new FrameMeta(covered, List.of()));
+        return out;
     }
 
     // --- PS-551: what the input fixes ------------------------------------------------
@@ -1556,6 +1639,7 @@ final class Encoder {
      * itself is not modified.
      */
     private Map<String, Object> deriveInputs(List<Field> list, Map<String, Object> data) {
+        data = TimeField.expandParts(list, data);                 // PS-615 (CR-2026-186)
         Map<String, Object> derived = new LinkedHashMap<>(data);
         if (rec != null) recordedInputs(list, data, derived);                   // PS-573
         for (Field f : list) {
@@ -3051,6 +3135,11 @@ final class Encoder {
      * reaches integer parsing as "Class A".
      */
     private Object reverseModifiers(Object value, Field field) {
+        if (TimeField.isTimeField(field)) {
+            // PS-615 (CR-2026-186): the value in its format, as the count of seconds since the
+            // epoch that PS-610 reads; the modifiers below then invert.
+            value = TimeField.inputSeconds(field, value);
+        }
         // The value as given, for a PS-168 rejection to name (PS-552).
         givenField = field;
         givenValue = value;
@@ -3509,7 +3598,10 @@ final class Encoder {
                 break;
             }
         }
-        if (terminator != null) {                                   // PS-595
+        if (terminator != null && field.isKeepTerminator()) {
+            return raw;                     // PS-620: the field after it writes the terminator
+        }
+        if (terminator != null) {                                   // PS-595, PS-620
             byte[] out = java.util.Arrays.copyOf(raw, raw.length + 1);
             out[raw.length] = (byte) (int) terminator;
             return out;

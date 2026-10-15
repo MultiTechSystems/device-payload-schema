@@ -65,6 +65,8 @@ public static partial class Meta
         }
         if (Has(field, "bit_labels") && Value(field, "bit_labels") != null)       // PS-616 (CR-2026-187)
             return Has(field, "join") ? "string" : "array";
+        if (Get(field, "time") is YamlMappingNode time)                                 // PS-610 (CR-2026-186)
+            return Value(time, "format") switch { "unix" => "number", "calendar" => "object", _ => "string" };
         var declared = Value(field, "type");
         var t = declared == null ? "" : Convert.ToString(declared, System.Globalization.CultureInfo.InvariantCulture)!.ToLowerInvariant();
         var hasValue = Has(field, "value");

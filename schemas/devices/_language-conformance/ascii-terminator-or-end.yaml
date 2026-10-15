@@ -1,0 +1,66 @@
+# Text that runs to a terminator byte it leaves unread, or to the end of the frame
+# (PS-593, PS-619, PS-620, CR-2026-188). Port 1 is the yobiiq shape: each element is a
+# channel byte and a model name that runs to the next element's 0xFF channel byte, or to
+# the end of the frame for the last one. The 0xFF is the next element's first byte, so it
+# is not consumed by the text, and an encoder does not write it after the text.
+# Port 2 ends its text at a 0x00 or at the end; an encoder always writes the 0x00, so a
+# frame that ended without one does not re-encode to itself. An empty frame on port 2 is
+# empty text; the shared cases in tests/cr-2026-188-cases.yaml hold it, since an empty
+# payload is not read as a decode vector by every runner.
+name: probe_ascii_terminator_or_end
+endian: big
+ports:
+  1:
+    fields:
+    - name: devices
+      type: repeat
+      until: end
+      fields:
+      - name: channel
+        type: u8
+      - name: model
+        type: ascii
+        terminator: 0xFF
+        consume_terminator: false
+        end_terminates: true
+  2:
+    fields:
+    - name: label
+      type: ascii
+      terminator: 0x00
+      end_terminates: true
+test_vectors:
+- name: two_elements_the_last_ended_by_the_frame
+  source: generated
+  fPort: 1
+  payload: "FF454D34333031FF58"
+  expected:
+    devices:
+    - {channel: 255, model: EM4301}
+    - {channel: 255, model: X}
+- name: other_channels_and_one_element
+  source: generated
+  fPort: 1
+  payload: "0141FF4243"
+  expected:
+    devices:
+    - {channel: 1, model: A}
+    - {channel: 255, model: BC}
+- name: empty_texts
+  source: generated
+  fPort: 1
+  payload: "FFFF"
+  expected:
+    devices:
+    - {channel: 255, model: ""}
+    - {channel: 255, model: ""}
+- name: text_to_the_end
+  source: generated
+  fPort: 2
+  payload: "616263"
+  expected: {label: abc}
+- name: text_to_its_terminator
+  source: generated
+  fPort: 2
+  payload: "61626300"
+  expected: {label: abc}

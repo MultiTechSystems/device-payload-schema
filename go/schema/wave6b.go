@@ -353,5 +353,6 @@ func encodeSentinel(field Field, ctx *EncodeContext) error {
 	raw.Transform, raw.Modifiers = nil, nil
 	raw.Lookup, raw.LookupArray, raw.LookupDefault = nil, nil, nil
 	raw.Encoding = ""
+	raw.Time = nil // a sentinel is a raw reading, not an instant (CR-2026-186)
 	return encodeField(raw, float64(field.Sentinel[0]), ctx)
 }

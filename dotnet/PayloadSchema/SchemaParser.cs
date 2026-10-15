@@ -277,6 +277,7 @@ public static partial class SchemaParser
         CheckFieldNames(root);
         CheckSampled(root);    // PS-569 (CR-2026-156)
         PayloadSchema.Checksum.Check(root);    // PS-585 (CR-2026-174)
+        PayloadSchema.Checksum.CheckPlacement(root);    // PS-608 (CR-2026-185)
         Meta.CheckLookupTypes(root);    // PS-571 (CR-2026-161)
         schema.RepeatOnlyNames = RepeatOnlyNames(root);
         // PS-491 (CR-2026-096): one reported name's declarations in one field list agree
@@ -465,6 +466,7 @@ public static partial class SchemaParser
         var type = fm.TryGetValue("type", out var t) ? Scalar(t) : "";
         Numeral.Check(fm);                                              // PS-560
         BitLabels.Check(fm);                                            // PS-616, PS-617
+        Cr189.Check(fm);                                                // PS-621
         AsciiText.Check(fm);                                            // PS-534, PS-593, PS-072
         if (fm.Children.ContainsKey(new YamlScalarNode("match_value")))
             throw new InvalidOperationException($"Field '{name}': match_value is withdrawn; write a signed "
@@ -699,6 +701,7 @@ public static partial class SchemaParser
             CheckAnnotations(fieldMap);       // PS-510
             CheckWave4(fieldMap);
             TemplateStrings.Check(fieldMap, aggregates);   // PS-361, PS-590, PS-532, PS-430
+            TimeFields.Parse(fieldMap);       // PS-610 to PS-614 (CR-2026-186)
             CheckLookupTemplate(fieldMap);    // PS-407
             if (fieldMap.TryGetValue("byte_group", out var group))
                 CheckByteGroup(fieldMap, group);   // PS-070, PS-397
@@ -753,6 +756,7 @@ public static partial class SchemaParser
             f.Name = Scalar(name);
         if (fm.TryGetValue("template", out var templateText) && templateText is YamlScalarNode)
             f.Template = Scalar(templateText);                             // PS-590
+        f.Time = TimeFields.Parse(fm);                                     // PS-610 (CR-2026-186)
 
         if (fm.TryGetValue("type", out var typeNode))
         {
@@ -985,6 +989,18 @@ public static partial class SchemaParser
                     + "that declares `type`, not a construct (PS-545)");
             f.Fields = ParseFields(elementSeq);
             f.ElementName = elementName;
+            if (fm.TryGetValue("packed_bits", out var packedNode) && YamlInt(packedNode) is { } pb
+                && Get(fm, "element") is YamlMappingNode packedElement
+                && Cr189.Width(packedElement) is var (pw, ps))
+            {
+                // PS-621 (CR-2026-189): the element reads its integer from bytes of its own
+                // width, big-endian, laid out from the bit stream (DecodeRepeat's Packed).
+                f.PackedBits = (int)pb;
+                f.BitOffset = fm.TryGetValue("bit_offset", out var bo) && YamlInt(bo) is { } bov ? (int)bov : 0;
+                f.PackedWidth = pw;
+                f.PackedSigned = ps;
+                f.Fields[0].Endian = "big";
+            }
         }
         if (fm.TryGetValue("identity", out var identityNode)) f.Identity = Scalar(identityNode);
         if (f.Type == FieldType.Repeat)
@@ -1036,6 +1052,10 @@ public static partial class SchemaParser
         if (fm.TryGetValue("nul", out var nulNode)) f.Nul = Scalar(nulNode);
         if (fm.TryGetValue("terminator", out var termNode) && AsciiText.ParseInteger(termNode) is long tv)
             f.Terminator = (int)tv;
+        if (fm.TryGetValue("consume_terminator", out var ctNode))                 // PS-619
+            f.KeepTerminator = AsciiText.BooleanOf(ctNode) == false;
+        if (fm.TryGetValue("end_terminates", out var etNode))                     // PS-619
+            f.EndTerminates = AsciiText.BooleanOf(etNode) == true;
         f.Checksum = PayloadSchema.Checksum.Parse(fm);                    // PS-585 (CR-2026-174)
         if (fm.TryGetValue("byte_group", out var bgNode))
         {
