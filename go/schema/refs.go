@@ -351,3 +351,40 @@ func cloneNode(node *yaml.Node) *yaml.Node {
 	}
 	return &copied
 }
+
+// stringKeyedDocument gives every mapping of the resolved document string keys, except
+// under definitions and test_vectors, which are kept as written (as expandRawRefs left
+// them before CR-2026-168 moved resolution onto the node tree).
+func stringKeyedDocument(raw map[string]any) map[string]any {
+	if raw == nil {
+		return nil
+	}
+	var convert func(value any) any
+	convert = func(value any) any {
+		switch typed := value.(type) {
+		case []any:
+			out := make([]any, len(typed))
+			for i, item := range typed {
+				out[i] = convert(item)
+			}
+			return out
+		case map[string]any, map[any]any:
+			m := asStringMap(typed)
+			out := make(map[string]any, len(m))
+			for key, item := range m {
+				out[key] = convert(item)
+			}
+			return out
+		}
+		return value
+	}
+	out := make(map[string]any, len(raw))
+	for key, value := range raw {
+		if key == "definitions" || key == "test_vectors" {
+			out[key] = value
+			continue
+		}
+		out[key] = convert(value)
+	}
+	return out
+}

@@ -1018,6 +1018,9 @@ func ParseSchema(data string) (*Schema, error) {
 			return nil, fmt.Errorf("failed to parse schema: %w", err)
 		}
 	}
+	// A mapping with a non-string key (a case key, a port) decodes as map[any]any; every
+	// walk after this reads string keys, as the map-based resolver used to leave them.
+	raw = stringKeyedDocument(raw)
 	rootNode = *resolvedRoot
 	fieldNodes := findFieldNodes(&rootNode, "fields")
 
