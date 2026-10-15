@@ -1091,6 +1091,32 @@ stays available as a variable.
 This is the one construct whose output cannot be round-tripped: encoding looks a field up
 by its schema name, and the decoded output holds the resolved key instead.
 
+## Template Strings (`template`)
+
+A `type: string` field declares either `value`, a literal, or `template`, text joined from
+values decoded earlier (PS-361, PS-590). It reads and writes no bytes, and an encoder ignores
+a value given for it.
+
+```yaml
+- {name: _major, type: u8}
+- {name: _minor, type: u8}
+- {name: _build, type: u16}
+- name: firmware_version            # 01 02 0003 -> "1.02.003"
+  type: string
+  template: "${_major}.${_minor:decimal:2}.${_build:decimal:3}"
+```
+
+- `${name}` writes the value as `name_from` does (PS-532): a number as JavaScript's
+  `String(n)`, a looked-up field's label, a string as it is, a boolean as `true`/`false`.
+- `${name:format}` writes the number the reference binds - a looked-up field's code - in a
+  bitfield_string part format: `decimal`, `sdecimal`, `hex` or `hex:upper`, with an optional
+  `:N` minimum width (zero-filled, never cut; a `-` before the padding).
+- `$$` writes a `$`.
+- A reference with no value makes the field absent (PS-592); a format given a fraction, or
+  `hex` given a negative number, makes it absent with a warning (PS-591).
+- A reference to an undeclared name, an object or a repeat, a format that is not a part
+  format, and `template` beside `value` or off `type: string` are rejected at load.
+
 ## TLV (Type-Length-Value)
 
 Parse tag-based variable content. Supports single and multi-byte tags.

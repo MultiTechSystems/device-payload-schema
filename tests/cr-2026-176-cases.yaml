@@ -1,0 +1,188 @@
+# CR-2026-176 (PS-361 amended, PS-590 to PS-592): a `type: string` field may declare
+# `template`, joining values decoded earlier into text. `${name}` writes what PS-532 writes
+# (a number as PS-406 does, a looked-up field's label, a string as it is, a boolean as
+# true/false); `${name:format}` writes the number the reference binds (PS-523) in a part
+# format of PS-430 (CR-2026-170's decimal, sdecimal, hex, hex:upper, optional `:N` minimum
+# width); `$$` is a literal `$`. A reference with no value makes the field absent (PS-592);
+# a format given a value it cannot write - not an integer, or hex given a negative number -
+# makes it absent with a warning naming the field and the reference (PS-591). It reads and
+# writes no bytes, and an encoder ignores a value given for it.
+#
+# Read by the reference, the validator and the generated codec
+# (tests/test_cr_2026_176_cases.py), Go (go/schema/cr176_test.go), Java (CR2026176Test.java)
+# and C# (CR2026_176Tests.cs). C has no template (tools/schema_binary.py refuses it, PS-446).
+#
+#   decode: `schema` (YAML text), `payload` (hex), `expected` (the whole decoded data) and,
+#           where given, `warning` (a substring of one decode warning).
+#   cases:  `schema`, `input` (JSON text) and `payload` (hex), the encoded bytes.
+#   load:   `schema`, refused when it is loaded with `error` (a substring of the message).
+#
+# The texts are the spec prototype's (TestCR2026176TemplateStrings).
+
+decode:
+
+- name: the_cr_examples
+  schema: "name: t\nendian: big\nfields:\n  - {name: _hw, type: u8}\n  - {name: _major, type: u8}\n  - {name: _minor, type: u8}\n  - {name: _build, type: u16}\n  - {name: firmware_version, type: string, template: 'VER${_hw} ${_major}.${_minor:decimal:2}.${_build:decimal:3}'}\n  - {name: _h, type: u8}\n  - {name: _m, type: u8}\n  - {name: alarm_time, type: string, template: '${_h:decimal:2}:${_m:decimal:2}'}\n"
+  payload: "02010200030705"
+  expected: {firmware_version: "VER2 1.02.003", alarm_time: "07:05"}
+
+- name: a_bare_reference_gives_the_label_and_a_format_the_code
+  schema: "name: t\nendian: big\nfields:\n  - {name: state, type: u8, lookup: {1: 'on', 0: 'off'}}\n  - {name: a, type: string, template: '${state}/${state:decimal}/$$'}\n"
+  payload: "01"
+  expected: {state: "on", a: "on/1/$"}
+
+- name: a_lookup_miss_is_absent_bare_and_its_code_under_a_format
+  schema: "name: t\nendian: big\nfields:\n  - {name: state, type: u8, lookup: {1: 'on', 0: 'off'}}\n  - {name: a, type: string, template: 'S${state}'}\n  - {name: b, type: string, template: 'S${state:decimal:3}'}\n"
+  payload: "05"
+  expected: {b: "S005"}
+
+- name: a_numeric_label_is_the_number_bound
+  schema: "name: t\nendian: big\nfields:\n  - {name: size, type: u8, lookup: [0, 125, 250]}\n  - {name: a, type: string, template: '${size}|${size:hex:upper}'}\n"
+  payload: "02"
+  expected: {size: 250, a: "250|FA"}
+
+- name: a_fraction_is_written_as_ps_406_writes_it
+  schema: "name: t\nendian: big\nfields:\n  - {name: v, type: u8, div: 10}\n  - {name: b, type: string, template: 'v=${v}'}\n"
+  payload: "19"
+  expected: {v: 2.5, b: "v=2.5"}
+
+- name: hex_formats_and_a_width_that_never_cuts
+  schema: "name: t\nendian: big\nfields:\n  - {name: _id, type: u16}\n  - {name: a, type: string, template: '${_id:hex:2}-${_id:hex:upper:6}'}\n"
+  payload: "0abc"
+  expected: {a: "abc-000ABC"}
+
+- name: a_negative_number_puts_its_sign_before_the_padding
+  schema: "name: t\nendian: big\nfields:\n  - {name: x, type: s8}\n  - {name: a, type: string, template: '${x:sdecimal:3}|${x:decimal}|${x}'}\n"
+  payload: "fb"
+  expected: {x: -5, a: "-005|-5|-5"}
+
+- name: a_string_and_a_boolean
+  schema: "name: t\nendian: big\nfields:\n  - {name: code, type: ascii, length: 2}\n  - {name: flag, type: boolean, value: true}\n  - {name: a, type: string, template: '${code}-${flag}'}\n"
+  payload: "4142"
+  expected: {code: "AB", flag: true, a: "AB-true"}
+
+- name: a_var_is_a_reference
+  schema: "name: t\nendian: big\nfields:\n  - {name: reading, type: u8, var: r}\n  - {name: a, type: string, template: 'r${r:decimal:2}'}\n"
+  payload: "07"
+  expected: {reading: 7, a: "r07"}
+
+- name: a_format_on_a_fraction_makes_the_field_absent_with_a_warning
+  schema: "name: t\nendian: big\nfields:\n  - {name: v, type: u8, div: 10}\n  - {name: c, type: string, template: '${v:decimal}'}\n"
+  payload: "19"
+  expected: {v: 2.5}
+  warning: "Field 'c': ${v:decimal} is given 2.5, which the format cannot write, so the field is absent (PS-591)"
+
+- name: hex_on_a_negative_makes_the_field_absent_with_a_warning
+  schema: "name: t\nendian: big\nfields:\n  - {name: x, type: s8}\n  - {name: c, type: string, template: '${x:hex:2}'}\n"
+  payload: "fb"
+  expected: {x: -5}
+  warning: "Field 'c': ${x:hex:2} is given -5, which the format cannot write, so the field is absent (PS-591)"
+
+- name: an_absent_reference_makes_the_field_absent
+  schema: "name: t\nendian: big\nfields:\n  - {name: x, type: u8, sentinel: [255]}\n  - {name: t, type: string, template: 'X${x}'}\n"
+  payload: "ff"
+  expected: {}
+
+- name: a_present_reference_after_a_sentinel_schema
+  schema: "name: t\nendian: big\nfields:\n  - {name: x, type: u8, sentinel: [255]}\n  - {name: t, type: string, template: 'X${x}'}\n"
+  payload: "05"
+  expected: {x: 5, t: "X5"}
+
+- name: a_reference_in_an_arm_not_taken_makes_the_field_absent
+  schema: "name: t\nendian: big\nfields:\n  - {name: kind, type: u8}\n  - match:\n      field: $kind\n      cases:\n        1:\n          - {name: a, type: u8}\n        2:\n          - {name: b, type: u8}\n  - {name: t, type: string, template: 'A${a}'}\n"
+  payload: "0207"
+  expected: {kind: 2, b: 7}
+
+- name: a_template_in_an_arm
+  schema: "name: t\nendian: big\nfields:\n  - {name: kind, type: u8}\n  - match:\n      field: $kind\n      cases:\n        1:\n          - {name: a, type: u8}\n          - {name: t, type: string, template: 'A${a}'}\n        2:\n          - {name: b, type: u8}\n          - {name: t, type: string, template: 'B${b:hex:2}'}\n"
+  payload: "020c"
+  expected: {kind: 2, b: 12, t: "B0c"}
+
+- name: a_template_in_an_object
+  schema: "name: t\nendian: big\nfields:\n  - name: o\n    type: object\n    fields:\n      - {name: major, type: u8}\n      - {name: minor, type: u8}\n      - {name: version, type: string, template: '${major}.${minor:decimal:2}'}\n"
+  payload: "0103"
+  expected: {o: {major: 1, minor: 3, version: "1.03"}}
+
+- name: a_template_in_a_tlv_case
+  schema: "name: t\nendian: big\nfields:\n  - tlv:\n      tag_size: 1\n      cases:\n        1:\n          - {name: major, type: u8}\n          - {name: minor, type: u8}\n          - {name: version, type: string, template: 'v${major}.${minor}'}\n"
+  payload: "010203"
+  expected: {major: 2, minor: 3, version: "v2.3"}
+
+- name: an_element_template_reads_its_own_element
+  schema: "name: t\nendian: big\nfields:\n  - name: items\n    type: repeat\n    count: 2\n    fields:\n      - {name: n, type: u8}\n      - {name: label, type: string, template: 'item${n:decimal:2}'}\n"
+  payload: "0109"
+  expected: {items: [{n: 1, label: "item01"}, {n: 9, label: "item09"}]}
+
+- name: only_dollar_signs
+  schema: "name: t\nendian: big\nfields:\n  - {name: x, type: u8}\n  - {name: a, type: string, template: '$$${x}$$'}\n"
+  payload: "03"
+  expected: {x: 3, a: "$3$"}
+
+cases:
+
+- name: encoding_writes_nothing_and_ignores_the_given_value
+  schema: "name: t\nendian: big\nfields:\n  - {name: _h, type: u8}\n  - {name: _m, type: u8}\n  - {name: t, type: string, template: '${_h}:${_m}'}\n"
+  input: '{"_h": 7, "_m": 5, "t": "ignored"}'
+  payload: "0705"
+
+- name: a_template_is_not_required
+  schema: "name: t\nendian: big\nfields:\n  - {name: _h, type: u8}\n  - {name: _m, type: u8}\n  - {name: t, type: string, template: '${_h}:${_m}'}\n"
+  input: '{"_h": 7, "_m": 5}'
+  payload: "0705"
+
+- name: a_decoded_record_round_trips
+  schema: "name: t\nendian: big\nfields:\n  - {name: state, type: u8, lookup: {1: 'on', 0: 'off'}}\n  - {name: a, type: string, template: '${state}/${state:decimal}'}\n"
+  input: '{"state": "on", "a": "on/1"}'
+  payload: "01"
+
+- name: an_arm_chosen_by_its_read_fields
+  schema: "name: t\nendian: big\nfields:\n  - {name: kind, type: u8}\n  - match:\n      field: $kind\n      cases:\n        1:\n          - {name: a, type: u8}\n          - {name: t, type: string, template: 'A${a}'}\n        2:\n          - {name: b, type: u8}\n          - {name: t, type: string, template: 'B${b}'}\n"
+  input: '{"b": 12, "t": "A1"}'
+  payload: "020c"
+
+- name: in_a_tlv_case
+  schema: "name: t\nendian: big\nfields:\n  - tlv:\n      tag_size: 1\n      cases:\n        1:\n          - {name: major, type: u8}\n          - {name: minor, type: u8}\n          - {name: version, type: string, template: 'v${major}.${minor}'}\n"
+  input: '{"major": 2, "minor": 3, "version": "v2.3"}'
+  payload: "010203"
+
+load:
+
+- name: an_undeclared_reference
+  schema: "name: t\nfields:\n  - {name: t, type: string, template: '${nope}'}\n"
+  error: "`$nope` (template) names no field, var, tag component, index or count_as the schema declares (PS-539)"
+
+- name: a_reference_declared_after
+  schema: "name: t\nfields:\n  - {name: t, type: string, template: '${later:decimal}'}\n  - {name: later, type: u8}\n"
+  error: "`$later` (template) is referenced before the schema declares it (PS-539, PS-122)"
+
+- name: both_value_and_template
+  schema: "name: t\nfields:\n  - {name: t, type: string, template: a, value: b}\n"
+  error: "The template of 't' is a string on a `type: string` field that declares no `value` (PS-361, PS-590)"
+
+- name: template_on_another_type
+  schema: "name: t\nfields:\n  - {name: t, type: u8, template: a}\n"
+  error: "The template of 't' is a string on a `type: string` field that declares no `value` (PS-361, PS-590)"
+
+- name: a_template_that_is_not_a_string
+  schema: "name: t\nfields:\n  - {name: t, type: string, template: 5}\n"
+  error: "The template of 't' is a string on a `type: string` field that declares no `value` (PS-361, PS-590)"
+
+- name: an_object_reference
+  schema: "name: t\nfields:\n  - name: o\n    type: object\n    fields:\n      - {name: q, type: u8}\n  - {name: t, type: string, template: '${o}'}\n"
+  error: "The template of 't' references `o`, an object or repeat, which has no text (PS-532, PS-590)"
+
+- name: a_repeat_reference
+  schema: "name: t\nfields:\n  - name: r\n    type: repeat\n    count: 1\n    fields:\n      - {name: q, type: u8}\n  - {name: t, type: string, template: '${r:decimal}'}\n"
+  error: "The template of 't' references `r`, an object or repeat, which has no text (PS-532, PS-590)"
+
+- name: a_format_that_is_no_part_format
+  schema: "name: t\nfields:\n  - {name: x, type: u8}\n  - {name: t, type: string, template: '${x:octal}'}\n"
+  error: "bitfield_string part format must be decimal, sdecimal, hex or hex:upper, with an optional :N width from 1 to 32, not 'octal' (PS-430)"
+
+- name: a_width_out_of_range
+  schema: "name: t\nfields:\n  - {name: x, type: u8}\n  - {name: t, type: string, template: '${x:decimal:0}'}\n"
+  error: "not 'decimal:0' (PS-430)"
+
+- name: a_string_with_neither
+  schema: "name: t\nfields:\n  - {name: t, type: string}\n"
+  error: "PS-361"

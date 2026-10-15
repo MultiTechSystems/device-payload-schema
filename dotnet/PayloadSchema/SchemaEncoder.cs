@@ -173,7 +173,11 @@ public static class SchemaEncoder
         => f.Type is FieldType.Number or FieldType.String or FieldType.Boolean && f.Value != null;
 
     /// <summary>A computed field: <c>type: number</c> (or integer) with no <c>value</c>.</summary>
-    static bool IsComputed(SchemaField f) => f.Type == FieldType.Number && f.Value == null;
+    static bool IsComputed(SchemaField f) => f.Type == FieldType.Number && f.Value == null || IsTemplate(f);
+
+    /// <summary>A template string (PS-590, CR-2026-176): computed, writing no bytes; an input
+    /// value for it is ignored.</summary>
+    static bool IsTemplate(SchemaField f) => f.Type == FieldType.String && f.Template != null;
 
     /// <summary>
     /// Every name a field list declares, anywhere in it, with whether some declaration
@@ -428,7 +432,8 @@ public static class SchemaEncoder
             }
 
             // PS-359: a literal writes no bytes and its key is not required of the input.
-            if (field.Type is FieldType.String or FieldType.Boolean && field.Value != null)
+            if (field.Type is FieldType.String or FieldType.Boolean && field.Value != null
+                || IsTemplate(field))                                   // PS-590: computed
                 return Array.Empty<byte>();
             // PS-589 (CR-2026-175): a non-consuming byte string writes nothing and is not
             // required; a value given for it is recorded on the frame and checked where the
@@ -800,7 +805,7 @@ public static class SchemaEncoder
             foreach (var f in fields)
             {
                 if (IsPeekField(f)) { pending.Add(f); continue; }
-                if (f.Type == FieldType.Number
+                if (f.Type == FieldType.Number || IsTemplate(f)
                     || (f.Type is FieldType.String or FieldType.Boolean && f.Value != null))
                     continue;
                 bool construct = f.MatchInline != null || f.TLVInline != null || f.ByteGroup.Count > 0
@@ -1005,7 +1010,7 @@ public static class SchemaEncoder
         static bool Derivable(SchemaField? source)
         {
             if (source == null || string.IsNullOrEmpty(source.Name)) return false;
-            if (source.Type == FieldType.Number) return false;
+            if (source.Type == FieldType.Number || IsTemplate(source)) return false;
             if (source.Type is FieldType.String or FieldType.Boolean && source.Value != null) return false;
             return source.Value == null && source.NameFrom == null && source.Lookup == null
                 && source.Mult == null && source.Div == null && source.Add == null
@@ -1405,7 +1410,7 @@ public static class SchemaEncoder
             foreach (var member in group.ByteGroup)
             {
                 // A computed or literal member has no bits of its own (PS-359).
-                if (member.Type == FieldType.Number
+                if (member.Type == FieldType.Number || IsTemplate(member)
                     || (member.Type is FieldType.String or FieldType.Boolean && member.Value != null))
                     continue;
                 object? value = string.IsNullOrEmpty(member.Name) ? 0.0
@@ -1595,7 +1600,8 @@ public static class SchemaEncoder
             // in the payload, so they cannot be written back. Only elements that read
             // nothing (computed fields and literals) can be encoded.
             if (field.PresentIf != null && field.Fields.Any(f =>
-                    f.Type != FieldType.Number && !(f.Type is FieldType.String or FieldType.Boolean && f.Value != null)))
+                    f.Type != FieldType.Number && !IsTemplate(f)
+                    && !(f.Type is FieldType.String or FieldType.Boolean && f.Value != null)))
                 throw new InvalidOperationException($"repeat field '{field.Name}' declares present_if "
                     + "and its elements read payload bytes, so the elements it dropped cannot be "
                     + "encoded (PS-387)");
@@ -3163,8 +3169,8 @@ public static class SchemaEncoder
                     var raw = ToBytes(field, value);
                     return Pad(raw, EncodeLength(field, raw.Length));
                 }
-                case FieldType.String or FieldType.Boolean when field.Value != null:
-                    // A literal came from no bytes, so it writes none.
+                case FieldType.String or FieldType.Boolean when field.Value != null || IsTemplate(field):
+                    // A literal or a template came from no bytes, so it writes none.
                     return Array.Empty<byte>();
                 case FieldType.Ascii when field.Numeral != null && Helpers.ToFloat64(value).Item1:
                 {
@@ -3362,7 +3368,7 @@ public static class SchemaEncoder
         static string? PayloadName(SchemaField f)
         {
             if (string.IsNullOrEmpty(f.Name) || f.Name.StartsWith("_")) return null;
-            if (f.Type == FieldType.Number) return null;
+            if (f.Type == FieldType.Number || IsTemplate(f)) return null;
             return f.Name;
         }
 

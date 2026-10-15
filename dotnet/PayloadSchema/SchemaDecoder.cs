@@ -604,9 +604,15 @@ public static class SchemaDecoder
                 // everything after it.
                 // `string` is only ever a literal: a string read from the payload is
                 // `ascii` (PS-361), and a literal reads no bytes (PS-357).
+                if (field.Template != null)
+                {
+                    // PS-590 to PS-592 (CR-2026-176): text joined from earlier values,
+                    // reading no bytes; omitted where a reference has no value.
+                    value = TemplateStrings.Render(field, ctx);
+                    break;
+                }
                 if (field.Value == null)
-                    throw new InvalidOperationException($"field '{field.Name}': type string declares "
-                        + "no value; a string read from the payload is type ascii (PS-361)");
+                    throw new InvalidOperationException(TemplateStrings.NeitherMessage(field.Name));
                 value = field.Value;
                 break;
             }

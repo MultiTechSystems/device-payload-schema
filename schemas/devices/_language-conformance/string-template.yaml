@@ -1,0 +1,92 @@
+# A string joined from values decoded earlier (PS-590 to PS-592, CR-2026-176). `${name}`
+# writes the value as a key template does (PS-532): a number as JavaScript writes it, a
+# looked-up field's label. `${name:format}` writes the number the reference binds in a part
+# format (PS-430): zero-filled on the left to a minimum width, never cut. A format given a
+# fraction makes the text absent with a warning (PS-591); a reference with no value makes it
+# absent (PS-592). The text reads and writes no bytes, so every vector round-trips.
+#
+# Each port is one rule. Rejected schemas are in tests/cr-2026-176-cases.yaml, since no
+# vector kind expects a refused schema.
+name: probe_string_template
+endian: big
+ports:
+  1:
+    fields:
+      - {name: major, type: u8}
+      - {name: minor, type: u8}
+      - {name: build, type: u16}
+      - name: version
+        type: string
+        template: "${major}.${minor:decimal:2}.${build:decimal:3}"
+  2:
+    fields:
+      - name: state
+        type: u8
+        lookup: {0: idle, 1: busy, 2: fault}
+      - name: status
+        type: string
+        template: "${state}#${state:hex:upper:2}"
+  3:
+    fields:
+      - {name: level, type: u8, div: 10}
+      - name: reading
+        type: string
+        template: "v=${level}"
+      - name: digits
+        type: string
+        template: "${level:decimal:2}"
+  4:
+    fields:
+      - {name: spare, type: u8, sentinel: [255]}
+      - name: spare_text
+        type: string
+        template: "S${spare:hex:2}$$"
+test_vectors:
+  - name: padded_version
+    source: generated
+    fPort: 1
+    payload: "01 02 0003"
+    expected: {major: 1, minor: 2, build: 3, version: "1.02.003"}
+  - name: a_width_never_cuts
+    source: generated
+    fPort: 1
+    payload: "0A FF 1234"
+    expected: {major: 10, minor: 255, build: 4660, version: "10.255.4660"}
+  - name: label_and_code
+    source: generated
+    fPort: 2
+    payload: "01"
+    expected: {state: busy, status: "busy#01"}
+  - name: label_and_code_two
+    source: generated
+    fPort: 2
+    payload: "02"
+    expected: {state: fault, status: "fault#02"}
+  - name: label_and_code_zero
+    source: generated
+    fPort: 2
+    payload: "00"
+    expected: {state: idle, status: "idle#00"}
+  - name: a_whole_value
+    source: generated
+    fPort: 3
+    payload: "1E"
+    expected: {level: 3, reading: "v=3", digits: "03"}
+    expected_warnings: []
+  - name: a_fraction_under_a_format
+    source: generated
+    fPort: 3
+    payload: "19"
+    expected: {level: 2.5, reading: "v=2.5", digits: null}
+    expected_warnings:
+      - "Field 'digits': ${level:decimal:2} is given 2.5, which the format cannot write, so the field is absent (PS-591)"
+  - name: a_present_reference
+    source: generated
+    fPort: 4
+    payload: "0C"
+    expected: {spare: 12, spare_text: "S0c$"}
+  - name: an_absent_reference
+    source: generated
+    fPort: 4
+    payload: "FF"
+    expected: {spare: null, spare_text: null}

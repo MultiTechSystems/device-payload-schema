@@ -572,7 +572,7 @@ def covered_peeks(fields) -> list:
         if is_peek_field(f):
             pending.append(f)
             continue
-        if ftype in COMPUTED_TYPES or is_literal(f):
+        if ftype in COMPUTED_TYPES or is_literal(f) or is_string_template(f):
             continue
         construct = any(k in f for k in ('match', 'tlv', 'byte_group', 'flagged', '$ref'))
         bits = isinstance(ftype, str) and any(m in ftype for m in ('[', ':', '<'))
@@ -1065,7 +1065,8 @@ def fixed_element_size(fields):
         base = INTEGER_TYPE_INFO.get(ftype)
         if ftype in _FIXED_TYPE_SIZES or base:
             total += _FIXED_TYPE_SIZES.get(ftype) or base[0]
-        elif ftype in COMPUTED_TYPES or is_literal(field) or is_echo(field):
+        elif (ftype in COMPUTED_TYPES or is_literal(field) or is_echo(field)
+              or is_string_template(field)):
             continue                    # an echo re-reads, advancing nothing (PS-588)
         elif '[' in ftype or ftype == 'bool':
             consume = field.get('consume', 0)
@@ -2039,6 +2040,8 @@ def reference_errors(schema):
                     names = list(indexed.groups()) if indexed else [v[1:]]
                 elif k in TEMPLATE_KEYS or (in_senml and k == 'name'):
                     names = TEMPLATE_REFERENCE.findall(v)
+                elif k == 'template':
+                    names = STRING_TEMPLATE_REFERENCE.findall(v)              # PS-590
                 ahead.extend((n, k) for n in names if n not in declared)
             elif k == 'default':
                 if key == 'match' and isinstance(v, (dict, list)):
@@ -2524,6 +2527,123 @@ def render_template_value(value, reference, template):
     raise ValueError(
         "template %r references %r, which is not a number, string or boolean "
         "and cannot be written into a key (PS-532)" % (template, reference))
+
+
+#: `$$`, `${name}` or `${name:format}` in a string field's `template` (PS-590, CR-2026-176).
+STRING_TEMPLATE_RE = re.compile(r'\$\$|\$\{(\w+)(?::([^}]*))?\}')
+#: The names a string field's `template` references, as the spec prototype's
+#: key_vocabulary.STRING_TEMPLATE_REFERENCE reads them (PS-539).
+STRING_TEMPLATE_REFERENCE = re.compile(r'\$\{(\w+)(?::[^}]*)?\}')
+
+
+def is_string_template(field_def):
+    """A `type: string` field declaring `template`: computed, reading no bytes (PS-590)."""
+    return (isinstance(field_def, dict) and field_def.get('type') == 'string'
+            and 'template' in field_def)
+
+
+def given_text(value):
+    """A value as a PS-591 warning writes it, the spec prototype's js_text: a boolean as
+    true or false, a number as JavaScript's String(n), anything else in single quotes."""
+    if isinstance(value, bool):
+        return 'true' if value else 'false'
+    if isinstance(value, (int, float)):
+        return format_lookup_value(value)
+    return "'" + str(value) + "'"
+
+
+def render_string_template(field_def, values, labels, warnings):
+    """A template string field's value (PS-590 to PS-592, CR-2026-176), or OMITTED.
+
+    `${name}` writes what PS-532 writes - a looked-up field's label (`labels`), else the
+    value bound; `${name:format}` writes the number the reference binds (PS-523) in a part
+    format of PS-430 (`format_part_number`, CR-2026-170's); `$$` writes `$`. A reference
+    with no value - never bound, or a lookup miss under a bare reference - makes the field
+    absent (PS-592). A format given a value that is not an integer, or hex given a negative
+    one, makes it absent with a warning naming the field and the reference (PS-591)."""
+    name = field_def.get('name')
+    absent = []
+
+    def substitute(match):
+        reference, fmt = match.group(1), match.group(2)
+        if reference is None:
+            return '$'
+        if reference not in values:
+            absent.append(reference)
+            return ''
+        number = values[reference]
+        if fmt is None:
+            value = labels.get(reference, number)
+            if value is OMITTED:
+                absent.append(reference)
+                return ''
+            return render_template_value(value, reference, field_def.get('template'))
+        base, width = parse_part_format(fmt)
+        integral = (not isinstance(number, bool) and isinstance(number, (int, float))
+                    and math.isfinite(number) and number == int(number)
+                    and not (base.startswith('hex') and number < 0))
+        if not integral:
+            warnings.append(f"Field '{name}': ${{{reference}:{fmt}}} is given "
+                            f"{given_text(number)}, which the format cannot write, so the "
+                            f"field is absent (PS-591)")
+            absent.append(reference)
+            return ''
+        return format_part_number(int(number), base, width)
+
+    text = STRING_TEMPLATE_RE.sub(substitute, str(field_def.get('template')))
+    return OMITTED if absent else text
+
+
+def string_neither_message(name):
+    """PS-361 for a `type: string` field declaring neither `value` nor `template`, in the
+    spec prototype's text."""
+    return (f"Field '{name}': `type: string` is a literal that declares `value`, or a "
+            f"template that declares `template`; a string read from the payload is `ascii` "
+            f"(PS-361)")
+
+
+def string_template_errors(node, _top=True):
+    """PS-361, PS-590, PS-532, PS-430 at load, in the spec prototype's text: `template` sits
+    on a `type: string` field that declares no `value` and is a string; it references no
+    object or repeat its field list declares before it; each `${name:format}` is a part
+    format. Its undeclared or late references are PS-539's (`reference_errors`)."""
+    errors = []
+    if isinstance(node, list):
+        structured = set()          # objects and repeats this list declares so far (PS-532)
+        for entry in node:
+            if isinstance(entry, dict) and isinstance(entry.get('template'), str):
+                for reference in STRING_TEMPLATE_REFERENCE.findall(entry['template']):
+                    if reference in structured:
+                        errors.append(
+                            f"The template of '{entry.get('name', '<unnamed>')}' references "
+                            f"`{reference}`, an object or repeat, which has no text (PS-532, "
+                            f"PS-590)")
+            if (isinstance(entry, dict) and entry.get('type') in ('object', 'repeat')
+                    and isinstance(entry.get('name'), str)):
+                structured.add(entry['name'])
+            errors.extend(string_template_errors(entry, False))
+    elif isinstance(node, dict):
+        if node.get('type') == 'string' and 'template' not in node and 'value' not in node:
+            errors.append(string_neither_message(node.get('name')))
+        if 'template' in node and ('type' in node or 'name' in node):
+            template = node['template']
+            if (node.get('type') != 'string' or 'value' in node
+                    or not isinstance(template, str)):
+                errors.append(f"The template of '{node.get('name', '<unnamed>')}' is a string "
+                              f"on a `type: string` field that declares no `value` (PS-361, "
+                              f"PS-590)")
+            else:
+                for match in STRING_TEMPLATE_RE.finditer(template):
+                    if match.group(2) is not None:
+                        problem = part_format_error(match.group(2))
+                        if problem:
+                            errors.append(problem)
+        for key, value in node.items():
+            if (_top and key in ('test_vectors', 'definitions')) or key in (
+                    'lookup', 'values', 'value', 'else'):
+                continue
+            errors.extend(string_template_errors(value, False))
+    return errors
 
 
 def lookup_template_pattern(template):
@@ -3337,6 +3457,7 @@ def schema_iterator_errors(schema):
     errors.extend(withdrawn_errors(schema))                          # CR-2026-159
     errors.extend(numeral_errors(schema))                            # PS-560
     errors.extend(bitfield_part_errors(schema))                      # PS-430
+    errors.extend(string_template_errors(schema))                    # PS-590
     errors.extend(lookup_type_errors(schema))                        # PS-571
     errors.extend(iterator_errors(schema.get('fields')))
     errors.extend(ipso_instance_errors(schema))                      # PS-548
@@ -4971,6 +5092,11 @@ class SchemaInterpreter:
                     pos if is_echo(field_def) else pos + length)
         
         if field_type == 'string':
+            if 'template' in field_def:
+                # PS-590 to PS-592 (CR-2026-176): a string joined from values decoded
+                # earlier, reading no bytes; OMITTED where a reference is absent.
+                return render_string_template(field_def, self._variables, self._labels,
+                                              self._nested_warnings), pos
             if 'value' in field_def:
                 # A string literal (spec "Literal Types"): a constant in the output,
                 # read from no bytes. This read the payload as a one-byte string, so a
@@ -4979,9 +5105,7 @@ class SchemaInterpreter:
                 return field_def['value'], pos
             # PS-361: `string` is a literal or nothing; a string read from the payload
             # is `ascii`. This read the bytes as UTF-8.
-            raise ValueError(
-                f"Field '{field_def.get('name', '?')}': type string declares no value; a "
-                f"string read from the payload is type ascii (PS-361)")
+            raise ValueError(string_neither_message(field_def.get('name', '?')))
         
         if field_type == 'boolean':
             # A boolean literal (PS-357, PS-519): reported as declared, read from no
@@ -7345,7 +7469,7 @@ class SchemaInterpreter:
             
             # PS-359: a literal came from no bytes and writes none, and its key is not
             # required of the input. This warned "Missing field" for it.
-            if is_literal(field_def):
+            if is_literal(field_def) or is_string_template(field_def):   # PS-590: computed
                 continue
             # PS-360: `value` on a field that reads bytes is the constant to write,
             # whatever the input supplies. The input's value was written instead.
@@ -7489,7 +7613,8 @@ class SchemaInterpreter:
         """
         if not isinstance(source, dict) or not source.get('name'):
             return False
-        if source.get('type') in COMPUTED_TYPES or is_literal(source):
+        if source.get('type') in COMPUTED_TYPES or is_literal(source) or \
+                is_string_template(source):
             return False
         return not any(key in source for key in (
             'value', 'name_from', 'lookup', 'mult', 'div', 'add', 'transform',
@@ -7632,7 +7757,8 @@ class SchemaInterpreter:
         def internal(f):
             name = f.get('name')
             if not isinstance(name, str) or not name.startswith('_') \
-                    or f.get('type') in COMPUTED_TYPES or is_literal(f) or 'value' in f:
+                    or f.get('type') in COMPUTED_TYPES or is_literal(f) or 'value' in f \
+                    or is_string_template(f):
                 return
             recorded = trace.lookup('internal', f)
             if recorded is _UNRECORDED:
@@ -7773,7 +7899,8 @@ class SchemaInterpreter:
                 continue
             name = f.get('name')
             if not name or str(name).startswith('_') \
-                    or (f.get('type') in COMPUTED_TYPES and not is_literal(f)):
+                    or (f.get('type') in COMPUTED_TYPES and not is_literal(f)) \
+                    or is_string_template(f):
                 continue
             key = name
             if f.get('name_from'):
@@ -7892,7 +8019,7 @@ class SchemaInterpreter:
                 continue
             name = gf.get('name', '')
             gtype = str(gf.get('type', ''))
-            if gtype in COMPUTED_TYPES or is_literal(gf):
+            if gtype in COMPUTED_TYPES or is_literal(gf) or is_string_template(gf):
                 continue                # no bits of its own (PS-359)
             if not name:
                 value = gf.get('default', 0)
@@ -8562,7 +8689,7 @@ class SchemaInterpreter:
             if is_echo(f):
                 out.echo(f, data)               # PS-589 (CR-2026-175): writes nothing
                 continue
-            if is_literal(f):
+            if is_literal(f) or is_string_template(f):
                 continue            # PS-359: a literal writes no bytes
             if 'value' in f:
                 # PS-360: the constant is written whatever the input says.
@@ -8638,7 +8765,7 @@ class SchemaInterpreter:
         # (computed fields and literals) can be encoded.
         if field_def.get('present_if') and any(
                 isinstance(f, dict) and f.get('type') not in COMPUTED_TYPES
-                and not is_literal(f) for f in record_fields):
+                and not is_literal(f) and not is_string_template(f) for f in record_fields):
             raise ValueError(
                 f"repeat field {name!r} declares present_if and its elements read payload "
                 f"bytes, so the elements it dropped cannot be encoded (PS-387)")
@@ -8796,7 +8923,8 @@ class SchemaInterpreter:
             name = f.get('name')
             if not name or str(name).startswith('_'):
                 continue
-            if is_literal(f) or f.get('type') in COMPUTED_TYPES or is_echo(f):
+            if (is_literal(f) or f.get('type') in COMPUTED_TYPES or is_echo(f)
+                    or is_string_template(f)):
                 # A literal or computed field writes no bytes, but only this case reports
                 # it, so it claims its name, never required: a literal where the input
                 # gives its value (wt303's `device_request`, a literal-only entry), a
@@ -9017,7 +9145,7 @@ class SchemaInterpreter:
                 return False
             if is_literal(f):
                 return same_label(f['value'], value)        # PS-359, PS-513
-            if f.get('type') in COMPUTED_TYPES:
+            if f.get('type') in COMPUTED_TYPES or is_string_template(f):
                 return True             # written from what it is computed from (PS-434)
             fit, exact = self._case_takes(f, value)
             return fit and (exact or not exact_only)
@@ -9324,7 +9452,7 @@ class SchemaInterpreter:
             length = encode_length(field_def, len(raw))
             return raw[:length].ljust(length, b'\x00')
         
-        if is_literal(field_def):
+        if is_literal(field_def) or is_string_template(field_def):
             # A literal came from no bytes, so it writes none (PS-359).
             return b''
         if field_type in ('string', 'ascii'):

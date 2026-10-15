@@ -1928,7 +1928,8 @@ def check_best_practices(schema: Dict[str, Any], result: ValidationResult) -> No
 
     # PS-361: `string` is a literal; a field that reads text from the payload is `ascii`.
     for field_def in typed_field_dicts(schema):
-        if field_def.get('type') == 'string' and 'value' not in field_def:
+        if field_def.get('type') == 'string' and 'value' not in field_def \
+                and 'template' not in field_def:
             result.add_warning("type string declares no value, so a decoder reports an "
                                "error; a string read from the payload is type ascii (PS-361)",
                                str(field_def.get('name', '?')))

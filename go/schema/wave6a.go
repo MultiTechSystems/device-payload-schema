@@ -705,7 +705,7 @@ func presentIfBlocksEncode(field Field) bool {
 		return false
 	}
 	for _, f := range field.Fields {
-		computed := f.Type == TypeNumber || f.Type == "number" || f.IntegerResult
+		computed := f.Type == TypeNumber || f.Type == "number" || f.IntegerResult || isStringTemplate(f)
 		literal := f.Value != nil && (f.Type == TypeString || f.Type == TypeStringLower || f.Type == TypeBoolean || computed)
 		if !computed && !literal {
 			return true

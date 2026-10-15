@@ -239,6 +239,7 @@ public class Schema {
             checkBytesFormat(fm);
             if (fm.containsKey("byte_group")) checkByteGroup(fm);        // PS-070, PS-397
             checkCaseBodies(fm);               // PS-441
+            TemplateStrings.check(fm, aggregates);   // PS-361, PS-430, PS-532, PS-590
             checkLiteral(fm);
             checkAnnotations(fm);              // PS-510
             checkWave4(fm);
@@ -580,7 +581,7 @@ public class Schema {
         for (Field f : fields) {
             FieldType t = f.getType();
             if (t == FieldType.NUMBER || t == FieldType.BOOLEAN
-                    || (t == FieldType.STRING && f.getValue() != null)) continue;
+                    || (t == FieldType.STRING && f.getValue() != null) || f.isTemplate()) continue;
             if (t == FieldType.BITS || t == FieldType.BOOL) { total += f.getConsume(); continue; }
             if (f.isEcho()) continue;               // PS-588: it advances nothing
             if (t == FieldType.BYTES || t == FieldType.ASCII || t == FieldType.HEX
@@ -1041,6 +1042,9 @@ public class Schema {
             }
             f.setLookup(lookup);
             f.setLookupSequence(true);
+        }
+        if (fm.get("template") instanceof String template) {
+            f.setTemplate(template);                    // PS-590 (CR-2026-176)
         }
         Object nameFromRaw = fm.get("name_from");
         if (nameFromRaw != null) {
@@ -2048,15 +2052,16 @@ public class Schema {
             }
             
             case STRING -> {
-                // A literal reads no bytes (PS-357), and `string` is only ever a literal: a
-                // string read from the payload is `ascii` (PS-361). A string with no value
-                // reported null.
-                if (field.getValue() == null) {
-                    throw new SchemaException.DecodeException("field '" + field.getName()
-                            + "': type string declares no value; a string read from the payload "
-                            + "is type ascii (PS-361)");
+                // A literal reads no bytes (PS-357), nor does a template (PS-590); a string
+                // read from the payload is `ascii` (PS-361), so one with neither is refused
+                // at load. A string with no value reported null.
+                if (field.isTemplate()) {
+                    value = TemplateStrings.render(field, ctx);     // null: absent (PS-591/592)
+                } else if (field.getValue() == null) {
+                    throw new SchemaException.DecodeException(TemplateStrings.neitherMessage(field.getName()));
+                } else {
+                    value = field.getValue();
                 }
-                value = field.getValue();
             }
 
             case BOOLEAN -> {

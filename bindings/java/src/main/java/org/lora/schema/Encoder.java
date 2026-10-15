@@ -255,7 +255,8 @@ final class Encoder {
     }
 
     private static boolean isComputed(Field f) {
-        return f.getType() == FieldType.NUMBER || f.getType() == FieldType.INTEGER;
+        return f.getType() == FieldType.NUMBER || f.getType() == FieldType.INTEGER
+                || f.isTemplate();          // PS-590: written from what it joins, no bytes
     }
 
     private static boolean isLiteral(Field f) {
@@ -1224,7 +1225,8 @@ final class Encoder {
             for (Field member : field.getFields()) {
                 boolean readsNothing = member.getType() == FieldType.NUMBER
                         || member.getType() == FieldType.BOOLEAN
-                        || (member.getType() == FieldType.STRING && member.getValue() != null);
+                        || (member.getType() == FieldType.STRING && member.getValue() != null)
+                        || member.isTemplate();
                 if (!readsNothing) {
                     throw new SchemaException.EncodeException("repeat field '" + name
                             + "' declares present_if and its elements read payload bytes, so the "
@@ -3234,8 +3236,9 @@ final class Encoder {
             return pad(raw, encodeLength(field, raw.length));
         }
 
-        if ((type == FieldType.STRING || type == FieldType.BOOLEAN) && field.getValue() != null) {
-            // A literal came from no bytes, so it writes none. This wrote its text:
+        if (((type == FieldType.STRING || type == FieldType.BOOLEAN) && field.getValue() != null)
+                || field.isTemplate()) {
+            // A literal came from no bytes, so it writes none, nor does a template (PS-590). This wrote its text:
             // `{type: string, value: "ppm"}` re-encoded 07 as 70706d07.
             return new byte[0];
         }
