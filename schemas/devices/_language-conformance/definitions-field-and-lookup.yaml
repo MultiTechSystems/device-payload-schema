@@ -1,0 +1,65 @@
+# One field and one table, each declared once in `definitions` and used several times
+# (CR-2026-168). A `$ref` to a `field` definition takes the definition's keys and replaces
+# each key it carries itself, whole (PS-578): `probe` is renamed three times, and the third
+# use replaces `div`. A field's `lookup` names a `lookup` definition by pointer (PS-579), and
+# a `field` definition may itself carry one (PS-580). The decoded output and `_meta` are
+# those of the schema written out field by field.
+#
+# Payload 00D7 0835 01 02: probe_1 = 0x00D7 / 10 = 21.5; probe_ext = 0x0835 / 100 = 21.01;
+# alarm = code 1 = low; mode = code 2 = boost.
+name: probe_definitions_field_and_lookup
+version: 1
+endian: big
+definitions:
+  alarm_codes:
+    lookup: {0: none, 1: low, 2: high}
+  probe:
+    field: {type: s16, div: 10, unit: Cel}
+  mode:
+    field:
+      name: mode
+      type: u8
+      lookup: '#/definitions/modes'
+  modes:
+    lookup: [eco, normal, boost]
+fields:
+- {$ref: '#/definitions/probe', name: probe_1}
+- {$ref: '#/definitions/probe', name: probe_ext, div: 100}
+- {name: alarm, type: u8, lookup: '#/definitions/alarm_codes'}
+- $ref: '#/definitions/mode'
+test_vectors:
+- name: renamed_and_replaced
+  description: "probe_1 keeps the definition's div of 10; probe_ext replaces it with 100"
+  payload: '00D7083501 02'
+  source: generated
+  expected:
+    probe_1: 21.5
+    probe_ext: 21.01
+    alarm: low
+    mode: boost
+  expected_meta:
+    schema: probe_definitions_field_and_lookup
+    version: 1
+    fields:
+      probe_1: {type: s16, reports: number, unit: Cel, display_unit: Cel}
+      probe_ext: {type: s16, reports: number, unit: Cel, display_unit: Cel}
+      alarm: {type: u8, reports: string}
+      mode: {type: u8, reports: string}
+- name: negative_probe
+  description: "The definition's s16 is kept: 0xFF38 is -200, so probe_1 is -20.0"
+  payload: 'FF38FF3800 00'
+  source: generated
+  expected:
+    probe_1: -20.0
+    probe_ext: -2.0
+    alarm: none
+    mode: eco
+- name: table_from_pointer
+  description: "alarm code 2 and mode code 1, both through pointers to shared tables"
+  payload: '0000000002 01'
+  source: generated
+  expected:
+    probe_1: 0
+    probe_ext: 0
+    alarm: high
+    mode: normal

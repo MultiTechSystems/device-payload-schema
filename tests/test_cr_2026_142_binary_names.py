@@ -81,7 +81,11 @@ def test_the_corpus_has_schemas_the_form_carries():
 )
 def test_names_round_trip_in_both_forms(path):
     doc = yaml.safe_load(path.read_text())
-    names = [f.get("name") or None for f in doc["fields"]]
+    # The blob carries each reference written out (CR-2026-168), so its names are those
+    # of the resolved field list.
+    from schema_interpreter import expand_refs
+
+    names = [f.get("name") or None for f in expand_refs(doc)[0]["fields"]]
 
     named = sb.decode_schema(sb.encode_schema(doc))
     assert named["names"] is True
