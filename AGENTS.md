@@ -232,10 +232,10 @@ implementation has a runner that reads the same YAML and the same vectors:
 
 | Implementation | Runner | Decode floor | Re-encode floor |
 |---|---|---|---|
-| Python | `tests/test_corpus_conformance.py` | every vector | 2245 |
-| Go | `go/schema/corpus_conformance_test.go` | 2850 | 2263 (plain API 2235) |
-| C# | `dotnet/PayloadSchema.Tests/CorpusConformanceTests.cs` | 2850 | 2246 |
-| Java | `bindings/java/.../CorpusConformanceTest.java` | 2850 | 2245 |
+| Python | `tests/test_corpus_conformance.py` | every vector | 2250 |
+| Go | `go/schema/corpus_conformance_test.go` | 2855 | 2268 (plain API 2240) |
+| C# | `dotnet/PayloadSchema.Tests/CorpusConformanceTests.cs` | 2855 | 2251 |
+| Java | `bindings/java/.../CorpusConformanceTest.java` | 2855 | 2250 |
 | C | `tools/c-corpus-harness.py` (builds each expressible schema through the struct API) | 575 of 575 attempted | n/a |
 
 These figures move with every schema added. `make check-floors` prints each floor beside
@@ -832,10 +832,10 @@ exercised to the best-covered part of the project:
 
 | | Runner | Round-trips |
 |---|---|---|
-| Python | `tests/test_encode_round_trip.py` | 2245 |
-| Go | `go/schema/corpus_encode_test.go` | 2263 (plain 2235) |
-| Java | `bindings/java/.../CorpusEncodeRoundTripTest.java` | 2245 |
-| C# | `dotnet/.../CorpusEncodeRoundTripTests.cs` | 2246 |
+| Python | `tests/test_encode_round_trip.py` | 2250 |
+| Go | `go/schema/corpus_encode_test.go` | 2268 (plain 2240) |
+| Java | `bindings/java/.../CorpusEncodeRoundTripTest.java` | 2250 |
+| C# | `dotnet/.../CorpusEncodeRoundTripTests.cs` | 2251 |
 | C | `src/test_encoder.c`, built by `make test-c` (unit tests, not a corpus round trip) | n/a |
 
 - **A name may be an object under one tag and a scalar under another, and a tlv encoder
