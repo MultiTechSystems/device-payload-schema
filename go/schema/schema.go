@@ -119,6 +119,12 @@ type Field struct {
 	Encoding string `json:"encoding,omitempty" yaml:"encoding,omitempty"`
 	// Numeral is `decimal` or `hex` on an ascii field reported as an integer (PS-560).
 	Numeral string `json:"numeral,omitempty" yaml:"numeral,omitempty"`
+	// Nul is an ascii field's treatment of 0x00 bytes: trailing (default), stop or drop
+	// (PS-534). Terminator ends a variable-length ascii field in place of `length`
+	// (PS-593); HasTerminator tells byte 0 from none.
+	Nul           string `json:"nul,omitempty" yaml:"nul,omitempty"`
+	Terminator    int    `json:"terminator,omitempty" yaml:"terminator,omitempty"`
+	HasTerminator bool   `json:"-" yaml:"-"`
 	// GroupEndian is a byte_group's own byte order (PS-364), empty for the context's.
 	GroupEndian string `json:"-" yaml:"-"`
 	// IntegerResult marks a computed field written `type: integer` (PS-283); its Type
@@ -1255,6 +1261,13 @@ func parseFieldMap(fm map[string]any, node *yaml.Node) Field {
 	}
 	if numeral, ok := fm["numeral"].(string); ok {
 		f.Numeral = numeral
+	}
+	if nul, ok := fm["nul"].(string); ok {
+		f.Nul = nul
+	}
+	if term, ok := terminatorValue(fm["terminator"]); ok {
+		f.Terminator = term
+		f.HasTerminator = true
 	}
 	if typ, ok := fm["type"].(string); ok {
 		f.Type = canonicalFieldType(typ)
@@ -2698,6 +2711,13 @@ func decodeField(field Field, ctx *DecodeContext) (any, error) {
 		value = field.Value
 
 	case TypeAscii, TypeAsciiLower:
+		if field.HasTerminator {
+			span, err := terminatedSpan(&field, ctx) // PS-593
+			if err != nil {
+				return nil, err
+			}
+			length = span
+		}
 		start := ctx.Offset
 		data, err := ctx.Read(length)
 		if err != nil {
@@ -2705,8 +2725,10 @@ func decodeField(field Field, ctx *DecodeContext) (any, error) {
 		}
 		if isEcho(field) {
 			ctx.Offset = start // PS-588 (CR-2026-175): the span is read again
+		} else if field.HasTerminator {
+			ctx.Offset++ // consumed, not reported
 		}
-		value = decodeASCII(field.Name, data, ctx) // PS-534, PS-538
+		value = decodeASCII(field.Name, data, ctx, field.Nul) // PS-534, PS-538
 		if field.Numeral != "" {
 			n, err := decodeNumeral(field.Name, value.(string), field.Numeral) // PS-560
 			if err != nil {
@@ -6262,6 +6284,10 @@ func encodeField(field Field, value any, ctx *EncodeContext) error {
 			if field.Length > 0 && field.LengthRef == "" {
 				fixed = field.Length
 			}
+			terminator := -1
+			if field.HasTerminator && (field.Type == TypeAscii || field.Type == TypeAsciiLower) {
+				terminator, fixed = field.Terminator, -1 // PS-593: no width
+			}
 			strVal, ok := value.(string)
 			if field.Numeral != "" {
 				if numVal, isNum := toFloat64(value); isNum {
@@ -6275,7 +6301,7 @@ func encodeField(field Field, value any, ctx *EncodeContext) error {
 			if !ok {
 				strVal = fmt.Sprintf("%v", value)
 			}
-			data, err := encodeASCII(field.Name, strVal, fixed, ctx)
+			data, err := encodeASCII(field.Name, strVal, fixed, ctx, field.Nul, terminator)
 			if err != nil {
 				return err
 			}

@@ -3312,6 +3312,7 @@ final class Encoder {
                 // PS-561: digits in the declared base, rounded as PS-552 requires.
                 Object declared = field.getRaw() != null ? field.getRaw().get("length") : null;
                 Integer fixed = declared instanceof Integer n && n >= 0 ? n : null;
+                if (field.getTerminator() != null) fixed = null;   // PS-593: no width
                 return encodeAscii(field, Numeral.encode(field.getName(),
                         (long) Math.rint(asDouble(value)), fixed, field.getNumeral()));
             }
@@ -3438,6 +3439,25 @@ final class Encoder {
         byte[] raw = text.getBytes(StandardCharsets.ISO_8859_1);
         Object declared = field.getRaw() != null ? field.getRaw().get("length") : null;
         Integer fixed = declared instanceof Integer n && n >= 0 ? n : null;
+        Integer terminator = field.getType() == FieldType.ASCII ? field.getTerminator() : null;
+        if (terminator != null) {                                   // PS-595
+            fixed = null;
+            for (byte b : raw) {
+                if ((b & 0xFF) == terminator) {
+                    throw new SchemaException.FieldEncodeException(String.format(
+                            "Field '%s': the value holds its terminator byte 0x%02X (PS-595)",
+                            name, terminator));
+                }
+            }
+        }
+        if ("stop".equals(field.getNul())) {                        // PS-595
+            for (byte b : raw) {
+                if (b == 0) {
+                    throw new SchemaException.FieldEncodeException("Field '" + name
+                            + "': a nul: stop value holds a 0x00 byte (PS-595)");
+                }
+            }
+        }
         if (fixed != null && raw.length > fixed) {
             throw new SchemaException.FieldEncodeException(String.format(
                     "Field '%s': an ascii value of %d bytes is longer than its length of %d (PS-537)",
@@ -3448,6 +3468,11 @@ final class Encoder {
                 warnings.add("Field '" + name + "': a character above U+007F in an ascii value (PS-537)");
                 break;
             }
+        }
+        if (terminator != null) {                                   // PS-595
+            byte[] out = java.util.Arrays.copyOf(raw, raw.length + 1);
+            out[raw.length] = (byte) (int) terminator;
+            return out;
         }
         return fixed == null ? raw : pad(raw, fixed);
     }

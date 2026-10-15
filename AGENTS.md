@@ -232,10 +232,10 @@ implementation has a runner that reads the same YAML and the same vectors:
 
 | Implementation | Runner | Decode floor | Re-encode floor |
 |---|---|---|---|
-| Python | `tests/test_corpus_conformance.py` | every vector | 2245 |
-| Go | `go/schema/corpus_conformance_test.go` | 2850 | 2263 (plain API 2235) |
-| C# | `dotnet/PayloadSchema.Tests/CorpusConformanceTests.cs` | 2850 | 2246 |
-| Java | `bindings/java/.../CorpusConformanceTest.java` | 2850 | 2245 |
+| Python | `tests/test_corpus_conformance.py` | every vector | 2254 |
+| Go | `go/schema/corpus_conformance_test.go` | 2865 | 2272 (plain API 2244) |
+| C# | `dotnet/PayloadSchema.Tests/CorpusConformanceTests.cs` | 2865 | 2255 |
+| Java | `bindings/java/.../CorpusConformanceTest.java` | 2865 | 2254 |
 | C | `tools/c-corpus-harness.py` (builds each expressible schema through the struct API) | 575 of 575 attempted | n/a |
 
 These figures move with every schema added. `make check-floors` prints each floor beside
@@ -832,10 +832,10 @@ exercised to the best-covered part of the project:
 
 | | Runner | Round-trips |
 |---|---|---|
-| Python | `tests/test_encode_round_trip.py` | 2245 |
-| Go | `go/schema/corpus_encode_test.go` | 2263 (plain 2235) |
-| Java | `bindings/java/.../CorpusEncodeRoundTripTest.java` | 2245 |
-| C# | `dotnet/.../CorpusEncodeRoundTripTests.cs` | 2246 |
+| Python | `tests/test_encode_round_trip.py` | 2254 |
+| Go | `go/schema/corpus_encode_test.go` | 2272 (plain 2244) |
+| Java | `bindings/java/.../CorpusEncodeRoundTripTest.java` | 2254 |
+| C# | `dotnet/.../CorpusEncodeRoundTripTests.cs` | 2255 |
 | C | `src/test_encoder.c`, built by `make test-c` (unit tests, not a corpus round trip) | n/a |
 
 - **A name may be an object under one tag and a scalar under another, and a tlv encoder
@@ -3338,6 +3338,53 @@ improved. The Go, Java and C# corpus runners write per-vector reports only when
   - **Floors:** decode 2755 -> 2768 in Go, Java and C#; re-encode +13 everywhere (Python, Java 2153
     -> 2166, C# 2154 -> 2167, Go 2171 -> 2184, plain 2143 -> 2156), `match` 160 -> 173, every vector
     round-tripping.
+
+- **CR-2026-177 (PS-534 amended, PS-072 amended, PS-593 to PS-595; la-payload-schema main
+  9e8957a, for 0.5.7): `nul` and `terminator` on `ascii`.**
+  - **What it does.** An `ascii` field declares `nul: trailing|stop|drop` (default `trailing`,
+    PS-534's old rule): `stop` ends the value before the first 0x00 and leaves the rest of the
+    field unreported; `drop` removes every 0x00; whitespace is never trimmed. Or it declares
+    `terminator`, a byte 0 to 255, in place of `length` (PS-593): the text runs to the first such
+    byte, which is consumed and not reported; a payload that ends first is `Field 'v': no
+    terminator byte 0x00 before the end of the payload (PS-593) (PS-535)`. `nul` and `terminator`
+    apply before `numeral` (PS-594). Encode (PS-595): `stop` pads with 0x00 to `length` and
+    rejects a value holding 0x00 (`Field 'v': a nul: stop value holds a 0x00 byte (PS-595)`);
+    `drop` pads as PS-537; a terminated value is written followed by its terminator, no padding,
+    and is rejected if it holds the terminator (`Field 'v': the value holds its terminator byte
+    0x2C (PS-595)`).
+  - **The Implementation Record's departure, binding:** a terminated `numeral` is written without
+    fill (there is no `length` to fill to), and a negative `hex` numeral without a length is
+    `Field 'v': -1 is negative, which a hex numeral cannot write (PS-168)` in all five encoders,
+    where an unfixed length used to say `does not fit N hex digits`.
+  - **Load (the prototype's text):** `an ascii field declares length or terminator, not both
+    (PS-593)`, `nul and terminator are defined only on an ascii field, not on u8 (PS-534,
+    PS-593)`, `nul must be trailing, stop or drop, not 'strip' (PS-534)`, `terminator must be a byte
+    value 0 to 255, not 256 (PS-593)`, each prefixed `Field '<name>': `. **PS-072's "neither" is
+    now a load error** (`ascii type requires 'length' field, or 'terminator' (PS-072)`); the
+    prototype raises it at decode, and Python used to read one byte for a length-less `ascii`.
+    Python `ascii_text_errors` (from `schema_iterator_errors`, so the validator and the TS013
+    generator refuse it too), Go `checkAsciiText` (`go/schema/cr177.go`, from `checkFieldRules`),
+    Java `AsciiText.check` (from `checkWave4`), C# `AsciiText.Check` (from `CheckWave4`).
+  - **Where decode and encode live.** Python `apply_nul_mode`, `terminated_span`, `decode_ascii`
+    and `encode_ascii` (`tools/schema_interpreter.py`); the generator's ascii branch and
+    `ENCODER_RUNTIME_JS` string branch; Go `applyNulMode`/`terminatedSpan` and `decodeASCII`/
+    `encodeASCII` (`cr114_115.go`); Java `AsciiText` and `Encoder.encodeAscii`; C#
+    `AsciiText` and `Helpers.DecodeAscii`/`EncodeAscii`. Before: all five kept every 0x00 that
+    was followed by another byte (`"AB\u0000XY"`), and none had a terminator.
+  - **C:** has neither key. `tools/schema_binary.py` refuses `nul` and `terminator` by name
+    (PS-446) and the C harness files them as C gaps.
+  - **Round trip:** `stop` and `drop` lose what they drop, so `encode-round-trip.py` files a
+    vector of such a field that does not re-encode as the inherent reason `nul-mode`.
+  - **Cases and fixtures:** `tests/cr-2026-177-cases.yaml` (18 decode, 15 encode, 9 load; the
+    prototype's `TestCR2026177NulAndTerminator` and more) read by `test_cr_2026_177_cases.py`
+    (reference and generated codec), Go `cr177_test.go`, Java `CR2026177Test`, C#
+    `CR2026_177Tests`. Fixtures `ascii-nul-stop`, `ascii-nul-drop`, `ascii-terminator`,
+    `ascii-terminator-numeral` (15 vectors, `source: generated`): decode 2801 -> 2816 in Go,
+    Java and C#; re-encode +9 everywhere (Python, Java 2199 -> 2208; C# 2200 -> 2209; Go 2217 ->
+    2226, plain 2189 -> 2198), `plain fixed` 185 -> 194.
+  - **Measured before:** no corpus, library or example schema, and none of the registry's
+    schemas, declares `nul` or `terminator` or an `ascii` field without `length`, so none is
+    rejected and no decode or encode output changes.
 
 - **CR-2026-175 (PS-453 and PS-015 amended, PS-588, PS-589; la-payload-schema main 9e8957a, for
   0.5.7): a byte string that does not consume reports its span again.** A `bytes`, `hex` or
