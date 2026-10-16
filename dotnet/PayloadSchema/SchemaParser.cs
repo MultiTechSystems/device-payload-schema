@@ -468,6 +468,7 @@ public static partial class SchemaParser
         BitLabels.Check(fm);                                            // PS-616, PS-617
         Cr189.Check(fm);                                                // PS-621
         AsciiText.Check(fm);                                            // PS-534, PS-593, PS-072
+        AsciiText.CheckCharset(fm);                                     // PS-624
         if (fm.Children.ContainsKey(new YamlScalarNode("match_value")))
             throw new InvalidOperationException($"Field '{name}': match_value is withdrawn; write a signed "
                 + "type (sN), a signed bit range (sN[start:end]), encoding, match or guard instead (PS-426)");
@@ -1056,6 +1057,8 @@ public static partial class SchemaParser
             f.KeepTerminator = AsciiText.BooleanOf(ctNode) == false;
         if (fm.TryGetValue("end_terminates", out var etNode))                     // PS-619
             f.EndTerminates = AsciiText.BooleanOf(etNode) == true;
+        if (fm.TryGetValue("charset", out var csNode))                             // PS-624
+            f.Utf8 = Scalar(csNode) == "utf-8";
         f.Checksum = PayloadSchema.Checksum.Parse(fm);                    // PS-585 (CR-2026-174)
         if (fm.TryGetValue("byte_group", out var bgNode))
         {

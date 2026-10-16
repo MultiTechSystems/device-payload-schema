@@ -24,7 +24,7 @@ public static class Helpers
     /// tools/schema_interpreter.py.
     /// </summary>
     public static string DecodeAscii(string? name, ReadOnlySpan<byte> raw, List<string> warnings,
-        string? nul = null)
+        string? nul = null, bool utf8 = false)
     {
         var chars = new char[raw.Length];
         bool high = false;
@@ -33,9 +33,11 @@ public static class Helpers
             chars[i] = (char)raw[i];
             if (raw[i] > 0x7F) high = true;
         }
+        var kept = AsciiText.ApplyNulMode(new string(chars), nul);             // PS-534
+        if (utf8) return AsciiText.DecodeUtf8(name, kept);                     // PS-624
         if (high)
             warnings.Add($"Field '{name}': a byte above 0x7F in an ascii value (PS-073, PS-538)");
-        return AsciiText.ApplyNulMode(new string(chars), nul);                 // PS-534
+        return kept;
     }
 
     /// <summary>
@@ -47,8 +49,10 @@ public static class Helpers
     /// which could split a character ("ABCé" to 414243c3).
     /// </summary>
     public static byte[] EncodeAscii(string? name, string text, int? length, List<string> warnings,
-        string? nul = null, int? terminator = null, bool writeTerminator = true)
+        string? nul = null, int? terminator = null, bool writeTerminator = true, bool utf8 = false)
     {
+        if (utf8)                                                               // PS-625
+            return AsciiText.EncodeUtf8(name, text, length, nul, terminator, writeTerminator);
         foreach (var ch in text)
             if (ch > 0xFF)
                 throw new FieldErrorException($"Field '{name}': an ascii value holds a character "

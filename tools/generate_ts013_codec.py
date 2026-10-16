@@ -674,6 +674,24 @@ function encMinifloat(type, value) {                  // encode_minifloat
   return sign + f;
 }
 
+// encode_ascii's UTF-8 form (PS-625, CR-2026-190): the text's UTF-8 bytes. A lone
+// surrogate, which has no UTF-8 form, is rejected as the reference's encode('utf-8') is.
+function encUtf8(text, name) {
+  var u = [];
+  for (var c = 0; c < text.length; c++) {
+    var cp = text.charCodeAt(c);
+    if (cp >= 0xD800 && cp <= 0xDBFF && c + 1 < text.length) {
+      var lo = text.charCodeAt(c + 1);
+      if (lo >= 0xDC00 && lo <= 0xDFFF) { cp = 0x10000 + ((cp - 0xD800) << 10) + (lo - 0xDC00); c++; }
+    }
+    if (cp >= 0xD800 && cp <= 0xDFFF) encFail("Field '" + name + "': an ascii value holds a lone surrogate, which has no UTF-8 form (PS-625)");
+    if (cp < 0x80) u.push(cp);
+    else if (cp < 0x800) u.push(0xC0 | (cp >> 6), 0x80 | (cp & 0x3F));
+    else if (cp < 0x10000) u.push(0xE0 | (cp >> 12), 0x80 | ((cp >> 6) & 0x3F), 0x80 | (cp & 0x3F));
+    else u.push(0xF0 | (cp >> 18), 0x80 | ((cp >> 12) & 0x3F), 0x80 | ((cp >> 6) & 0x3F), 0x80 | (cp & 0x3F));
+  }
+  return u;
+}
 function encPad(out, bytes, length) {
   for (var i = 0; i < length; i++) out.push(i < bytes.length ? bytes[i] & 0xFF : 0);
 }
@@ -833,8 +851,9 @@ function encFieldInner(out, f, value, endian, ctx) {  // _encode_field_inner
     var term = type === "ascii" && f.terminator !== undefined && f.terminator !== null ? f.terminator : null;
     if (term !== null) fixed = null;                  // PS-593: a terminated field has no width
     if (f.numeral && type === "ascii") value = encNumeral(f, value, fixed);   // encode_numeral (PS-561)
-    var text = String(value), u = [], high = false;
-    for (var c = 0; c < text.length; c++) {
+    var text = String(value), u = [], high = false, utf8 = type === "ascii" && f.charset === "utf-8";
+    if (utf8) u = encUtf8(text, f.name);                      // PS-625: UTF-8, no warning
+    for (var c = 0; !utf8 && c < text.length; c++) {
       var code = text.charCodeAt(c);
       if (code > 0xFF) {
         encFail("Field '" + f.name + "': an ascii value holds a character above U+00FF, which has no byte (PS-537)");
@@ -849,7 +868,7 @@ function encFieldInner(out, f, value, endian, ctx) {  // _encode_field_inner
       encFail("Field '" + f.name + "': a nul: stop value holds a 0x00 byte (PS-595)");
     }
     if (fixed !== null && u.length > fixed) {
-      encFail("Field '" + f.name + "': an ascii value of " + u.length + " bytes is longer than its length of " + fixed + " (PS-537)");
+      encFail("Field '" + f.name + "': an ascii value of " + u.length + " bytes is longer than its length of " + fixed + (utf8 ? " (PS-537, PS-625)" : " (PS-537)"));
     }
     if (high) ctx.wa.push("Field '" + f.name + "': a character above U+007F in an ascii value (PS-537)");
     if (term !== null) {                              // PS-595, PS-620
@@ -4097,6 +4116,33 @@ function need(buf, pos, size) {
 function needPeek(buf, pos, size) {
   if (pos + size > buf.length) throw underflow("Buffer underflow at peek offset " + pos);
 }
+/* PS-624 (CR-2026-190): `charset: utf-8` text. `s` holds one character per byte, as the
+ * byte rules (length, nul, terminator) left it; the bytes are decoded as UTF-8 (RFC 3629),
+ * and a sequence that is not well formed is an error naming the field and the position of
+ * its first byte within the text, as the reference's UnicodeDecodeError.start gives it. */
+function utf8Text(s, name) {
+  var out = "", i = 0, n = s.length;
+  while (i < n) {
+    var b = s.charCodeAt(i), len = 0, lo = 0x80, hi = 0xBF, cp = 0;
+    if (b < 0x80) { out += s.charAt(i); i++; continue; }
+    if (b >= 0xC2 && b <= 0xDF) { len = 1; cp = b & 0x1F; }
+    else if (b >= 0xE0 && b <= 0xEF) { len = 2; cp = b & 0x0F; if (b === 0xE0) lo = 0xA0; if (b === 0xED) hi = 0x9F; }
+    else if (b >= 0xF0 && b <= 0xF4) { len = 3; cp = b & 0x07; if (b === 0xF0) lo = 0x90; if (b === 0xF4) hi = 0x8F; }
+    var ok = len > 0;
+    for (var k = 1; ok && k <= len; k++) {
+      var c = i + k < n ? s.charCodeAt(i + k) : -1;
+      if (c < (k === 1 ? lo : 0x80) || c > (k === 1 ? hi : 0xBF)) ok = false;
+      else cp = (cp << 6) | (c & 0x3F);
+    }
+    if (!ok) {
+      throw new Error("Field '" + name + "': the bytes are not well-formed UTF-8 from byte " + i + " of the text (PS-624)");
+    }
+    if (cp > 0xFFFF) { cp -= 0x10000; out += String.fromCharCode(0xD800 + (cp >> 10), 0xDC00 + (cp & 0x3FF)); }
+    else out += String.fromCharCode(cp);
+    i += len + 1;
+  }
+  return out;
+}
 
 function orderedBytes(buf, pos, size, endian) {
   need(buf, pos, size);
@@ -5508,8 +5554,10 @@ function writeS(buf, pos, size, value, endian) {
                 # for one above 0x7F. Collected apart and reported after the decode's
                 # own warnings, where the reference reports a nested one.
                 from schema_interpreter import ASCII_HIGH_BYTE_WARNING
+                utf8 = field.get('charset') == 'utf-8'           # PS-624 (CR-2026-190)
                 warning = json.dumps(ASCII_HIGH_BYTE_WARNING.format(field.get('name')))
-                lines.append(f'{i}  if (/[\\u0080-\\u00ff]/.test({js_name})) wn.push({warning});')
+                if not utf8:
+                    lines.append(f'{i}  if (/[\\u0080-\\u00ff]/.test({js_name})) wn.push({warning});')
                 nul = field.get('nul', 'trailing')              # PS-534 (CR-2026-177)
                 if nul == 'stop':
                     lines.append(f'{i}  {js_name} = {js_name}.split("\\u0000")[0];')
@@ -5517,6 +5565,10 @@ function writeS(buf, pos, size, value, endian) {
                     lines.append(f'{i}  {js_name} = {js_name}.replace(/\\u0000/g, "");')
                 else:
                     lines.append(f'{i}  {js_name} = {js_name}.replace(/\\u0000+$/, "");')
+                if utf8:
+                    # PS-624: the bytes the byte rules leave, decoded as UTF-8.
+                    lines.append(f'{i}  {js_name} = utf8Text({js_name}, '
+                                 f'{json.dumps(str(field.get("name")))});')
                 if echo:
                     lines.append(f'{i}  pos = {js_name}_p0;')
                 elif field.get('terminator') is not None:

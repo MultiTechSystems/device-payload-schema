@@ -3517,6 +3517,47 @@ improved. The Go, Java and C# corpus runners write per-vector reports only when
   - **Measured:** no corpus, library, example or registry schema declares either key, so none
     is rejected and no decode or encode output changes.
 
+- **CR-2026-190 (PS-624, PS-625; la-payload-schema main ed1f2f2, for 0.5.8): UTF-8 text.** An
+  `ascii` field may declare `charset: utf-8`. Decode applies `length`, `nul` and `terminator` to the
+  bytes first, then decodes what they leave as UTF-8, with no PS-073 warning; bytes after a `nul:
+  stop` are never decoded. Bytes that are not well-formed UTF-8 are `Field 'c': the bytes are not
+  well-formed UTF-8 from byte 2 of the text (PS-624)` - the **position within the text**, not the
+  payload offset (the Implementation Record's departure), and the first byte of the first bad
+  sequence, as Python's `UnicodeDecodeError.start` gives it (a sequence cut short, an overlong form
+  and an encoded surrogate are all named at their lead byte). Encode writes UTF-8 and `length`
+  counts bytes: `... an ascii value of 10 bytes is longer than its length of 8 (PS-537, PS-625)`,
+  no PS-537 character warning; a lone surrogate (no UTF-8 form) is rejected naming the field.
+  - **Load (the prototype's text):** `Field 'c': charset is utf-8, on an ascii field (PS-624)`, for
+    any other value (`UTF-8` included) and for the key on any other type. Python `charset_errors`
+    (from `schema_iterator_errors`, so the validator and the TS013 generator too), Go
+    `checkCharset` (`go/schema/cr190.go`, from `checkFieldRules`), Java `AsciiText.checkCharset`
+    (from `checkWave4`), C# `AsciiText.CheckCharset` (from `CheckWave4`).
+  - **Where:** Python `decode_ascii`/`encode_ascii(..., charset)`; the generator's ascii branch
+    (`utf8Text`, in the always-emitted helpers, so `--slim` decodes it) and `encUtf8` in
+    `ENCODER_RUNTIME_JS`; Go `decodeUTF8Text`/`encodeUTF8Text` (`Field.Charset`); Java
+    `AsciiText.firstBadUtf8`/`decodeUtf8` and `Encoder.encodeAscii` (`Field.isUtf8`); C#
+    `AsciiText.DecodeUtf8`/`EncodeUtf8` via `Helpers.DecodeAscii`/`EncodeAscii` (`Field.Utf8`).
+    Java, C# and the codec validate by hand (RFC 3629's table) so the position agrees with Python;
+    Go uses `utf8.DecodeRune`, whose first `RuneError` of size 1 is the same byte. A
+    non-consuming field's echo check (PS-588) decodes the same way.
+  - **Before:** every implementation ignored the key - each byte was its Latin-1 character with
+    PS-073's warning, so UTF-8 text read as mojibake - and the validator refused it as unknown.
+  - **C:** has no UTF-8 ascii; `tools/schema_binary.py` refuses `charset` by name (PS-446) and the
+    C harness files it as a C gap.
+  - **Cases and fixture:** `tests/cr-2026-190-cases.yaml` (11 decode, 6 encode, 4 load; the
+    prototype's `TestCR2026190Utf8Text` and more, with exact `warnings` where given) read by
+    `test_cr_2026_190_cases.py` (reference and generated codec), Go `cr190_test.go`, Java
+    `CR2026190Test`, C# `CR2026_190Tests`. Fixture `ascii-utf8` (3 vectors, `source: generated`:
+    two-byte characters filling a padded length, plain text and empty terminated text, a four-byte
+    character): decode 2939 -> 2942 in Go, Java and C#; re-encode +3 everywhere, all `plain fixed`
+    (Python 2324 -> 2327, `plain fixed` 262 -> 265; Java 2324 -> 2327; C# 2325 -> 2328; Java and
+    C# `plain fixed` 256 -> 259; Go 2342 -> 2345, plain 2314 -> 2317, `plain fixed` 256 -> 259).
+  - **Measured:** no corpus, library, example or registry schema declares `charset`, and every
+    new path is reached only through it, so none is rejected and no decode or encode output
+    changes. The milesight em310-tilt and gs601/wt303/wt304/wt401 registry schemas read UTF-8
+    text as plain `ascii` today; with ASCII content the two agree, so adopting the key is a
+    registry follow-up.
+
 - **CR-2026-175 (PS-453 and PS-015 amended, PS-588, PS-589; la-payload-schema main 9e8957a, for
   0.5.7): a byte string that does not consume reports its span again.** A `bytes`, `hex` or
   `ascii` field declaring `consume: 0` reads and reports its span and leaves the read position,

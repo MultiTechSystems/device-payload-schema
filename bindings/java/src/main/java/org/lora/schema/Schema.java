@@ -728,6 +728,7 @@ public class Schema {
         BitLabels.check(fm);                                  // PS-616, PS-617
         Packed.check(fm);                                     // PS-621
         AsciiText.check(fm);                                  // PS-534, PS-593, PS-072
+        AsciiText.checkCharset(fm);                           // PS-624
         if (fm.containsKey("match_value")) {
             throw new SchemaException(at + "match_value is withdrawn; write a signed type (sN), a "
                     + "signed bit range (sN[start:end]), encoding, match or guard instead (PS-426)");
@@ -1261,6 +1262,7 @@ public class Schema {
         f.setTerminator(AsciiText.terminatorOf(fm.get("terminator")));
         f.setKeepTerminator(Boolean.FALSE.equals(fm.get("consume_terminator")));   // PS-619
         f.setEndTerminates(Boolean.TRUE.equals(fm.get("end_terminates")));         // PS-619
+        f.setUtf8("utf-8".equals(fm.get("charset")));                               // PS-624
         if (fm.get("checksum") instanceof Map<?, ?> checksum) {                 // PS-585
             f.setChecksum((Map<String, Object>) checksum, String.valueOf(fm.get("type")));
         }
@@ -2159,7 +2161,8 @@ public class Schema {
                 // value is lossless and re-encodes to the same bytes (PS-537). US_ASCII
                 // decoded a byte above 0x7F as U+FFFD. PS-073's warning reports it.
                 String str = new String(data, StandardCharsets.ISO_8859_1);
-                for (byte b : data) {
+                for (int bi = 0; !field.isUtf8() && bi < data.length; bi++) {
+                    byte b = data[bi];
                     if ((b & 0xFF) > 0x7F) {
                         ctx.addWarning("Field '" + field.getName()
                                 + "': a byte above 0x7F in an ascii value (PS-073, PS-538)");
@@ -2170,6 +2173,9 @@ public class Schema {
                 // every NUL and then trimmed spaces, so "HC " read as "HC" and "A\0B"
                 // as "AB" where Python, Go and C# keep both.
                 value = AsciiText.applyNulMode(str, field.getNul());       // PS-534
+                if (field.isUtf8()) {
+                    value = AsciiText.decodeUtf8(field.getName(), (String) value);   // PS-624
+                }
                 if (field.getNumeral() != null) {
                     value = Numeral.decode(field.getName(), (String) value, field.getNumeral());   // PS-560
                 }
@@ -3408,6 +3414,7 @@ public class Schema {
                 int end = str.length();
                 while (end > 0 && str.charAt(end - 1) == '\0') end--;
                 Object value = str.substring(0, end);
+                if (field.isUtf8()) value = AsciiText.decodeUtf8(field.getName(), (String) value);   // PS-624
                 if (field.getNumeral() != null) {
                     value = Numeral.decode(field.getName(), (String) value, field.getNumeral());
                 }
