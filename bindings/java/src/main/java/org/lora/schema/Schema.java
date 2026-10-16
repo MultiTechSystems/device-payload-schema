@@ -314,6 +314,10 @@ public class Schema {
                             + problem);
                 }
             }
+            if (construct.equals("tlv")) {
+                String problem = OneFieldKeys.error(body, cases);       // CR-2026-194
+                if (problem != null) throw new SchemaException(problem);
+            }
         }
     }
 

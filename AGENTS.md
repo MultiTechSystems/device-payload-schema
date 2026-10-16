@@ -3426,6 +3426,48 @@ improved. The Go, Java and C# corpus runners write per-vector reports only when
     -> 2166, C# 2154 -> 2167, Go 2171 -> 2184, plain 2143 -> 2156), `match` 160 -> 173, every vector
     round-tripping.
 
+- **CR-2026-194 (PS-436, PS-437, PS-438, PS-440, PS-270; la-payload-schema branch
+  `cr/0.5.8-apply-194`, for 0.5.8): one-field tlv wildcard keys, and no tlv `default`.**
+  - **What it does.** A one-field tag may use `"[*]"` (any value) and `"[!n]"` (any value but
+    n), ranked below every exact key whatever their declaration order (PS-270). A tlv has no
+    `default` case: its catch-all is `"[*]"`.
+  - **Ranking: measured before, all five already right.** Python's `_decode_tlv` sweeps the
+    specificities 0, 1, 2 through `_match_composite_key`; Go `findTLVCaseKey`, Java
+    `findTLVCaseKey` and C# `FindTLVCaseKey` try the exact key first and then sweep
+    `matchCompositeCaseKey`'s specificity; the TS013 codec ranks the same. The fixture, written
+    `"[*]"`, `"[!0x02]"`, `1` so declaration order would read every entry as the catch-all,
+    passed in all five unchanged. No code changed for it.
+  - **Load rejections, the prototype's text (`check_one_field_keys`), no prefix:**
+    ``A tlv has no `default` case; its catch-all is the key "[*]" (PS-436, PS-438)``;
+    `TLV keys '[*]' and '[ * ]' are the same key (PS-437)`; `TLV keys '[!1]' and '[!2]' have
+    the same rank and can match the same tag (PS-440)`. The first problem only, keys in
+    declaration order (Go reads it through `keyOrder`). Python `tlv_one_field_key_errors` from
+    `case_body_errors` (the interpreter, the validator and the TS013 generator), Go
+    `checkOneFieldTLVKeys` (`go/schema/cr194.go`, after `checkOnRepeat`), Java `OneFieldKeys`
+    from `checkCaseBodies`, C# `OneFieldKeys.cs` from `CheckCaseBodies`. Before, every
+    implementation accepted a tlv `default` key and ignored it with no warning (an unmatched tag
+    went to `unknown:`), and accepted both duplicate forms.
+  - **Departure from the prototype:** it rejects `default` only on a one-field tag; PS-438's
+    text rejects it in any tlv's cases, and so does this repository. PS-437 and PS-440 are
+    checked here only among a one-field tag's one-element keys, as the prototype does; a
+    composite tag's keys are still not checked for either (open).
+  - **C:** no wildcard keys, and `tools/schema_binary.py` refuses every tlv already; the C
+    harness files the fixture as "not a tag this interpreter can key on".
+  - **Found, not fixed:** Python never matches a quoted list (`"[1, 2]"`) on a one-field tag -
+    it reads any `[`-key as a composite one, whose element count differs - though PS-438 allows
+    it. No corpus or registry schema writes one.
+  - **Measured:** no corpus, library, example or registry (058e63f) schema declares a tlv
+    `default` or two one-element keys, so nothing is rejected. atomsenses aem-codec (85/85) and
+    as-es-codec (147/147) already passed in the reference; the spec's 83 -> 85 was its prototype.
+  - **Cases:** `tests/cr-2026-194-cases.yaml` (the prototype's five tests, the ranking also in
+    reverse declaration order, and the PS-437 negated spelling), read by
+    `test_cr_2026_194_cases.py` (reference, validator, generator and codec), Go
+    `cr194_test.go`, Java `CR2026194Test`, C# `CR2026_194Tests`. Fixture
+    `_language-conformance/tlv-one-field-catch-all.yaml`: decode floors 2942 -> 2945 in
+    Go, Java and C#; re-encode +1 everywhere, `tlv` (Python and Java 2327 -> 2328, C# 2328 ->
+    2329, Go 2345 -> 2346, plain 2317 -> 2318): only the exact-key vector round-trips, since a
+    negated or catch-all key names no tag to write.
+
 - **CR-2026-177 (PS-534 amended, PS-072 amended, PS-593 to PS-595; la-payload-schema main
   9e8957a, for 0.5.7): `nul` and `terminator` on `ascii`.**
   - **What it does.** An `ascii` field declares `nul: trailing|stop|drop` (default `trailing`,

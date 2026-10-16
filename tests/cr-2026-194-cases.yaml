@@ -1,0 +1,53 @@
+# CR-2026-194 (0.5.8; PS-436, PS-437, PS-438, PS-440, PS-270): a one-field tlv tag may use
+# the keys "[*]" (any value) and "[!n]" (any value but n), ranked below every exact key
+# (PS-270) whatever order they are declared in; a tlv has no `default` case.
+#
+# One case list, mirroring the spec prototype's TestCR2026194OneFieldWildcardKeys, read by
+# the reference, the validator and the TS013 generator and codec
+# (tests/test_cr_2026_194_cases.py), Go (go/schema/cr194_test.go), Java (CR2026194Test.java)
+# and C# (CR2026_194Tests.cs).
+#
+# `schema` is YAML text. A case is either `error` (text the load error contains: the
+# prototype's message, or its requirement where the keys it names vary) or a list of
+# `decodes`, each a `payload` (hex) and `decoded` (JSON text).
+
+cases:
+
+- name: exact_then_negated_then_wildcard
+  schema: "name: t\nversion: 1\nfields:\n  - tlv:\n      tag_size: 1\n      length_size: 1\n      cases:\n        1: [{name: temperature, type: s16, div: 10}]\n        '[!0x02]': [{name: other, type: hex, length: 1}]\n        '[*]': [{name: raw, type: hex, length: 1}]\n"
+  decodes:
+  - {payload: "010200FA", decoded: "{\"temperature\": 25}"}
+  - {payload: "0501CD", decoded: "{\"other\": \"cd\"}"}
+  - {payload: "0201AB", decoded: "{\"raw\": \"ab\"}"}
+
+- name: declared_in_reverse_the_ranking_holds
+  schema: "name: t\nversion: 1\nfields:\n  - tlv:\n      tag_size: 1\n      length_size: 1\n      cases:\n        '[*]': [{name: raw, type: hex, length: 1}]\n        '[!0x02]': [{name: other, type: hex, length: 1}]\n        1: [{name: temperature, type: s16, div: 10}]\n"
+  decodes:
+  - {payload: "010200FA", decoded: "{\"temperature\": 25}"}
+  - {payload: "0501CD", decoded: "{\"other\": \"cd\"}"}
+  - {payload: "0201AB", decoded: "{\"raw\": \"ab\"}"}
+
+- name: wildcard_alone_is_a_catch_all
+  schema: "name: t\nversion: 1\nfields:\n  - tlv:\n      tag_size: 1\n      length_size: 1\n      cases:\n        '[*]': [{name: raw, type: hex, length: 1}]\n"
+  decodes:
+  - {payload: "7701EE", decoded: "{\"raw\": \"ee\"}"}
+
+- name: a_default_case_is_rejected
+  schema: "name: t\nversion: 1\nfields:\n  - tlv:\n      tag_size: 1\n      length_size: 1\n      cases:\n        default: [{name: x, type: u8}]\n"
+  error: "A tlv has no `default` case; its catch-all is the key \"[*]\" (PS-436, PS-438)"
+
+- name: a_default_case_beside_exact_keys_is_rejected
+  schema: "name: t\nversion: 1\nfields:\n  - tlv:\n      tag_size: 1\n      cases:\n        1: [{name: a, type: u8}]\n        default: [{name: x, type: u8}]\n"
+  error: "A tlv has no `default` case; its catch-all is the key \"[*]\" (PS-436, PS-438)"
+
+- name: two_negated_keys_are_rejected
+  schema: "name: t\nversion: 1\nfields:\n  - tlv:\n      tag_size: 1\n      length_size: 1\n      cases:\n        '[!1]': []\n        '[!2]': []\n"
+  error: "TLV keys '[!1]' and '[!2]' have the same rank and can match the same tag (PS-440)"
+
+- name: one_wildcard_written_twice_is_rejected
+  schema: "name: t\nversion: 1\nfields:\n  - tlv:\n      tag_size: 1\n      length_size: 1\n      cases:\n        '[*]': []\n        '[ * ]': []\n"
+  error: "TLV keys '[*]' and '[ * ]' are the same key (PS-437)"
+
+- name: one_negated_key_written_twice_is_rejected
+  schema: "name: t\nversion: 1\nfields:\n  - tlv:\n      tag_size: 1\n      length_size: 1\n      cases:\n        '[!1]': []\n        '[!0x01]': []\n"
+  error: "TLV keys '[!1]' and '[!0x01]' are the same key (PS-437)"
