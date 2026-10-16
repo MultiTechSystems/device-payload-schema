@@ -168,7 +168,8 @@ FIXABLE = ("templated-name", "separate-tlv")
 
 #: What a decode says when it could not read part of the payload. CR-2026-013 and
 #: CR-2026-021 put these there; they are the evidence this tool reads.
-UNREAD_MARKERS = ("undecoded", "unread", "discarded", "could not be delimited")
+UNREAD_MARKERS = ("undecoded", "unread", "discarded", "could not be delimited",
+                  "(PS-631)")
 
 
 def walk(node):

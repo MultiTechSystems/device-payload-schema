@@ -1,0 +1,54 @@
+# CR-2026-193 (PS-630, PS-631): a tlv entry with a length bounds its case. A case field that
+# reads past the entry's value bytes is an error naming the entry's tag, its offset in the
+# frame and the field; value bytes the case leaves unread are skipped with a warning, and the
+# next entry begins after them. An encoder writes the length of the bytes the case writes.
+#
+# Read by the reference and the generated codec (tests/test_cr_2026_193_cases.py), Go
+# (go/schema/cr193_test.go), Java (CR2026193Test.java) and C# (CR2026_193Tests.cs). Mirrors
+# the spec prototype's TestCR2026193TlvEntryBound case for case, and one encode case.
+#
+#   decode: `schema` (YAML text), `payload` (hex) and either `expected` (the whole decoded
+#           data) and `warnings` (the decode's warnings, exactly, in order), or `error`
+#           (text one of the errors contains; no data is reported).
+#   cases:  `schema`, `input` (JSON text) and `payload` (hex).
+#
+# The error and the warning are the spec prototype's text. The PS-535 message inside the
+# error gives the read's offset in the frame, as every implementation here reports it.
+
+decode:
+
+- name: reading_past_the_entry_is_an_error
+  schema: "name: t\nfields:\n  - tlv:\n      tag_size: 1\n      length_size: 1\n      cases:\n        1: [{name: a, type: u16}]\n        2: [{name: b, type: u8}]\n"
+  payload: "0101AA0201BB"
+  error: "tlv entry tag 1 at offset 0: Field 'a': Buffer underflow: need 2 bytes at offset 2, but only 1 remaining (PS-535); the case reads past the entry's 1 value byte(s) (PS-630)"
+
+- name: unread_value_bytes_are_skipped_with_a_warning
+  schema: "name: t\nfields:\n  - tlv:\n      tag_size: 1\n      length_size: 1\n      cases:\n        1: [{name: a, type: u16}]\n        2: [{name: b, type: u8}]\n"
+  payload: "0103AABBCC0201DD"
+  expected: {a: 43707, b: 221}
+  warnings: ["tlv entry tag 1 at offset 0: 1 byte(s) of its value not read (PS-631)"]
+
+- name: an_entry_read_exactly_warns_nothing
+  schema: "name: t\nfields:\n  - tlv:\n      tag_size: 1\n      length_size: 1\n      cases:\n        1: [{name: a, type: u16}]\n        2: [{name: b, type: u8}]\n"
+  payload: "0102AABB0201CC"
+  expected: {a: 43707, b: 204}
+  warnings: []
+
+- name: the_offset_is_the_entrys_in_the_frame
+  schema: "name: t\nfields:\n  - tlv:\n      tag_size: 1\n      length_size: 1\n      cases:\n        1: [{name: a, type: u16}]\n        2: [{name: b, type: u8}]\n"
+  payload: "0201CC0103AABBCC"
+  expected: {b: 204, a: 43707}
+  warnings: ["tlv entry tag 1 at offset 3: 1 byte(s) of its value not read (PS-631)"]
+
+- name: a_case_that_reads_nothing_skips_its_whole_value
+  schema: "name: t\nfields:\n  - tlv:\n      tag_size: 1\n      length_size: 1\n      cases:\n        1: [{name: a, type: u16}]\n        3: []\n"
+  payload: "0302EEFF0102AABB"
+  expected: {a: 43707}
+  warnings: ["tlv entry tag 3 at offset 0: 2 byte(s) of its value not read (PS-631)"]
+
+cases:
+
+- name: skipped_bytes_re_encode_without_them
+  schema: "name: t\nfields:\n  - tlv:\n      tag_size: 1\n      length_size: 1\n      cases:\n        1: [{name: a, type: u16}]\n        2: [{name: b, type: u8}]\n"
+  input: '{"a": 43707, "b": 221}'
+  payload: "0102aabb0201dd"

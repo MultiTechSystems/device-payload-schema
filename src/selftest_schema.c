@@ -692,6 +692,46 @@ static void test_a_cut_value_is_an_error(void) {
     TCHECK(r.bytes_unread == 0);
 }
 
+/* PS-630, PS-631 (CR-2026-193): an entry with a length bounds its case. Tag 1 is a u16
+ * `a`, tag 2 a u8 `b`. A field reading past the value bytes is an error naming the entry's
+ * tag and frame offset around the PS-535 message; bytes the case leaves unread are skipped
+ * and the next entry begins after them. This interpreter has no warning list, so PS-631's
+ * warning is not given (the harness counts it as a C gap). */
+static void build_bounded_tlv(schema_t* s) {
+    memset(s, 0, sizeof(*s));
+    s->endian = ENDIAN_BIG;
+    field_def_t t = field_tlv(1, 1);
+    strcpy(t.name, "channels");
+    field_add_tlv_case(&t, 1, 10, 1);
+    field_add_tlv_case(&t, 2, 11, 1);
+    schema_add_field(s, &t);
+    field_def_t a = field_u16("a", ENDIAN_BIG);
+    schema_place_field(s, 10, &a);
+    field_def_t b = field_u8("b");
+    schema_place_field(s, 11, &b);
+}
+
+static void test_a_tlv_entry_bounds_its_case(void) {
+    schema_t s;
+    decode_result_t r;
+    uint8_t past[] = {0x01, 0x01, 0xAA, 0x02, 0x01, 0xBB};
+    uint8_t unread[] = {0x02, 0x01, 0xCC, 0x01, 0x03, 0xAA, 0xBB, 0xCC, 0x02, 0x01, 0xDD};
+
+    build_bounded_tlv(&s);
+    TCHECK(schema_decode(&s, past, sizeof(past), &r) == SCHEMA_ERR_BUFFER);
+    TCHECK(strcmp(r.error_msg, "tlv entry tag 1 at offset 0: Field 'a': Buffer underflow: "
+                               "need 2 bytes at offset 2, but only 1 remaining (PS-535); "
+                               "the case reads past the entry's 1 value byte(s) "
+                               "(PS-630)") == 0);
+
+    TCHECK(schema_decode(&s, unread, sizeof(unread), &r) == SCHEMA_OK);
+    TCHECK(r.field_count == 3);
+    TCHECK(r.fields[0].value.i64 == 0xCC);
+    TCHECK(r.fields[1].value.i64 == 0xAABB);
+    TCHECK(r.fields[2].value.i64 == 0xDD);
+    TCHECK(r.bytes_unread == 0);
+}
+
 /* PS-472: bytes after the last field are reported - offset bytes_consumed, count
  * bytes_unread - and the decode is otherwise unchanged. */
 static void test_leftover_bytes_are_reported(void) {
@@ -2259,6 +2299,7 @@ void selftest_schema(void) {
     test_a_partial_tag_size_tag_is_an_error();
     test_a_cut_length_is_an_error();
     test_a_cut_value_is_an_error();
+    test_a_tlv_entry_bounds_its_case();
     test_leftover_bytes_are_reported();
     test_a_skip_past_the_end_is_an_error();
     test_a_short_read_names_the_field();

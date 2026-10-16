@@ -294,8 +294,9 @@ typedef struct {
      * truncation as an error, so the buffer has to hold the worst case rather than the
      * typical one. The longest is PS-486's length cut short, at 146 bytes with a
      * SCHEMA_MAX_NAME_LEN tlv name and three full-width numbers; PS-288's, which names
-     * the schema and both directions, is 103. */
-    char error_msg[152];
+     * the schema and both directions, is 103. 256 since CR-2026-193: PS-630 wraps a
+     * PS-535 message (141 at most) in the entry's tag, offset and length, 258 at most. */
+    char error_msg[272];
     /* PS-472: the bytes after the last field that nothing decoded. The other five
      * implementations report these as a warning; this interpreter has no warning list
      * (a fixed-size, allocation-free result has nowhere to keep text), so it reports the
@@ -1585,6 +1586,34 @@ static inline int schema_field_failed(
     return rc;
 }
 
+/* PS-630 (CR-2026-193): a short read inside a tlv entry with a length is an error naming
+ * the entry - its tag as the spec prototype writes it (a one-part tag a decimal, a two-part
+ * one `[a, b]`) and its offset in the frame - and the entry's length, around the PS-535
+ * message. Any other failure, or an entry with no length, is returned unchanged. */
+static inline int schema_tlv_entry_overrun(
+    decode_result_t* result,
+    int rc,
+    const field_def_t* tlv,
+    int packed,
+    size_t entry_start,
+    int entry_len
+) {
+    if (rc != SCHEMA_ERR_BUFFER || entry_len < 0) return rc;
+    char inner[sizeof(result->error_msg)];
+    memcpy(inner, result->error_msg, sizeof(inner));
+    inner[sizeof(inner) - 1] = '\0';
+    char tag[32];
+    if (tlv->tlv_tag_parts == 2) {
+        snprintf(tag, sizeof(tag), "[%d, %d]", (packed >> 8) & 0xFF, packed & 0xFF);
+    } else {
+        snprintf(tag, sizeof(tag), "%u", (unsigned)packed);
+    }
+    snprintf(result->error_msg, sizeof(result->error_msg),
+             "tlv entry tag %.12s at offset %u: %.141s; the case reads past the entry's %u "
+             "value byte(s) (PS-630)", tag, (unsigned)entry_start, inner, (unsigned)entry_len);
+    return rc;
+}
+
 /* ============================================
  * byte_group (CR-2026-131, PS-070, PS-364, PS-397)
  * ============================================
@@ -2030,6 +2059,12 @@ static inline int schema_decode_direction(
                     break;                  /* bytes from the tag on are left over */
                 }
 
+                /* PS-630, PS-631 (CR-2026-193): an entry with a length decodes its case
+                 * within its value bytes, a field reading past them is an error naming
+                 * the entry, and the next entry begins after them whatever the case read.
+                 * This interpreter has no warning list, so the unread bytes PS-631 warns
+                 * about are skipped without one - a C gap the harness counts. */
+                const size_t entry_end = entry_len >= 0 ? pos + (size_t)entry_len : len;
                 for (int f = 0; f < chosen->field_count; f++) {
                     int field_idx = chosen->field_start + f;
                     /* Bounded by the array, not by field_count: a case body is placed
@@ -2048,20 +2083,25 @@ static inline int schema_decode_direction(
                     }
                     if (schema->fields[field_idx].type == FIELD_TYPE_BYTE_GROUP) {
                         int grc = schema_decode_byte_group(schema, &schema->fields[field_idx],
-                                                           buf, len, &pos, result, &vars);
-                        if (grc != SCHEMA_OK) return grc;
+                                                           buf, entry_end, &pos, result, &vars);
+                        if (grc != SCHEMA_OK) {
+                            return schema_tlv_entry_overrun(result, grc, field, packed,
+                                                            entry_start, entry_len);
+                        }
                         continue;
                     }
 
                     int rc = decode_field(
                         &schema->fields[field_idx],
-                        buf, len, &pos,
+                        buf, entry_end, &pos,
                         &result->fields[result->field_count],
                         &vars, schema->endian
                     );
                     if (rc != SCHEMA_OK) {
-                        return schema_field_failed(result, rc, &schema->fields[field_idx],
-                                                   buf, pos, len, schema->endian);
+                        rc = schema_field_failed(result, rc, &schema->fields[field_idx],
+                                                 buf, pos, entry_end, schema->endian);
+                        return schema_tlv_entry_overrun(result, rc, field, packed,
+                                                        entry_start, entry_len);
                     }
                     result->fields[result->field_count].field_index = field_idx;
                     schema_note_checksum(result, &result->fields[result->field_count],
@@ -2070,6 +2110,7 @@ static inline int schema_decode_direction(
                         result->field_count++;
                     }
                 }
+                if (entry_len >= 0 && pos < entry_end) pos = entry_end;   /* PS-631 */
             }
             continue;
         }

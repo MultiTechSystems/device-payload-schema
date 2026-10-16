@@ -3729,14 +3729,26 @@ func decodeTLV(field Field, ctx *DecodeContext) (map[string]any, error) {
 			// PS-486, PS-619: an entry with a length is decoded within it, so the end of
 			// the entry is the end of the data for its value.
 			entryData := ctx.Data
+			entryEnd := -1
 			if dataLength >= 0 {
-				ctx.Data = entryData[:ctx.Offset+dataLength]
+				entryEnd = ctx.Offset + dataLength
+				ctx.Data = entryData[:entryEnd]
 			}
 			caseResult, err := decodeFields(caseFields, ctx)
 			ctx.Data = entryData
 			ctx.trace.pop(pushed)
 			if err != nil {
+				if entryEnd >= 0 {
+					// PS-630: a field read past the entry names the entry.
+					return nil, tlvEntryOverrun(err, tlvEntryWhere(tag, entryStart), dataLength)
+				}
 				return nil, err
+			}
+			if entryEnd >= 0 && ctx.Offset < entryEnd {
+				// PS-631: unread value bytes are skipped, with a warning.
+				ctx.Warnings = append(ctx.Warnings,
+					tlvEntryUnread(tlvEntryWhere(tag, entryStart), entryEnd-ctx.Offset))
+				ctx.Offset = entryEnd
 			}
 
 			if merge {

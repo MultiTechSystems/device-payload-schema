@@ -6078,12 +6078,31 @@ function writeS(buf, pos, size, value, endian) {
                 # PS-486, PS-619: the value is decoded within its entry's length, so the
                 # end of the entry is the end of the data for it.
                 lines.append(f'{i}      var _tlvB{fold_id} = buf; buf = buf.slice(0, pos + _tlvLen);')
-            self.indent += 2
+                lines.append(f'{i}      var _tlvL{fold_id} = _tlvLen, _tlvEnd{fold_id} = pos + _tlvLen;')
+                # PS-630, PS-631 (CR-2026-193): the entry is named by its tag and frame
+                # offset, a field reading past it is an error naming the entry, and the
+                # next entry begins after its value bytes, whatever the case read.
+                if len(tag_parts) == 1:
+                    where_tag = f'String({tag_parts[0]})'
+                else:
+                    where_tag = f'"[" + {tag_parts_expr}.join(", ") + "]"'
+                lines.append(f'{i}      var _tlvW{fold_id} = "tlv entry tag " + {where_tag} + '
+                             f'" at offset " + _tlvStart;')
+                lines.append(f'{i}      try {{')
+            self.indent += 3 if length_size else 2
             for cf in case_fields:
                 lines.extend(self._gen_decode_field(cf))
-            self.indent -= 2
+            self.indent -= 3 if length_size else 2
             if length_size:
+                lines.append(f'{i}      }} catch (_tlvE) {{ buf = _tlvB{fold_id}; '
+                             f'if (_tlvE && /\\(PS-535\\)$/.test(_tlvE.message)) '
+                             f'throw new Error(_tlvW{fold_id} + ": " + _tlvE.message + '
+                             f'"; the case reads past the entry\'s " + _tlvL{fold_id} + '
+                             f'" value byte(s) (PS-630)"); throw _tlvE; }}')
                 lines.append(f'{i}      buf = _tlvB{fold_id};')
+                lines.append(f'{i}      if (pos < _tlvEnd{fold_id}) {{ w.push(_tlvW{fold_id} + ": " + '
+                             f'(_tlvEnd{fold_id} - pos) + " byte(s) of its value not read '
+                             f'(PS-631)"); pos = _tlvEnd{fold_id}; }}')
             if separate:
                 lines.append(f'{i}      if (!_tlvOuter.channels) {{ _tlvOuter.channels = []; }}')
                 lines.append(f'{i}      _tlvOuter.channels.push(d); d = _tlvOuter;')
