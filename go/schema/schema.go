@@ -137,6 +137,9 @@ type Field struct {
 	// `end_terminates: true`: the end of the data ends the text too (PS-619).
 	KeepTerminator bool `json:"-" yaml:"-"`
 	EndTerminates  bool `json:"-" yaml:"-"`
+	// Charset is an ascii field's `charset`: "utf-8" decodes and encodes its bytes as
+	// UTF-8 text (PS-624, PS-625, CR-2026-190); empty for ISO 8859-1 (PS-538).
+	Charset string `json:"-" yaml:"-"`
 	// GroupEndian is a byte_group's own byte order (PS-364), empty for the context's.
 	GroupEndian string `json:"-" yaml:"-"`
 	// IntegerResult marks a computed field written `type: integer` (PS-283); its Type
@@ -1323,6 +1326,9 @@ func parseFieldMap(fm map[string]any, node *yaml.Node) Field {
 	}
 	if b, ok := fm["end_terminates"].(bool); ok && b {
 		f.EndTerminates = true // PS-619
+	}
+	if cs, ok := fm["charset"].(string); ok {
+		f.Charset = cs // PS-624
 	}
 	if typ, ok := fm["type"].(string); ok {
 		f.Type = canonicalFieldType(typ)
@@ -2813,7 +2819,15 @@ func decodeField(field Field, ctx *DecodeContext) (any, error) {
 		} else {
 			ctx.Offset += consumed // PS-593: consumed, not reported; PS-619: or left
 		}
-		value = decodeASCII(field.Name, data, ctx, field.Nul) // PS-534, PS-538
+		if field.Charset == "utf-8" {
+			text, err := decodeUTF8Text(field.Name, data, field.Nul) // PS-624
+			if err != nil {
+				return nil, err
+			}
+			value = text
+		} else {
+			value = decodeASCII(field.Name, data, ctx, field.Nul) // PS-534, PS-538
+		}
 		if field.Numeral != "" {
 			n, err := decodeNumeral(field.Name, value.(string), field.Numeral) // PS-560
 			if err != nil {
@@ -6430,7 +6444,13 @@ func encodeField(field Field, value any, ctx *EncodeContext) error {
 			if !ok {
 				strVal = fmt.Sprintf("%v", value)
 			}
-			data, err := encodeASCII(field.Name, strVal, fixed, ctx, field.Nul, terminator)
+			var data []byte
+			var err error
+			if field.Charset == "utf-8" && (field.Type == TypeAscii || field.Type == TypeAsciiLower) {
+				data, err = encodeUTF8Text(field.Name, strVal, fixed, field.Nul, terminator) // PS-625
+			} else {
+				data, err = encodeASCII(field.Name, strVal, fixed, ctx, field.Nul, terminator)
+			}
 			if err != nil {
 				return err
 			}

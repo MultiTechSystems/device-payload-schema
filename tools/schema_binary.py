@@ -202,6 +202,7 @@ C_UNSUPPORTED_KEYS = {
     "terminator": "the C interpreter has no terminator-delimited ascii (PS-593)",
     "consume_terminator": "the C interpreter has no terminator-delimited ascii (PS-619)",
     "end_terminates": "the C interpreter has no terminator-delimited ascii (PS-619)",
+    "charset": "the C interpreter has no UTF-8 ascii (PS-624)",
     "numeral": "the C interpreter holds ascii text, not the integer it spells (PS-560)",
     "bit_labels": "the C interpreter has no bit_labels; it reports a number, not the labels of its set bits (PS-616)",
     "join": "the C interpreter has no bit_labels (PS-616)",

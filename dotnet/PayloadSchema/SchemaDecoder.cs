@@ -672,7 +672,7 @@ public static class SchemaDecoder
                 var data = ctx.Read(length);
                 if (field.IsEcho) ctx.Offset = start;              // PS-588 (CR-2026-175)
                 else ctx.Offset += consumed;                       // consumed, not reported, or left
-                value = Helpers.DecodeAscii(field.Name, data, ctx.Warnings, field.Nul);
+                value = Helpers.DecodeAscii(field.Name, data, ctx.Warnings, field.Nul, field.Utf8);
                 if (field.Numeral != null)
                     value = Numeral.Decode(field.Name, (string)value, field.Numeral);   // PS-560
                 break;

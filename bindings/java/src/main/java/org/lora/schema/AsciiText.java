@@ -58,6 +58,58 @@ final class AsciiText {
         return String.valueOf(v);
     }
 
+    /**
+     * PS-624 (CR-2026-190): the index of the first byte of the first sequence that is not
+     * well-formed UTF-8 (RFC 3629), or -1 where every byte is; the position the reference's
+     * UnicodeDecodeError.start gives.
+     */
+    static int firstBadUtf8(byte[] b) {
+        int i = 0;
+        while (i < b.length) {
+            int c = b[i] & 0xFF;
+            if (c < 0x80) { i++; continue; }
+            int len;
+            int lo = 0x80;
+            int hi = 0xBF;
+            if (c >= 0xC2 && c <= 0xDF) len = 1;
+            else if (c >= 0xE0 && c <= 0xEF) { len = 2; if (c == 0xE0) lo = 0xA0; if (c == 0xED) hi = 0x9F; }
+            else if (c >= 0xF0 && c <= 0xF4) { len = 3; if (c == 0xF0) lo = 0x90; if (c == 0xF4) hi = 0x8F; }
+            else return i;
+            for (int k = 1; k <= len; k++) {
+                if (i + k >= b.length) return i;
+                int d = b[i + k] & 0xFF;
+                if (d < (k == 1 ? lo : 0x80) || d > (k == 1 ? hi : 0xBF)) return i;
+            }
+            i += len + 1;
+        }
+        return -1;
+    }
+
+    /**
+     * PS-624: the bytes the byte rules left ({@code kept}, one ISO 8859-1 character per
+     * byte) decoded as UTF-8; a sequence that is not well formed is an error naming the field
+     * and the position of its first byte within the text.
+     */
+    static String decodeUtf8(String name, String kept) {
+        byte[] raw = kept.getBytes(java.nio.charset.StandardCharsets.ISO_8859_1);
+        int bad = firstBadUtf8(raw);
+        if (bad >= 0) {
+            throw new SchemaException.DecodeException("Field '" + name + "': the bytes are not "
+                    + "well-formed UTF-8 from byte " + bad + " of the text (PS-624)");
+        }
+        return new String(raw, java.nio.charset.StandardCharsets.UTF_8);
+    }
+
+    /** PS-624: {@code charset} is {@code utf-8}, on an ascii field; the prototype's text. */
+    static void checkCharset(Map<?, ?> fm) {
+        if (!fm.containsKey("type") || !fm.containsKey("charset")) return;
+        if (!"ascii".equals(fm.get("type")) || !"utf-8".equals(fm.get("charset"))) {
+            Object name = fm.get("name");
+            throw new SchemaException("Field '" + (name instanceof String s ? s : "None")
+                    + "': charset is utf-8, on an ascii field (PS-624)");
+        }
+    }
+
     /** The load rule over one field mapping, in the spec prototype's text. */
     static void check(Map<?, ?> fm) {
         if (!fm.containsKey("type")) return;

@@ -74,6 +74,13 @@
           "type": "boolean",
           "description": "With terminator: true lets the end of the data (less any reserve, or a tlv entry's end) end the text too, which is then not an error (PS-619)."
         },
+        "charset": {
+          "type": "string",
+          "enum": [
+            "utf-8"
+          ],
+          "description": "On an ascii field: its bytes, after length, nul and terminator, are UTF-8 text; an encoder writes UTF-8 and length counts bytes (PS-624, PS-625)."
+        },
         "checksum": {
           "type": "object",
           "description": "On an unsigned integer field: the check value over the bytes from `from` to the byte before it, verified on decode and computed on encode (PS-585 to PS-587).",
