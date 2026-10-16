@@ -1009,9 +1009,11 @@ def run():
                 # rendered from `bytes_unread`.
                 ok, detail = warnings_match(vector.get("expected_warnings"), warnings)
                 if not ok and has_tlv:
-                    # A tlv's unknown-tag warning (PS-301/PS-302) names the tag, and the
-                    # result has no slot for it - a C gap, counted apart from a wrong
-                    # decode rather than hidden. The values were compared above.
+                    # A tlv's unknown-tag warning (PS-301/PS-302) names the tag, and so
+                    # does PS-631's for value bytes an entry's case left unread
+                    # (CR-2026-193); the result has no slot for either - a C gap, counted
+                    # apart from a wrong decode rather than hidden. The values were
+                    # compared above.
                     unreportable.append((key, detail))
                     passed += 1
                     continue
@@ -1028,8 +1030,8 @@ def run():
     print("=" * 74)
     print(f"  {passed:>5} of {attempted} attempted vectors decode as the corpus expects")
     print(f"  {len(failures):>5} differ")
-    print(f"  {len(unreportable):>5} of the passes expect a tlv unknown-tag warning, which "
-          "this interpreter has no slot to give")
+    print(f"  {len(unreportable):>5} of the passes expect a tlv warning (an unknown tag, "
+          "PS-631), which this interpreter has no slot to give")
     print(f"  {skipped_vectors:>5} not attempted, in {sum(skips.values())} schemas "
           + ("the binary form cannot carry" if args.from_blob
              else "the struct API cannot build"))

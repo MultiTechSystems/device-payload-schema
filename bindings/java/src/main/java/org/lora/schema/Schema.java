@@ -2817,12 +2817,24 @@ public class Schema {
                 // PS-486, PS-619: an entry with a length is decoded within it, so the end of
                 // the entry is the end of the data for its value.
                 int entryLimit = ctx.getLimit();
-                if (dataLength >= 0) ctx.setLimit(ctx.getOffset() + dataLength);
+                int entryEnd = dataLength >= 0 ? ctx.getOffset() + dataLength : -1;
+                if (dataLength >= 0) ctx.setLimit(entryEnd);
                 try {
                     caseResult = decodeFields(caseFields, ctx);
+                } catch (SchemaException.BufferUnderflow under) {
+                    // PS-630: a field read past the entry names the entry.
+                    if (entryEnd < 0) throw under;
+                    throw TlvEntryBound.overrun(TlvEntryBound.where(tag, entryStart), under,
+                            dataLength);
                 } finally {
                     ctx.setLimit(entryLimit);
                     if (rec != null) rec.pop(pushed);
+                }
+                if (entryEnd >= 0 && ctx.getOffset() < entryEnd) {
+                    // PS-631: unread value bytes are skipped, with a warning.
+                    ctx.addWarning(TlvEntryBound.unread(TlvEntryBound.where(tag, entryStart),
+                            entryEnd - ctx.getOffset()));
+                    ctx.setOffset(entryEnd);
                 }
                 
                 if (merge) {

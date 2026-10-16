@@ -1745,13 +1745,25 @@ public static class SchemaDecoder
                 var pushed = ctx.Trace?.Push(field.Anchor, "tlv", entryIndex) ?? false;
                 // PS-486, PS-619: an entry with a length is decoded within it, so the end of
                 // the entry is the end of the data for its value.
+                var entryEnd = dataLength >= 0 ? ctx.Offset + dataLength : -1;
                 try
                 {
                     caseResult = dataLength >= 0
-                        ? ctx.WithRegion(ctx.Offset + dataLength, () => DecodeFields(caseFields, ctx, null))
+                        ? ctx.WithRegion(entryEnd, () => DecodeFields(caseFields, ctx, null))
                         : DecodeFields(caseFields, ctx, null);
                 }
+                catch (BufferUnderflowException under) when (entryEnd >= 0)
+                {
+                    // PS-630: a field read past the entry names the entry.
+                    throw TlvEntryBound.Overrun(TlvEntryBound.Where(tag, entryStart), under, dataLength);
+                }
                 finally { ctx.Trace?.Pop(pushed); }
+                if (entryEnd >= 0 && ctx.Offset < entryEnd)
+                {
+                    // PS-631: unread value bytes are skipped, with a warning.
+                    ctx.Warnings.Add(TlvEntryBound.Unread(TlvEntryBound.Where(tag, entryStart), entryEnd - ctx.Offset));
+                    ctx.Offset = entryEnd;
+                }
 
                 if (merge)
                 {
