@@ -429,7 +429,8 @@ def echo_value(field_def, span: bytes) -> Any:
         return format_bytes(field_def, span)
     if ftype == 'hex':
         return span.hex()
-    value = decode_ascii(field_def.get('name'), span, [])
+    value = decode_ascii(field_def.get('name'), span, [], 'trailing',
+                         field_def.get('charset'))
     if field_def.get('numeral'):
         value = decode_numeral(field_def.get('name'), value, field_def['numeral'])
     return value
@@ -2637,14 +2638,49 @@ def apply_nul_mode(text: str, mode: str) -> str:
     return text.rstrip('\x00')
 
 
-def decode_ascii(name: Any, raw: bytes, warnings: List[str], nul: str = 'trailing') -> str:
+def decode_ascii(name: Any, raw: bytes, warnings: List[str], nul: str = 'trailing',
+                 charset: Optional[str] = None) -> str:
     """PS-534, PS-538: each byte is the ISO 8859-1 character of the same number, so the
     value is lossless and re-encodes to the same bytes (PS-537); the field's `nul` mode
     (trailing 0x00 padding by default) is applied. A byte above 0x7F is reported with
-    PS-073's warning."""
+    PS-073's warning.
+
+    PS-624 (CR-2026-190): with `charset: utf-8` the bytes the `nul` mode leaves are decoded
+    as UTF-8, with no warning; a sequence that is not well formed is an error naming the
+    field and the position of its first bad byte within the text."""
+    if charset == 'utf-8':
+        kept = apply_nul_mode(raw.decode('latin-1'), nul).encode('latin-1')
+        try:
+            return kept.decode('utf-8')
+        except UnicodeDecodeError as exc:
+            raise FieldError(f"Field '{name}': the bytes are not well-formed UTF-8 from "
+                             f"byte {exc.start} of the text (PS-624)") from None
     if any(byte > 0x7F for byte in raw):
         warnings.append(ASCII_HIGH_BYTE_WARNING.format(name))
     return apply_nul_mode(raw.decode('latin-1'), nul)
+
+
+#: PS-624 (CR-2026-190): the one value `charset` takes, on an ascii field only.
+CHARSETS = ('utf-8',)
+
+
+def charset_errors(node, _top=True):
+    """PS-624: `charset` is `utf-8`, on an ascii field; anything else is refused, in the
+    spec prototype's text. Walked over the whole schema."""
+    errors = []
+    if isinstance(node, list):
+        for item in node:
+            errors.extend(charset_errors(item, False))
+    elif isinstance(node, dict):
+        if 'type' in node and 'charset' in node:
+            if node.get('type') != 'ascii' or node['charset'] not in CHARSETS:
+                errors.append(f"Field '{node.get('name')}': charset is utf-8, on an ascii "
+                              f"field (PS-624)")
+        for key, value in node.items():
+            if _top and key == 'test_vectors':
+                continue
+            errors.extend(charset_errors(value, False))
+    return errors
 
 
 def terminated_span(field_def: Dict[str, Any], buf: bytes, pos: int) -> Tuple[int, int]:
@@ -2984,16 +3020,24 @@ def bitfield_part_errors(node, _top=True):
 def encode_ascii(name: Any, value: Any, length: Optional[int],
                  warnings: List[str], nul: str = 'trailing',
                  terminator: Optional[int] = None,
-                 consume_terminator: bool = True) -> bytes:
+                 consume_terminator: bool = True,
+                 charset: Optional[str] = None) -> bytes:
     """PS-537: a character above U+00FF, or a value longer than a fixed `length`, is
     rejected naming the field; U+0080..U+00FF is written as the byte of the same number
     with a warning; a short value is padded with 0x00. `length` is None where the field's
-    length is not fixed (`remaining`, a reference), and the value then supplies it."""
+    length is not fixed (`remaining`, a reference), and the value then supplies it.
+    PS-625 (CR-2026-190): with `charset: utf-8` the value is written as UTF-8, with no
+    warning, and `length` counts its bytes."""
     text = str(value)
-    if any(ord(ch) > 0xFF for ch in text):
+    utf8 = charset == 'utf-8'
+    if not utf8 and any(ord(ch) > 0xFF for ch in text):
         raise FieldError(f"Field '{name}': an ascii value holds a character above "
                          f"U+00FF, which has no byte (PS-537)")
-    encoded = text.encode('latin-1')
+    try:
+        encoded = text.encode('utf-8' if utf8 else 'latin-1')
+    except UnicodeEncodeError:
+        raise FieldError(f"Field '{name}': an ascii value holds a lone surrogate, which has "
+                         f"no UTF-8 form (PS-625)") from None
     if terminator is not None and terminator in encoded:               # PS-595
         raise FieldError(f"Field '{name}': the value holds its terminator byte "
                          f"0x{terminator:02X} (PS-595)")
@@ -3003,8 +3047,9 @@ def encode_ascii(name: Any, value: Any, length: Optional[int],
         length = None
     if length is not None and len(encoded) > length:
         raise FieldError(f"Field '{name}': an ascii value of {len(encoded)} bytes is "
-                         f"longer than its length of {length} (PS-537)")
-    if any(byte > 0x7F for byte in encoded):
+                         f"longer than its length of {length} "
+                         f"(PS-537{', PS-625' if utf8 else ''})")
+    if not utf8 and any(byte > 0x7F for byte in encoded):
         warnings.append(f"Field '{name}': a character above U+007F in an ascii value "
                         f"(PS-537)")
     if terminator is not None and not consume_terminator:
@@ -4724,6 +4769,7 @@ def schema_iterator_errors(schema):
     errors.extend(bit_labels_errors(schema))                         # PS-616, PS-617
     errors.extend(packed_repeat_errors(schema))                      # PS-621
     errors.extend(ascii_text_errors(schema))                         # PS-534, PS-593
+    errors.extend(charset_errors(schema))                            # PS-624
     errors.extend(checksum_errors(schema))                           # PS-585
     errors.extend(checksum_placement_errors(schema))                 # PS-608
     errors.extend(bitfield_part_errors(schema))                      # PS-430
@@ -7005,7 +7051,8 @@ class SchemaInterpreter:
             if pos + length > len(buf):
                 raise BufferUnderflow.need(length, pos, len(buf))
             value = decode_ascii(field_def.get('name'), buf[pos:pos + length],
-                                 self._nested_warnings, field_def.get('nul', 'trailing'))
+                                 self._nested_warnings, field_def.get('nul', 'trailing'),
+                                 field_def.get('charset'))              # PS-624
             if field_def.get('numeral'):                                 # PS-594
                 value = decode_numeral(field_def.get('name'), value, field_def['numeral'])
             if is_echo(field_def):                                       # PS-588
@@ -11582,7 +11629,8 @@ class SchemaInterpreter:
             return encode_ascii(field_def.get('name'), value, fixed,
                                 self._encode_warnings, field_def.get('nul', 'trailing'),
                                 field_def.get('terminator') if field_type == 'ascii' else None,
-                                field_def.get('consume_terminator') is not False)
+                                field_def.get('consume_terminator') is not False,
+                                field_def.get('charset') if field_type == 'ascii' else None)
         
         if field_type in ('hex', 'base64'):
             # PS-601 and PS-602 apply to the hex and base64 types as to `bytes` with that

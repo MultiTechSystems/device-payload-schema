@@ -333,6 +333,10 @@ func checkFieldRules(field map[string]any, at string) error {
 	if err := checkAsciiText(field); err != nil {
 		return err
 	}
+	// PS-624 (CR-2026-190): charset is utf-8, on an ascii field.
+	if err := checkCharset(field); err != nil {
+		return err
+	}
 	// PS-585 (CR-2026-174): a checksum on an unsigned integer wide enough for its algo.
 	if err := checkChecksum(field); err != nil {
 		return err

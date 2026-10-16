@@ -53,6 +53,10 @@ public class Field {
     private boolean endTerminates;
     public boolean isEndTerminates() { return endTerminates; }
     public void setEndTerminates(boolean end) { this.endTerminates = end; }
+    /** {@code charset: utf-8}: the text is UTF-8 (PS-624, PS-625, CR-2026-190). */
+    private boolean utf8;
+    public boolean isUtf8() { return utf8; }
+    public void setUtf8(boolean utf8) { this.utf8 = utf8; }
     /** A {@code checksum} declaration and the type it sits on (PS-585, CR-2026-174). */
     private Map<String, Object> checksum;
     private String checksumType;

@@ -3377,7 +3377,8 @@ public static class SchemaEncoder
                     var text = Numeral.Encode(field.Name, Helpers.ToFloat64(value).Item2,
                         fixedLen, field.Numeral);
                     return Helpers.EncodeAscii(field.Name, text, fixedLen,
-                        _result.Warnings, field.Nul, field.Terminator, !field.KeepTerminator);
+                        _result.Warnings, field.Nul, field.Terminator, !field.KeepTerminator,
+                        field.Utf8);
                 }
                 case FieldType.Ascii or FieldType.String:
                     // PS-537. A fixed `length` pads and bounds the value; `remaining` or a
@@ -3386,7 +3387,7 @@ public static class SchemaEncoder
                         field.Length > 0 && field.LengthRef == null ? field.Length : null,
                         _result.Warnings, field.Nul,
                         field.Type == FieldType.Ascii ? field.Terminator : null,
-                        !field.KeepTerminator);
+                        !field.KeepTerminator, field.Type == FieldType.Ascii && field.Utf8);
             }
 
             throw new InvalidOperationException($"Cannot encode type: {field.Type}");
@@ -3867,7 +3868,8 @@ internal sealed class FrameMeta
                 return Convert.ToHexString(span).ToLowerInvariant();
             default:
             {
-                object text = Helpers.DecodeAscii(field.Name, span, new List<string>());
+                object text = Helpers.DecodeAscii(field.Name, span, new List<string>(), null,
+                    field.Utf8);
                 if (field.Numeral != null)
                     text = Numeral.Decode(field.Name, (string)text, field.Numeral);
                 return text;

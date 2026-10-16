@@ -1,0 +1,32 @@
+# An ascii field declaring `charset: utf-8` holds UTF-8 text (PS-624, PS-625, CR-2026-190).
+# The byte rules apply first - a fixed length padded with 0x00, or a terminator - and the
+# bytes they leave are decoded as UTF-8, with no PS-073 warning. An encoder writes UTF-8,
+# its length counting bytes, so each vector re-encodes to its payload. Malformed UTF-8 and a
+# value too long in bytes are held by tests/cr-2026-190-cases.yaml.
+name: probe_ascii_utf8
+endian: big
+fields:
+- name: label
+  type: ascii
+  length: 8
+  charset: utf-8
+- name: model
+  type: ascii
+  terminator: 0x3B
+  charset: utf-8
+- name: battery
+  type: u8
+test_vectors:
+- name: two_byte_characters_filling_the_length
+  source: generated
+  payload: "C3856E67C2B04300C3A93B64"
+  expected: {label: "Ång°C", model: "é", battery: 100}
+  expected_warnings: []
+- name: plain_text_padded_and_empty_text
+  source: generated
+  payload: "6F6B0000000000003B07"
+  expected: {label: "ok", model: "", battery: 7}
+- name: a_four_byte_character_padded
+  source: generated
+  payload: "F09F98800000000078C2B03BFF"
+  expected: {label: "\U0001F600", model: "x°", battery: 255}

@@ -3558,14 +3558,27 @@ final class Encoder {
      */
     private byte[] encodeAscii(Field field, String text) {
         String name = field.getName();
-        for (int i = 0; i < text.length(); i++) {
+        // PS-625 (CR-2026-190): `charset: utf-8` writes UTF-8, with no PS-537 warning, and
+        // `length` counts its bytes.
+        boolean utf8 = field.isUtf8() && field.getType() == FieldType.ASCII;
+        for (int i = 0; utf8 && i < text.length(); i++) {
+            char ch = text.charAt(i);
+            if (Character.isHighSurrogate(ch) && i + 1 < text.length()
+                    && Character.isLowSurrogate(text.charAt(i + 1))) {
+                i++;
+            } else if (Character.isSurrogate(ch)) {
+                throw new SchemaException.FieldEncodeException("Field '" + name
+                        + "': an ascii value holds a lone surrogate, which has no UTF-8 form (PS-625)");
+            }
+        }
+        for (int i = 0; !utf8 && i < text.length(); i++) {
             // A character outside the BMP is a surrogate pair, each half above U+00FF.
             if (text.charAt(i) > 0xFF) {
                 throw new SchemaException.FieldEncodeException("Field '" + name
                         + "': an ascii value holds a character above U+00FF, which has no byte (PS-537)");
             }
         }
-        byte[] raw = text.getBytes(StandardCharsets.ISO_8859_1);
+        byte[] raw = text.getBytes(utf8 ? StandardCharsets.UTF_8 : StandardCharsets.ISO_8859_1);
         Object declared = field.getRaw() != null ? field.getRaw().get("length") : null;
         Integer fixed = declared instanceof Integer n && n >= 0 ? n : null;
         Integer terminator = field.getType() == FieldType.ASCII ? field.getTerminator() : null;
@@ -3589,10 +3602,10 @@ final class Encoder {
         }
         if (fixed != null && raw.length > fixed) {
             throw new SchemaException.FieldEncodeException(String.format(
-                    "Field '%s': an ascii value of %d bytes is longer than its length of %d (PS-537)",
-                    name, raw.length, fixed));
+                    "Field '%s': an ascii value of %d bytes is longer than its length of %d (PS-537%s)",
+                    name, raw.length, fixed, utf8 ? ", PS-625" : ""));
         }
-        for (byte b : raw) {
+        for (byte b : utf8 ? new byte[0] : raw) {
             if ((b & 0xFF) > 0x7F) {
                 warnings.add("Field '" + name + "': a character above U+007F in an ascii value (PS-537)");
                 break;

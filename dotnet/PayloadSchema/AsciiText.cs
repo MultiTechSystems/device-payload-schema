@@ -79,6 +79,95 @@ internal static class AsciiText
     }
 
     /// <summary>The load rule over one field mapping, in the spec prototype's text.</summary>
+    /// <summary>
+    /// PS-624 (CR-2026-190): the index of the first byte of the first sequence that is not
+    /// well-formed UTF-8 (RFC 3629), or -1; the position the reference's
+    /// UnicodeDecodeError.start gives.
+    /// </summary>
+    internal static int FirstBadUtf8(byte[] b)
+    {
+        int i = 0;
+        while (i < b.Length)
+        {
+            int c = b[i];
+            if (c < 0x80) { i++; continue; }
+            int len, lo = 0x80, hi = 0xBF;
+            if (c >= 0xC2 && c <= 0xDF) len = 1;
+            else if (c >= 0xE0 && c <= 0xEF) { len = 2; if (c == 0xE0) lo = 0xA0; if (c == 0xED) hi = 0x9F; }
+            else if (c >= 0xF0 && c <= 0xF4) { len = 3; if (c == 0xF0) lo = 0x90; if (c == 0xF4) hi = 0x8F; }
+            else return i;
+            for (int k = 1; k <= len; k++)
+            {
+                if (i + k >= b.Length) return i;
+                int d = b[i + k];
+                if (d < (k == 1 ? lo : 0x80) || d > (k == 1 ? hi : 0xBF)) return i;
+            }
+            i += len + 1;
+        }
+        return -1;
+    }
+
+    /// <summary>
+    /// PS-624: the bytes the byte rules left (<paramref name="kept"/>, one ISO 8859-1
+    /// character per byte) decoded as UTF-8; a sequence that is not well formed is an error
+    /// naming the field and the position of its first byte within the text.
+    /// </summary>
+    internal static string DecodeUtf8(string? name, string kept)
+    {
+        var raw = new byte[kept.Length];
+        for (int i = 0; i < kept.Length; i++) raw[i] = (byte)kept[i];
+        int bad = FirstBadUtf8(raw);
+        if (bad >= 0)
+            throw new FieldErrorException($"Field '{name}': the bytes are not well-formed UTF-8 "
+                + $"from byte {bad} of the text (PS-624)");
+        return System.Text.Encoding.UTF8.GetString(raw);
+    }
+
+    /// <summary>
+    /// PS-625: a <c>charset: utf-8</c> value written as UTF-8, under the terminator,
+    /// <c>nul: stop</c> and length rules of Helpers.EncodeAscii, with no PS-537 warning;
+    /// <c>length</c> counts bytes.
+    /// </summary>
+    internal static byte[] EncodeUtf8(string? name, string text, int? length, string? nul,
+        int? terminator, bool writeTerminator)
+    {
+        byte[] raw;
+        try
+        {
+            raw = new System.Text.UTF8Encoding(false, true).GetBytes(text);
+        }
+        catch (System.Text.EncoderFallbackException)
+        {
+            throw new FieldErrorException($"Field '{name}': an ascii value holds a lone surrogate, "
+                + "which has no UTF-8 form (PS-625)");
+        }
+        if (terminator is int term && raw.Any(b => b == term))                  // PS-595
+            throw new FieldErrorException($"Field '{name}': the value holds its terminator byte "
+                + $"0x{term:X2} (PS-595)");
+        if (nul == "stop" && raw.Contains((byte)0))                             // PS-595
+            throw new FieldErrorException($"Field '{name}': a nul: stop value holds a 0x00 byte (PS-595)");
+        if (terminator != null) length = null;                                 // PS-593: no width
+        if (!writeTerminator) terminator = null;
+        if (length is int fixedLength && raw.Length > fixedLength)
+            throw new FieldErrorException($"Field '{name}': an ascii value of {raw.Length} bytes "
+                + $"is longer than its length of {fixedLength} (PS-537, PS-625)");
+        var output = new byte[length ?? raw.Length + (terminator != null ? 1 : 0)];
+        raw.CopyTo(output, 0);
+        if (terminator is int endByte) output[raw.Length] = (byte)endByte;     // PS-595
+        return output;
+    }
+
+    /// <summary>PS-624: <c>charset</c> is <c>utf-8</c>, on an ascii field; the prototype's text.</summary>
+    internal static void CheckCharset(YamlMappingNode fm)
+    {
+        if (!fm.Children.TryGetValue(new YamlScalarNode("type"), out var typeNode)) return;
+        if (!fm.Children.TryGetValue(new YamlScalarNode("charset"), out var cs)) return;
+        if ((typeNode as YamlScalarNode)?.Value == "ascii" && cs is YamlScalarNode sc && sc.Value == "utf-8")
+            return;
+        var name = fm.Children.TryGetValue(new YamlScalarNode("name"), out var n) ? (n as YamlScalarNode)?.Value : "None";
+        throw new InvalidOperationException($"Field '{name}': charset is utf-8, on an ascii field (PS-624)");
+    }
+
     internal static void Check(YamlMappingNode fm)
     {
         if (!fm.Children.TryGetValue(new YamlScalarNode("type"), out var typeNode)) return;

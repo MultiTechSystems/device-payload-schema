@@ -74,6 +74,13 @@ func echoValue(field Field, span []byte) (any, bool) {
 		runes[i] = rune(b)
 	}
 	text := strings.TrimRight(string(runes), "\x00")
+	if field.Charset == "utf-8" { // PS-624
+		utf, err := decodeUTF8Text(field.Name, span, "trailing")
+		if err != nil {
+			return nil, false
+		}
+		text = utf
+	}
 	if field.Numeral != "" {
 		n, err := decodeNumeral(field.Name, text, field.Numeral)
 		if err != nil {

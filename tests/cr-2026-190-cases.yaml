@@ -1,0 +1,128 @@
+# CR-2026-190 (PS-624, PS-625): an `ascii` field declaring `charset: utf-8` decodes the bytes
+# its byte rules (`length`, `nul`, `terminator`) leave as UTF-8, with no PS-073 warning, and
+# encodes its value as UTF-8, `length` counting bytes.
+#
+# Three lists, read by the reference and the generated codec
+# (tests/test_cr_2026_190_cases.py), Go (go/schema/cr190_test.go), Java (CR2026190Test.java)
+# and C# (CR2026_190Tests.cs). C cannot hold the key (PS-446). The spec prototype's
+# TestCR2026190Utf8Text, case for case, and a few more.
+#
+#   decode: `schema` (YAML text), `payload` (hex) and either `expected` (the whole decoded
+#           data) or `error` (text one of the errors contains; no data is reported);
+#           `warnings`, where given, is the whole list of warnings the decode reports.
+#   cases:  `schema`, `input` (JSON text) and either `payload` (hex) or `error`;
+#           `warnings` as for decode.
+#   load:   `schema` and the `error` its load reports.
+
+decode:
+
+- name: utf8_text_round_trips
+  schema: "name: t\nfields:\n  - {name: condition, type: ascii, length: 8, nul: stop, charset: utf-8}\n"
+  payload: "C3856E67C2B04300"
+  expected: {condition: "Ång°C"}
+  warnings: []
+
+- name: bytes_after_a_nul_stop_are_not_decoded
+  schema: "name: t\nfields:\n  - {name: condition, type: ascii, length: 8, nul: stop, charset: utf-8}\n"
+  payload: "6F6B00FFFE000000"
+  expected: {condition: ok}
+
+- name: malformed_utf8_is_an_error
+  schema: "name: t\nfields:\n  - {name: condition, type: ascii, length: 8, nul: stop, charset: utf-8}\n"
+  payload: "C328616263000000"
+  error: "Field 'condition': the bytes are not well-formed UTF-8 from byte 0 of the text (PS-624)"
+
+- name: the_position_counts_bytes_not_characters
+  schema: "name: t\nfields:\n  - {name: c, type: ascii, length: 3, charset: utf-8}\n"
+  payload: "C3A9FF"
+  error: "Field 'c': the bytes are not well-formed UTF-8 from byte 2 of the text (PS-624)"
+
+- name: a_sequence_cut_short_is_named_at_its_first_byte
+  schema: "name: t\nfields:\n  - {name: condition, type: ascii, length: 8, nul: stop, charset: utf-8}\n"
+  payload: "6162E28200000000"
+  error: "Field 'condition': the bytes are not well-formed UTF-8 from byte 2 of the text (PS-624)"
+
+- name: an_encoded_surrogate_is_not_well_formed
+  schema: "name: t\nfields:\n  - {name: c, type: ascii, length: 3, charset: utf-8}\n"
+  payload: "EDA080"
+  error: "Field 'c': the bytes are not well-formed UTF-8 from byte 0 of the text (PS-624)"
+
+- name: an_overlong_form_is_not_well_formed
+  schema: "name: t\nfields:\n  - {name: c, type: ascii, length: 2, charset: utf-8}\n"
+  payload: "C0AF"
+  error: "Field 'c': the bytes are not well-formed UTF-8 from byte 0 of the text (PS-624)"
+
+- name: a_four_byte_character_to_a_terminator
+  schema: "name: t\nfields:\n  - {name: s, type: ascii, terminator: 0x3B, charset: utf-8}\n  - {name: b, type: u8}\n"
+  payload: "78F09F98803B07"
+  expected: {s: "x\U0001F600", b: 7}
+  warnings: []
+
+- name: trailing_padding_is_removed_first
+  schema: "name: t\nfields:\n  - {name: c, type: ascii, length: 6, charset: utf-8}\n"
+  payload: "C3A900000000"
+  expected: {c: "é"}
+
+- name: a_numeral_reads_ascii_digits
+  schema: "name: t\nfields:\n  - {name: n, type: ascii, length: 4, numeral: decimal, charset: utf-8}\n"
+  payload: "30303432"
+  expected: {n: 42}
+
+- name: without_charset_a_byte_above_0x7f_is_latin1
+  schema: "name: t\nfields:\n  - {name: c, type: ascii, length: 2}\n"
+  payload: "C385"
+  expected: {c: "Ã\u0085"}
+  warnings: ["Field 'c': a byte above 0x7F in an ascii value (PS-073, PS-538)"]
+
+cases:
+
+- name: utf8_text_round_trips
+  schema: "name: t\nfields:\n  - {name: condition, type: ascii, length: 8, nul: stop, charset: utf-8}\n"
+  input: '{"condition": "Ång°C"}'
+  payload: "c3856e67c2b04300"
+  warnings: []
+
+- name: length_counts_bytes
+  schema: "name: t\nfields:\n  - {name: condition, type: ascii, length: 8, nul: stop, charset: utf-8}\n"
+  input: '{"condition": "ÅÅÅÅÅ"}'
+  error: "Field 'condition': an ascii value of 10 bytes is longer than its length of 8 (PS-537, PS-625)"
+
+- name: a_short_value_is_padded_in_bytes
+  schema: "name: t\nfields:\n  - {name: c, type: ascii, length: 6, charset: utf-8}\n"
+  input: '{"c": "é"}'
+  payload: "c3a900000000"
+
+- name: a_four_byte_character_and_its_terminator
+  schema: "name: t\nfields:\n  - {name: s, type: ascii, terminator: 0x3B, charset: utf-8}\n  - {name: b, type: u8}\n"
+  input: '{"s": "x😀", "b": 7}'
+  payload: "78f09f98803b07"
+
+- name: a_nul_stop_value_holding_a_nul_is_still_rejected
+  schema: "name: t\nfields:\n  - {name: c, type: ascii, length: 4, nul: stop, charset: utf-8}\n"
+  input: '{"c": "a\u0000b"}'
+  error: "Field 'c': a nul: stop value holds a 0x00 byte (PS-595)"
+
+- name: without_charset_a_character_above_u00ff_is_rejected
+  schema: "name: t\nfields:\n  - {name: c, type: ascii, length: 2}\n"
+  input: '{"c": "Ω"}'
+  error: "Field 'c': an ascii value holds a character above U+00FF, which has no byte (PS-537)"
+
+# `charset` with another value, or on another type, is rejected when the schema is loaded
+# (PS-624).
+load:
+
+- name: another_charset
+  schema: "name: t\nfields:\n  - {name: c, type: ascii, length: 2, charset: latin-1}\n"
+  error: "Field 'c': charset is utf-8, on an ascii field (PS-624)"
+
+- name: charset_on_hex
+  schema: "name: t\nfields:\n  - {name: c, type: hex, length: 2, charset: utf-8}\n"
+  error: "Field 'c': charset is utf-8, on an ascii field (PS-624)"
+
+- name: the_value_is_case_sensitive
+  schema: "name: t\nfields:\n  - {name: c, type: ascii, length: 2, charset: UTF-8}\n"
+  error: "Field 'c': charset is utf-8, on an ascii field (PS-624)"
+
+- name: charset_on_an_integer
+  schema: "name: t\nfields:\n  - {name: c, type: u8, charset: utf-8}\n"
+  error: "Field 'c': charset is utf-8, on an ascii field (PS-624)"

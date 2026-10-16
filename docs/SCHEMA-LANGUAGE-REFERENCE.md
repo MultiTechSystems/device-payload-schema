@@ -191,6 +191,18 @@ false, is rejected at load.
 - {name: model, type: ascii, terminator: 0xFF, consume_terminator: false, end_terminates: true}
 ```
 
+Each byte of an `ascii` value is the ISO 8859-1 character of the same number, with a warning
+for one above 0x7F (PS-538, PS-073). A device that writes UTF-8 text declares `charset: utf-8`
+(PS-624): `length`, `nul` and `terminator` apply to the bytes first, and the bytes they leave
+are decoded as UTF-8, with no warning. Bytes that are not well-formed UTF-8 are an error naming
+the field and the position of the first bad byte within the text. An encoder writes the value
+as UTF-8, and `length` counts bytes, not characters: a value whose UTF-8 is longer is rejected
+(PS-625). `charset` with another value, or on another type, is rejected at load.
+
+```yaml
+- {name: condition, type: ascii, length: 8, nul: stop, charset: utf-8}   # C3 85 6E 67 00 ... -> "Ång"
+```
+
 A `bytes` field reports a **lowercase** hex string by default (PS-281). Its `format:` is
 one of `hex`, `hex:upper`, `base64` or `array` (PS-079), and a `separator:` goes between
 the bytes of either hex format (PS-391). `hex:upper` is a format, not a type: `type:
