@@ -4793,13 +4793,19 @@ func claimableFields(fields []Field, out []Field) []Field {
 // than one (PS-270), so it cannot be encoded.
 func encodeTLVTag(caseKey string, field Field, ctx *EncodeContext) ([]byte, error) {
 	text := strings.TrimSpace(caseKey)
-	if strings.HasPrefix(text, "[") {
+	// A tlv with tag_fields writes its tag through them whether or not the key is
+	// bracketed ("0x0307" against one u16 component); it wrote `tag_size` bytes.
+	if strings.HasPrefix(text, "[") || len(field.TagFields) > 0 {
 		text = strings.TrimSuffix(strings.TrimPrefix(text, "["), "]")
 		parts := strings.Split(text, ",")
 		if len(field.TagFields) == 0 {
 			return nil, fmt.Errorf("composite tlv case %q with no tag_fields", caseKey)
 		}
 		names := tagKeyNames(field.TagKey)
+		if len(names) == 0 {
+			// tag_key defaults to the first tag field (Clause 4).
+			names = []string{field.TagFields[0].Name}
+		}
 		if len(names) != len(parts) {
 			return nil, fmt.Errorf("tlv case %q does not match tag_key %v", caseKey, names)
 		}

@@ -2802,15 +2802,17 @@ public static class SchemaEncoder
         /// </remarks>
         byte[] EncodeTLVTag(string caseKey, SchemaField tlv)
         {
-            if (tlv.TagFields.Count > 0 && tlv.TagKey != null)
+            if (tlv.TagFields.Count > 0)
             {
                 var text = caseKey.Trim();
                 if (text.StartsWith("["))
                     text = text.TrimStart('[').TrimEnd(']');
                 var parts = text.Split(',');
+                // tag_key defaults to the first tag field (Clause 4); with none declared the
+                // tag was written as `tag_size` bytes whatever its components' widths.
                 var names = tlv.TagKey is List<object?> keyList
                     ? keyList.Select(k => k?.ToString() ?? "").ToList()
-                    : new List<string> { tlv.TagKey.ToString() ?? "" };
+                    : new List<string> { tlv.TagKey?.ToString() ?? tlv.TagFields[0].Name ?? "" };
                 if (parts.Length != names.Count)
                     throw new InvalidOperationException(
                         $"TLV case '{caseKey}' does not match tag_key [{string.Join(", ", names)}]");

@@ -4391,6 +4391,46 @@ improved. The Go, Java and C# corpus runners write per-vector reports only when
     7289 registry vectors at 058e63f): no vector gains a PS-631 warning, none changes decode
     output or errors, so no `expected_warnings` needed changing.
 
+- **A tlv's `tag_key` defaults to its first tag field (Clause 4; PS-536, PS-523).** A tlv
+  that declares `tag_fields` reads its tag through them and binds each component, by name and
+  by `var`, as the entry's tag is read, whether or not it declares `tag_key`; the case is
+  keyed by `tag_key`, else by the first component, as the spec prototype's
+  `decode_construct_tlv` does.
+  - **Before:** the Python reference read `tag_fields` only beside a `tag_key`. Without one
+    it read `tag_size` bytes (default 1) whatever the components' widths and bound nothing,
+    so `$_t`, `${_t}` and a component's `var` were unbound in every case and a `u16`
+    component read its first byte as the tag. Its encoder (`_encode_tlv_tag`), the generated
+    codec's runtime (`encTlvTag`) and C#'s (`EncodeTLVTag`) wrote `tag_size` bytes; Java's
+    encoder did the same; Go's wrote `tag_size` bytes for any case key without brackets
+    (`"0x0309"` against one `u16` component), whether or not `tag_key` was declared. Go, Java
+    and C# decoded it already, and the generated codec's decoder too; C# recorded a
+    component for `_meta` (`ctx.Produced`) only where `tag_key` was declared.
+  - **Where:** Python `tlv_tag_key` (used by `_decode_tlv` and `_encode_tlv_tag`); runtime
+    `encTlvTag`; Go `encodeTLVTag` (a tlv with `tag_fields` always takes the component path,
+    names defaulting to the first); Java `Encoder.encodeTLVTag`; C# `SchemaEncoder.EncodeTLVTag`
+    and `SchemaDecoder`'s unconditional `ctx.Produced(tf)`. C has no `tag_fields` of this
+    kind in the harness (the fixture has ports, a C gap).
+  - **Cases:** `tests/tag-fields-default-key-cases.yaml` (two decodes; three encodes from
+    input alone, one a declared `tag_key` with an unbracketed key, which no round trip
+    shows), read by `test_tag_fields_default_key.py` (reference and codec), Go
+    `tag_fields_default_key_test.go`, Java `TagFieldsDefaultKeyTest`, C#
+    `TagFieldsDefaultKeyTests`.
+  - **Fixture** `_language-conformance/tag-fields-default-key.yaml`: port 1 a `u8`
+    component, port 2 a `u16`, each read in its case through `ref: $_t`, a `var` and a
+    `template`; six vectors, all round-tripping. Floors: decode 2947 -> 2953 in Go, Java and
+    C#; re-encode +6 everywhere, `tlv` +6 (Python and Java 2328 -> 2334, C# 2329 -> 2335, Go
+    2346 -> 2352, plain 2318 -> 2324). Mutation score 100%.
+  - **Measured:** no other tlv in `schemas/`, `examples/` or the private registry (5463e01,
+    97 tlvs with `tag_fields`) omits `tag_key` or keys a case without brackets, so nothing
+    else changes; the Python round-trip failing set is identical before and after.
+  - **Found on the way, not fixed:** Go and Java match no tlv case key written as a quoted
+    hex string (`'0x0309':`) - Go's `findTLVCaseKey` compares the tag's decimal text and
+    parses only bracketed keys, so the entry is an unknown tag - while Python and C# match
+    it. A plain `0x0309:` is an integer to PyYAML, yaml.v3 and SnakeYAML and works in all
+    five; the fixture and the cases use that form. No corpus or registry key is quoted hex.
+  - **Also:** `mk/gate-verdicts.mk` and `tools/verdicts-gate.py` used `.cache/` whatever
+    `CACHE_DIR` said; both follow `CACHE_DIR` now, as the Makefile's other targets do.
+
 ## Converting a vendor codec
 
 The converters in `tools/` (`convert_decentlab.py`, `convert_milesight.py`) do the

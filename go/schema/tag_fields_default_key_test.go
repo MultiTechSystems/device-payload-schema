@@ -1,0 +1,100 @@
+package schema
+
+import (
+	"encoding/hex"
+	"encoding/json"
+	"os"
+	"reflect"
+	"strings"
+	"testing"
+
+	"gopkg.in/yaml.v3"
+)
+
+// A tlv that declares tag_fields and no tag_key is keyed by its first tag field (Clause
+// 4), and its encoder writes the tag through the components. The cases are shared with the
+// reference, the generated codec, Java and C# in tests/tag-fields-default-key-cases.yaml.
+
+type tagKeyCase struct {
+	Name     string   `yaml:"name"`
+	Schema   string   `yaml:"schema"`
+	Payload  string   `yaml:"payload"`
+	Input    string   `yaml:"input"`
+	Expected any      `yaml:"expected"`
+	Warnings []string `yaml:"warnings"`
+	Error    string   `yaml:"error"`
+}
+
+func tagKeyCases(t *testing.T) (decode, encode []tagKeyCase) {
+	raw, err := os.ReadFile(repoPath(t, "tests", "tag-fields-default-key-cases.yaml"))
+	if err != nil {
+		t.Fatalf("read cases: %v", err)
+	}
+	var doc struct {
+		Decode []tagKeyCase `yaml:"decode"`
+		Cases  []tagKeyCase `yaml:"cases"`
+	}
+	if err := yaml.Unmarshal(raw, &doc); err != nil || len(doc.Decode) == 0 {
+		t.Fatalf("parse cases: %v", err)
+	}
+	return doc.Decode, doc.Cases
+}
+
+func TestTagFieldsDefaultKeyDecode(t *testing.T) {
+	decode, _ := tagKeyCases(t)
+	for _, c := range decode {
+		t.Run(c.Name, func(t *testing.T) {
+			s, err := ParseSchema(c.Schema)
+			if err != nil {
+				t.Fatalf("parse: %v", err)
+			}
+			payload, _ := hex.DecodeString(c.Payload)
+			out, decErr := s.Decode(payload)
+			if c.Error != "" {
+				if decErr == nil || !strings.Contains(decErr.Error(), c.Error) {
+					t.Errorf("Decode = %v, %v; want error %q", out, decErr, c.Error)
+				}
+				return
+			}
+			if decErr != nil {
+				t.Fatalf("Decode: %v", decErr)
+			}
+			warnings, _ := out["_warnings"].([]string)
+			delete(out, "_warnings")
+			if got, want := cr187JSON(t, out), cr187JSON(t, c.Expected); !reflect.DeepEqual(got, want) {
+				t.Errorf("Decode = %v, want %v", got, want)
+			}
+			if len(warnings) != len(c.Warnings) {
+				t.Fatalf("warnings %q, want %q", warnings, c.Warnings)
+			}
+			for i := range warnings {
+				if warnings[i] != c.Warnings[i] {
+					t.Errorf("warnings %q, want %q", warnings, c.Warnings)
+				}
+			}
+		})
+	}
+}
+
+func TestTagFieldsDefaultKeyEncode(t *testing.T) {
+	_, encode := tagKeyCases(t)
+	for _, c := range encode {
+		t.Run(c.Name, func(t *testing.T) {
+			s, err := ParseSchema(c.Schema)
+			if err != nil {
+				t.Fatalf("parse: %v", err)
+			}
+			var data map[string]any
+			if err := json.Unmarshal([]byte(c.Input), &data); err != nil {
+				t.Fatalf("input: %v", err)
+			}
+			out, encErr := s.Encode(data)
+			if encErr != nil {
+				t.Fatalf("Encode: %v", encErr)
+			}
+			if got := hex.EncodeToString(out); got != c.Payload {
+				t.Errorf("Encode = %s, want %s", got, c.Payload)
+			}
+		})
+	}
+}
