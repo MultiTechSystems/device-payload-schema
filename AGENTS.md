@@ -4394,6 +4394,44 @@ improved. The Go, Java and C# corpus runners write per-vector reports only when
     registry schemas (1136 vectors) that the registry's LC-03 rewrite (57e3227, on its
     master) gave `time`. No registry `sampled` declares `at`, so none is anchored at a field
     yet. Encoding is untouched.
+- **CR-2026-193 (PS-630, PS-631; la-payload-schema main ed1f2f2, for 0.5.8): a tlv entry with
+  a length bounds its case.** The case decodes within the entry's value bytes and the next
+  entry begins after them, whatever the case read. A field reading past them is an error, and
+  bytes the case leaves unread are skipped with a warning. Both texts are the prototype's
+  (`decode_tlv_value`), the tag written as it writes it (a one-part tag a decimal, a
+  composite one `[a, b]`) and the offset the entry's in the frame:
+  `tlv entry tag 1 at offset 0: Field 'a': Buffer underflow: need 2 bytes at offset 2, but
+  only 1 remaining (PS-535); the case reads past the entry's 1 value byte(s) (PS-630)` and
+  `tlv entry tag 1 at offset 0: 1 byte(s) of its value not read (PS-631)`. The PS-535 text
+  inside keeps each implementation's frame offset (the prototype's is within the entry).
+  Encode is unchanged: the length written is the bytes the case writes.
+  - **Before:** #185 (CR-2026-188) cut the data at the entry's end in all five, so a case
+    could not read into the next entry, but the error was PS-535's alone and the next entry
+    began where the case stopped: `01 03 AA BB CC 02 01 DD` read `CC` as a tag and skipped it
+    as unknown (`{a: 43707}`, "unknown TLV tag (0xCC) skipped"). C did not bound the case at
+    all.
+  - **Where:** Python `_decode_bounded_entry` with `tlv_entry_where`/`tlv_entry_overrun`/
+    `tlv_entry_unread`; the generator's tlv loop (`_tlvW`/`_tlvEnd`, per tlv, so a nested tlv
+    does not clobber them); Go `cr193.go`; Java `TlvEntryBound`; C# `TlvEntryBound.cs`; C
+    `schema_tlv_entry_overrun` and `entry_end` in the tlv loop, which now passes the entry's
+    end as the case's length. C has no warning list, so it skips without PS-631's warning;
+    the harness files such a vector with the unknown-tag ones it cannot warn about.
+    `error_msg` grew 152 -> 272 bytes for PS-630's worst case (258).
+  - `encode-round-trip.py` files a PS-631 warning as `undecoded-bytes`.
+  - **Cases:** `tests/cr-2026-193-cases.yaml` (the prototype's four
+    `TestCR2026193TlvEntryBound` tests, a case reading nothing, and one encode), read by
+    `test_cr_2026_193_cases.py` (reference and codec), Go `cr193_test.go`, Java
+    `CR2026193Test`, C# `CR2026_193Tests`; C `test_a_tlv_entry_bounds_its_case`.
+  - **Fixture** `_language-conformance/tlv-entry-bound.yaml`: an exact frame, three frames
+    with skipped bytes (`expected_warnings` naming tag and offset) and one PS-630
+    `expected_error`. Floors: decode 2939 -> 2944 in Go, Java and C# (the PS-630 vector counts,
+    as an expected error); re-encode +1 everywhere, `tlv` +1 (Python and Java 2324 -> 2325,
+    C# 2325 -> 2326, Go 2342 -> 2343, plain 2314 -> 2315); the skipping frames cannot
+    re-encode their skipped bytes. C: 582 of 582 attempted, three of them passes it cannot
+    warn about.
+  - **Measured** (Python, every vector of a schema declaring `length_size`: 616 corpus and
+    7289 registry vectors at 058e63f): no vector gains a PS-631 warning, none changes decode
+    output or errors, so no `expected_warnings` needed changing.
 
 ## Converting a vendor codec
 

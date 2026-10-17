@@ -1,0 +1,64 @@
+# A tag-length-value entry that declares a length bounds what its case reads (CR-2026-193,
+# PS-630, PS-631). The case decodes within the entry's value bytes and the next entry begins
+# after them, whatever the case read. A field reading past the value bytes is an error
+# naming the entry's tag, its offset in the frame and the field; value bytes the case leaves
+# unread are skipped with a warning naming the entry and the count. The encoder writes the
+# length of the bytes the case writes, so a frame with skipped bytes does not re-encode to
+# itself.
+name: probe_tlv_entry_bound
+version: 1
+endian: big
+fields:
+  - tlv:
+      tag_size: 1
+      length_size: 1
+      cases:
+        1:
+          - name: reading
+            type: u16
+        2:
+          - name: status
+            type: u8
+        3: []
+test_vectors:
+  - name: entries_read_exactly
+    description: "each case reads its whole value: nothing is skipped"
+    payload: "0102AABB0201CC"
+    source: generated
+    expected:
+      reading: 43707
+      status: 204
+    expected_warnings: []
+  - name: an_unread_value_byte_is_skipped
+    description: "tag 1 declares three bytes and its case reads two: CC is skipped and tag 2 follows"
+    payload: "0103AABBCC0201DD"
+    source: spec-example
+    expected:
+      reading: 43707
+      status: 221
+    expected_warnings:
+      - ["tlv entry tag 1", "offset 0", "1 byte(s)", "PS-631"]
+  - name: the_offset_is_the_entrys_in_the_frame
+    description: "the entry skipping a byte starts at offset 3"
+    payload: "0201CC0103AABBCC"
+    source: spec-example
+    expected:
+      status: 204
+      reading: 43707
+    expected_warnings:
+      - ["tlv entry tag 1", "offset 3", "1 byte(s)", "PS-631"]
+  - name: a_case_reading_nothing_skips_its_value
+    description: "tag 3's case reads no byte of its two"
+    payload: "0302EEFF0102AABB"
+    source: generated
+    expected:
+      reading: 43707
+    expected_warnings:
+      - ["tlv entry tag 3", "offset 0", "2 byte(s)", "PS-631"]
+  - name: reading_past_the_entry
+    description: "tag 1 declares one byte and its case reads two: PS-630 names the entry and the field"
+    payload: "0101AA0201BB"
+    source: spec-example
+    expected_error:
+      requirement: [PS-535, PS-630]
+      at: reading

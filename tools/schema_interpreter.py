@@ -2596,6 +2596,29 @@ def name_underflow(exc: 'BufferUnderflow', name: Any, kind: Any) -> FieldError:
     return named
 
 
+def tlv_entry_where(tag: Any, start: int) -> str:
+    """How PS-630 and PS-631 identify a tlv entry, in the spec prototype's words: its tag
+    as the prototype writes it (a one-part tag a decimal integer, a composite tag a
+    list) and its offset in the frame."""
+    parts = list(tag) if isinstance(tag, (list, tuple)) else [tag]
+    if len(parts) == 1:
+        text = str(parts[0])
+    else:
+        text = "[" + ", ".join(str(p) for p in parts) + "]"
+    return f"tlv entry tag {text} at offset {start}"
+
+
+def tlv_entry_overrun(where: str, exc: BaseException, length: int) -> str:
+    """PS-630: a case field read past its entry's value bytes."""
+    return (f"{where}: {exc}; the case reads past the entry's {length} value "
+            f"byte(s) (PS-630)")
+
+
+def tlv_entry_unread(where: str, count: int) -> str:
+    """PS-631: value bytes of an entry its case left unread, skipped."""
+    return f"{where}: {count} byte(s) of its value not read (PS-631)"
+
+
 def error_text(prefix: str, exc: BaseException) -> str:
     """An error for `result.errors`: a FieldError verbatim, anything else prefixed."""
     if getattr(exc, 'named', False):
@@ -8571,7 +8594,13 @@ class SchemaInterpreter:
                 # end of the entry is the end of the data for its value (a terminated
                 # `end_terminates` text stops there), as the prototype's sub-context.
                 entry_buf = buf if data_length is None else buf[:pos + data_length]
-                tag_result, pos = self._decode_nested_list(matched_fields, entry_buf, pos)
+                if data_length is None:
+                    tag_result, pos = self._decode_nested_list(matched_fields, entry_buf,
+                                                               pos)
+                else:
+                    tag_result, pos = self._decode_bounded_entry(
+                        matched_fields, entry_buf, pos, data_length,
+                        tlv_entry_where(tag_tuple, entry_start), outer)
             finally:
                 if self._trace is not None:
                     self._trace.pop(pushed)
@@ -8603,6 +8632,22 @@ class SchemaInterpreter:
         
         return result, pos
     
+    def _decode_bounded_entry(self, fields: Any, entry_buf: bytes, pos: int,
+                              length: int, where: str,
+                              outer: Optional[DecodeResult]) -> Tuple[Dict[str, Any], int]:
+        """PS-630, PS-631 (CR-2026-193): a tlv entry with a length decodes its case within
+        its value bytes and the next entry begins after them. A field reading past them is
+        an error naming the entry's tag and frame offset; bytes left unread are skipped with
+        a warning. `entry_buf` already ends at the entry's end."""
+        try:
+            values, read_to = self._decode_nested_list(fields, entry_buf, pos)
+        except BufferUnderflow as exc:
+            raise FieldError(tlv_entry_overrun(where, exc, length)) from None
+        end = len(entry_buf)
+        if read_to < end and outer is not None:
+            outer.warnings.append(tlv_entry_unread(where, end - read_to))
+        return values, end
+
     def _check_valid_range(self, value: Any, field_def: Dict[str, Any], 
                            result: 'DecodeResult') -> str:
         """
