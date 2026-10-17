@@ -4433,6 +4433,33 @@ improved. The Go, Java and C# corpus runners write per-vector reports only when
     7289 registry vectors at 058e63f): no vector gains a PS-631 warning, none changes decode
     output or errors, so no `expected_warnings` needed changing.
 
+- **A quoted numeric tlv case key is the number it spells, in all five.** `'0x0309':` and
+  `'258':` reach an implementation as text where `0x0309:` reaches it as an integer (PyYAML,
+  yaml.v3 and SnakeYAML resolve the unquoted form; YamlDotNet keeps the text either way). Python
+  (`_match_case_pattern`: hex with a `0x` prefix, else decimal) and C# (hex keys normalised to
+  decimal in `SchemaParser`) read the quoted form as a number; **Go and Java did not**: their
+  `findTLVCaseKey` compared the tag's decimal text with the key and parsed only bracketed keys,
+  so the entry read as an unknown tag and its fields were never reported. Both now read a
+  single-component key that is not bracketed the same way, after the exact lookup (Go over the
+  keys sorted, Java in declaration order); Go and Java's encoders already parsed such a key
+  (`parseIntAny`). The generated codec and C (the harness packs the key through `int(..., 0)`)
+  were right already. The rule is the reference's, so `'010'` is decimal 10, not octal.
+  - **Fixture** `_language-conformance/tlv-quoted-number-key.yaml`: a two-byte tag, two quoted
+    hex keys, a quoted decimal key and an unquoted hex key, four vectors, each round-tripping.
+  - **Measured:** no tlv in `schemas/`, `examples/` or the private registry (c56cf0f) has a
+    quoted numeric key (the registry's quoted numbers are `match` cases, lookup keys and
+    expected values), so nothing else changes.
+- **milesight/em310-tilt's `angle_alarm_condition` (channel 0xFF or 0xFE, type 0x63)** is an
+  `ascii` of `length: 8`, `nul: stop`, `charset: utf-8` (PS-534, PS-624): the vendor's
+  `readUtf8` stops at the first 0x00, where Milesight's `readString` keeps it (registry LC-08).
+  Eight vectors from em310-tilt.js run under node, `source: vendor-codec`, with two-, three- and
+  four-byte characters. Two cannot round-trip: the 0xFE copy (an encoder writes the first case,
+  0xFF; Go's ordered API recovers it) and the bytes after a 0x00. Score unchanged, GOLD 90%.
+- **Floors:** decode 2950 -> 2962 in Go, Java and C# (em310-tilt 8, the fixture 4); re-encode
+  +10, all `tlv` (Python and Java 2329 -> 2339, C# 2330 -> 2340), Go ordered 2347 -> 2358 and
+  `tlv` 1623 -> 1634, plain 2319 -> 2327 (two vectors' tags are not ascending). C: 586 of 586
+  attempted (the fixture's four).
+
 ## Converting a vendor codec
 
 The converters in `tools/` (`convert_decentlab.py`, `convert_milesight.py`) do the
