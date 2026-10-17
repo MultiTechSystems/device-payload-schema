@@ -3616,6 +3616,62 @@ def range_key_error(key):
     return None
 
 
+#: PS-436 as CR-2026-194 amends it: a tlv's catch-all is "[*]", never a `default` case.
+TLV_DEFAULT_ERROR = ('A tlv has no `default` case; its catch-all is the key "[*]" '
+                     '(PS-436, PS-438)')
+
+
+def one_element_tlv_key(key):
+    """PS-438 (CR-2026-194): a one-field tag's `"[*]"` or `"[!n]"` key as an element and
+    its PS-270 rank - (('any', None), 2) or (('not', n), 1) - else None, for a key written
+    as a match key is (a value, a quoted list, a range). The spec prototype's
+    one_element_key."""
+    if not isinstance(key, str):
+        return None
+    text = key.strip()
+    if not (text.startswith('[') and text.endswith(']')) or ',' in text:
+        return None
+    inner = text[1:-1].strip()
+    if inner == '*':
+        return ('any', None), 2
+    if inner.startswith('!'):
+        try:
+            return ('not', int(inner[1:].strip(), 0)), 1
+        except ValueError:
+            return None
+    return None
+
+
+def tlv_one_field_key_errors(tlv):
+    """PS-436, PS-437, PS-440 for a tlv's case keys (CR-2026-194), in the spec prototype's
+    words (check_one_field_keys): a tlv has no `default` case; and on a one-field tag, no
+    two one-element keys with the same value, nor two of one rank that can match one tag.
+    The first problem only, as the prototype raises it.
+
+    A `default` key was ignored by every decoder, with no warning: an unknown tag went to
+    `unknown:` while the schema said it had a catch-all.
+    """
+    cases = tlv.get('cases') if isinstance(tlv, dict) else None
+    if not isinstance(cases, dict):
+        return []
+    if 'default' in cases:
+        return [TLV_DEFAULT_ERROR]
+    tag_key = tlv.get('tag_key')
+    if tlv.get('tag_fields') and isinstance(tag_key, list) and len(tag_key) > 1:
+        return []           # a composite tag's keys are PS-436's [e1, e2, ...] form
+    parsed = [(key,) + one_element_tlv_key(key) for key in cases
+              if one_element_tlv_key(key) is not None]
+    for i, (key_a, element_a, rank_a) in enumerate(parsed):
+        for key_b, element_b, rank_b in parsed[i + 1:]:
+            if element_a == element_b:
+                return [f"TLV keys {key_a!r} and {key_b!r} are the same key (PS-437)"]
+            # Two wildcards are the same key; two negated keys can always match one tag.
+            if rank_a == rank_b:
+                return [f"TLV keys {key_a!r} and {key_b!r} have the same rank and can "
+                        f"match the same tag (PS-440)"]
+    return []
+
+
 def case_body_errors(schema):
     """A `match` or `tlv` case body is a field list (PS-347, PS-441), `[]` for a case
     that reads nothing.
@@ -3641,6 +3697,8 @@ def case_body_errors(schema):
                     problem = range_key_error(key)
                     if problem:
                         errors.append(f"{where}.{construct}.cases[{key}]: {problem}")
+                if construct == 'tlv':
+                    errors.extend(tlv_one_field_key_errors(body))    # CR-2026-194
             for key, value in node.items():
                 if key not in ('test_vectors', 'definitions'):
                     walk(value, f"{where}.{key}" if where else key)

@@ -653,6 +653,8 @@ public static partial class SchemaParser
                     throw new InvalidOperationException(
                         $"{construct}.cases[{Scalar(kv.Key)}]: {problem}");
             }
+            if (construct == "tlv" && OneFieldKeys.Error(bodyMap, caseMap) is { } keyProblem)
+                throw new InvalidOperationException(keyProblem);                 // CR-2026-194
         }
     }
 

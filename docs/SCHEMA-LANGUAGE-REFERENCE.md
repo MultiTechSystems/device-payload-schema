@@ -1445,6 +1445,23 @@ For protocols with multi-field tag structures:
 A composite key is a quoted string; a bare YAML list (`[1, 0x67]:`) is not a valid mapping
 key and the file fails to load. The corpus writes the components in decimal.
 
+A one-field tag may use the one-element keys `"[*]"` (any value) and `"[!n]"` (any value but
+n). They rank below every exact key, whatever order they are written in (PS-270, PS-438):
+
+```yaml
+- tlv:
+    tag_size: 1
+    cases:
+      1: [{name: temperature, type: s16, div: 10}]   # tag 1
+      "[!0x02]": [{name: other, type: u8}]          # any tag but 1 and 2
+      "[*]": [{name: raw, type: u8}]                # tag 2
+```
+
+A tlv has no `default` case; its catch-all is `"[*]"` (`"[*, *]"` for a two-field tag), and
+a `default` key is rejected at load (PS-436, PS-438). One key written twice (`"[*]"` and
+`"[ * ]"`) is rejected (PS-437), and so are two negated keys, which can match one tag
+(PS-440).
+
 ## Match Patterns
 
 ```yaml

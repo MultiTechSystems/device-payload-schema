@@ -1091,6 +1091,11 @@ func ParseSchema(data string) (*Schema, error) {
 	if err := checkOnRepeat(raw, order); err != nil {
 		return nil, err
 	}
+	// CR-2026-194: a tlv has no `default` case, and a one-field tag's "[*]" and "[!n]" keys
+	// are neither written twice (PS-437) nor two of one rank (PS-440).
+	if err := checkOneFieldTLVKeys(raw, order); err != nil {
+		return nil, err
+	}
 	// CR-2026-138: every field but a skip has a name (PS-553). Checked after the rules
 	// above, as the spec prototype does, so a construct's own error keeps its text.
 	if err := checkFieldNames(raw); err != nil {
