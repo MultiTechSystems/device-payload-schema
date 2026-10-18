@@ -171,6 +171,7 @@ VOCABULARY: Dict[str, Dict[str, Tuple[Tuple[str, ...], str]]] = {
         "terminator": (_DECODERS, "a byte 0 to 255 that ends a variable-length ascii field, in place of length (PS-593)"),
         "consume_terminator": (_DECODERS, "with terminator: false leaves the terminator unread for the next field (PS-619, PS-620)"),
         "end_terminates": (_DECODERS, "with terminator: true lets the end of the data end the text too (PS-619)"),
+        "trim": (_DECODERS, "true on an ascii field: leading and trailing whitespace is removed, and encode pads with spaces where no nul is declared (PS-641, PS-642)"),
         "charset": (_DECODERS, "utf-8 on an ascii field: its bytes are UTF-8 text, length counting bytes (PS-624, PS-625)"),
         "checksum": (_DECODERS, "a check value over earlier bytes, verified on decode and computed on encode (PS-585)"),
         "bit_labels": (_DECODERS, "{bit: label} on an unsigned integer or bit range: the labels of its set bits, a list or joined text (PS-616 to PS-618)"),

@@ -57,6 +57,10 @@ public class Field {
     private boolean utf8;
     public boolean isUtf8() { return utf8; }
     public void setUtf8(boolean utf8) { this.utf8 = utf8; }
+    /** CR-2026-199 (PS-641, PS-642): an ascii field's {@code trim: true}. */
+    private boolean trim;
+    public boolean isTrim() { return trim; }
+    public void setTrim(boolean trim) { this.trim = trim; }
     /** A {@code checksum} declaration and the type it sits on (PS-585, CR-2026-174). */
     private Map<String, Object> checksum;
     private String checksumType;

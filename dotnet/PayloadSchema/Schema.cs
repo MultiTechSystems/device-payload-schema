@@ -145,6 +145,8 @@ public class SchemaField
     public bool EndTerminates { get; set; }
     /// <summary><c>charset: utf-8</c>: the text is UTF-8 (PS-624, PS-625, CR-2026-190).</summary>
     public bool Utf8 { get; set; }
+    /// <summary><c>trim: true</c>: whitespace is removed from both ends on decode, and encode pads with spaces where no <c>nul</c> is declared (PS-641, PS-642, CR-2026-199).</summary>
+    public bool Trim { get; set; }
     /// <summary>A check value over the bytes before the field (PS-585 to PS-587, CR-2026-174).</summary>
     public ChecksumSpec? Checksum { get; set; }
     /// <summary>A computed field written `type: integer` (PS-283); its Type is Number.</summary>

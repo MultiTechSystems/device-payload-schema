@@ -1,0 +1,37 @@
+# An ascii field declaring `trim: true` drops leading and trailing U+0020, U+0009, U+000A
+# and U+000D from its text, after its 0x00 rule, its terminator and its character set
+# (PS-641, CR-2026-199). An encoder pads such a field with spaces where it declares no
+# `nul`, and with 0x00 where it does (PS-642), so a frame padded that way re-encodes to
+# itself; leading whitespace is not restored. A trim on another type, or other than true or
+# false, is held by tests/cr-2026-199-cases.yaml.
+name: probe_ascii_trim
+endian: big
+fields:
+- name: label
+  type: ascii
+  length: 10
+  trim: true
+- name: code
+  type: ascii
+  length: 6
+  trim: true
+  nul: stop
+- name: model
+  type: ascii
+  terminator: 0x3B
+  trim: true
+- name: battery
+  type: u8
+test_vectors:
+- name: space_padding_comes_back
+  source: generated
+  payload: "54414720202020202020414200000000783B64"
+  expected: {label: "TAG", code: "AB", model: "x", battery: 100}
+- name: whitespace_at_both_ends_is_dropped
+  source: generated
+  payload: "2054414709202020200A204120420D002020790D3B07"
+  expected: {label: "TAG", code: "A B", model: "y", battery: 7}
+- name: blank_text_is_empty
+  source: generated
+  payload: "202020202020202020200000000000003BFF"
+  expected: {label: "", code: "", model: "", battery: 255}

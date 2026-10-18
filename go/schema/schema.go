@@ -140,6 +140,10 @@ type Field struct {
 	// Charset is an ascii field's `charset`: "utf-8" decodes and encodes its bytes as
 	// UTF-8 text (PS-624, PS-625, CR-2026-190); empty for ISO 8859-1 (PS-538).
 	Charset string `json:"-" yaml:"-"`
+	// Trim is an ascii field's `trim: true` (PS-641, PS-642, CR-2026-199): leading and
+	// trailing whitespace is removed on decode, and encode pads with spaces where no `nul`
+	// is declared.
+	Trim bool `json:"-" yaml:"-"`
 	// GroupEndian is a byte_group's own byte order (PS-364), empty for the context's.
 	GroupEndian string `json:"-" yaml:"-"`
 	// IntegerResult marks a computed field written `type: integer` (PS-283); its Type
@@ -1334,6 +1338,9 @@ func parseFieldMap(fm map[string]any, node *yaml.Node) Field {
 	}
 	if cs, ok := fm["charset"].(string); ok {
 		f.Charset = cs // PS-624
+	}
+	if b, ok := fm["trim"].(bool); ok && b {
+		f.Trim = true // PS-641
 	}
 	if typ, ok := fm["type"].(string); ok {
 		f.Type = canonicalFieldType(typ)
@@ -2833,6 +2840,7 @@ func decodeField(field Field, ctx *DecodeContext) (any, error) {
 		} else {
 			value = decodeASCII(field.Name, data, ctx, field.Nul) // PS-534, PS-538
 		}
+		value = trimText(field, value.(string)) // PS-641, after nul, terminator and charset
 		if field.Numeral != "" {
 			n, err := decodeNumeral(field.Name, value.(string), field.Numeral) // PS-560
 			if err != nil {
@@ -6490,6 +6498,7 @@ func encodeField(field Field, value any, ctx *EncodeContext) error {
 			if err != nil {
 				return err
 			}
+			data = spacePadded(field, data, strVal, fixed, terminator) // PS-642
 			if terminator >= 0 && field.KeepTerminator {
 				data = data[:len(data)-1] // PS-620: the field after it writes the terminator
 			}
