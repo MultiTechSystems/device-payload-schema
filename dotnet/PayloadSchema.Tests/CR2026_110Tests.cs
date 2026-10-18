@@ -96,9 +96,9 @@ public class CR2026_110Tests
     [InlineData("    cases:\n      1: [{name: e, type: u8, on_repeat: last}]\n      2: [{name: e, type: u8}]\n",
         "tlv: the fields reporting 'e' declare different `on_repeat`, last and collect (PS-526)")]
     [InlineData("    on_repeat: first\n    cases:\n      1: [{name: e, type: u8}]\n",
-        "tlv `on_repeat` is one of collect, merge, last, not 'first' (PS-525)")]
+        "tlv `on_repeat` is one of collect, merge, last, concat, not 'first' (PS-525)")]
     [InlineData("    cases:\n      1: [{name: e, type: u8, on_repeat: keep}]\n",
-        "Field 'e': `on_repeat` is one of collect, merge, last, not 'keep' (PS-525)")]
+        "Field 'e': `on_repeat` is one of collect, merge, last, concat, not 'keep' (PS-525)")]
     public void RejectedAtLoad(string body, string message)
     {
         var thrown = Assert.Throws<InvalidOperationException>(

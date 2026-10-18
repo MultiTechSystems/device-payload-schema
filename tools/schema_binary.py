@@ -234,13 +234,15 @@ C_UNSUPPORTED_KEYS = {
     # CR-2026-189: a repeat's elements packed in bits (PS-621 to PS-623).
     "packed_bits": "this format has no repeat record (PS-621)",
     "bit_offset": "this format has no repeat record (PS-621)",
+    # CR-2026-195: a repeat flattening its groups' inner repeats (PS-633).
+    "flatten": "this format has no repeat record (PS-633)",
     # CR-2026-118: several records from one repeat element (PS-541).
     "records": "this format has no repeat record (PS-541)",
     "fields": "this format has no nested object record",
     "name_from": "this format has no name template",
     # Read only in a tlv case, which is already refused above; listed so a field
     # carrying it is refused by name wherever it sits (CR-2026-110).
-    "on_repeat": "the C interpreter has no on_repeat (PS-525)",
+    "on_repeat": "the C interpreter has no on_repeat (PS-525, PS-632)",
     # A bytes rendering other than lowercase hex (PS-079, PS-391); the C interpreter
     # has neither key.
     "format": "the C interpreter has no bytes format (PS-079)",

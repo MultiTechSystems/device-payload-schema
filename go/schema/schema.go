@@ -252,6 +252,9 @@ type Field struct {
 	// BitOffset where its first element starts; packedWidth and packedSigned are the
 	// element type's (PS-621, CR-2026-189).
 	PackedBits   int  `json:"-" yaml:"-"`
+	// Flatten names the inner repeat whose arrays this repeat reports, concatenated, in
+	// place of its elements (PS-633, CR-2026-195).
+	Flatten string `json:"-" yaml:"-"`
 	packedWidth  int
 	packedSigned bool
 	ElementName string `json:"-" yaml:"-"`
@@ -3766,6 +3769,9 @@ func decodeTLV(field Field, ctx *DecodeContext) (map[string]any, error) {
 					existing, ok := result[k]
 					mode := repeat.mode(k)
 					switch {
+					case mode == "concat":
+						// PS-632 (CR-2026-195): always one array, a list value spliced.
+						result[k] = concatValue(existing, ok, v)
 					case !ok:
 						result[k] = v
 					case mode != "collect":
@@ -4963,6 +4969,19 @@ func encodeTLV(field Field, data map[string]any, ctx *EncodeContext) error {
 			if _, queued := queues[f.Name]; !ok || queued || repeat.mode(f.Name) == "merge" {
 				continue
 			}
+			if repeat.mode(f.Name) == "concat" {
+				// PS-634 (CR-2026-195): each element is one entry's value, unless a case
+				// reports a list, which cannot be split back into entries.
+				if reportsList(f) {
+					return concatListError(f.Name)
+				}
+				if list, isList := value.([]any); isList {
+					queues[f.Name] = append([]any{}, list...)
+				} else {
+					queues[f.Name] = []any{value}
+				}
+				continue
+			}
 			if list, isList := value.([]any); isList && !reportsList(f) && repeat.mode(f.Name) == "collect" {
 				queues[f.Name] = append([]any{}, list...)
 			} else {
@@ -5605,6 +5624,9 @@ func encodeRepeat(field Field, data map[string]any, ctx *EncodeContext, siblings
 func encodeRepeatRecords(field Field, records []any, ctx *EncodeContext, count int) error {
 	ctx.ps564Depth++ // PS-564 is not checked inside a repeat (tail_unchecked)
 	defer func() { ctx.ps564Depth-- }()
+	if field.Flatten != "" {
+		return flattenEncodeError(field.Name)
+	}
 	if recordsReachable(field.Fields) {
 		// PS-542: the records do not say which element they came from.
 		return fmt.Errorf("Repeat '%s' has elements that yield several records, which cannot be encoded (PS-542)", field.Name)

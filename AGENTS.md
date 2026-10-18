@@ -4432,6 +4432,51 @@ improved. The Go, Java and C# corpus runners write per-vector reports only when
   - **Measured** (Python, every vector of a schema declaring `length_size`: 616 corpus and
     7289 registry vectors at 058e63f): no vector gains a PS-631 warning, none changes decode
     output or errors, so no `expected_warnings` needed changing.
+- **CR-2026-195 (PS-525 amended, PS-632 to PS-634; la-payload-schema main 478db1a, for
+  0.5.8): flat lists.** Two vendor shapes put values from several parts of a frame into one
+  array (milesight gs601/wt401 `request_result`, comtac lpn-km `counters`).
+  - **PS-632, `on_repeat: concat`** (a tlv's or a case field's): the name is always an
+    array, one entry included; a value that is itself a list has its elements spliced in; no
+    entry leaves it absent. Python's tlv merge loop, the generator's `tlvFold`, Go
+    `concatValue` (`cr195.go`), Java `FlatLists.concat`, C# `Cr195.Concat`. `ON_REPEAT` /
+    `onRepeatModes` / `OnRepeat.MODES` / `OnRepeatModes` gain `concat`, so the PS-525 text
+    is now "one of collect, merge, last, concat" (the CR-2026-110 tests updated).
+  - **PS-633, `flatten: <inner repeat>`** on a repeat with `fields`: it reports the
+    concatenation of each element's inner-repeat array, read from the element or, where the
+    inner repeat is internal, from the element's scope before PS-368 restores it. Load, in
+    the prototype's `check_flatten` text: `Repeat 'v': flatten names a repeat among its
+    element's fields (PS-633)` and `Repeat 'v': with flatten, its element's other fields
+    are internal; 'shown' would be reported (PS-633)`. Python `flatten_errors` (from
+    `schema_iterator_errors`: interpreter, validator, generator), Go `flattenError` (from
+    `checkFieldRules`), Java `FlatLists.check` (from `checkWave4`), C# `Cr195.Check`. The
+    repeat element functions take a `Flatten` field (Go, C#) or read the raw `flatten`
+    (Java).
+  - **PS-634:** a concat of single values or objects encodes one entry per element; a
+    concat whose case reports a list, and any flatten repeat, are refused, in the
+    prototype's texts: `tlv: 'codes' is concatenated from lists, which cannot be split back
+    into entries; the schema decodes but is not encoded (PS-634)` and `Repeat 'counters'
+    flattens its groups into one list, which cannot be split back into groups; the schema
+    decodes but is not encoded (PS-634)`. Departure: the list check uses `_reports_list`
+    (a repeat, or bytes with `format: array`) on the case being queued, where the prototype
+    looks only at the name's first declaration as a repeat. `encode-round-trip.py` files
+    both as the inherent reason `flat-list`.
+  - **Before:** `concat` was refused at load in all five (`... one of collect, merge, last,
+    not 'concat' (PS-525)`); `flatten` was read by none, so the comtac frame decoded as
+    `{counters: [{}, {}]}` (every group's fields internal) with success.
+  - **Not done:** `_meta` is the prototype's, unchanged: a concat field's `reports` is its
+    case's type (as for `collect`), and a flatten repeat's `elements` lists the outer
+    element's reported fields (none). C has no repeat and no on_repeat:
+    `tools/schema_binary.py` refuses `flatten` by name (and `on_repeat`, already).
+  - **Cases:** `tests/cr-2026-195-cases.yaml` (the prototype's eight
+    `TestCR2026195FlatLists` tests, plus a concat of scalars both ways, a one-element encode
+    and the amended PS-525 text), read by `test_cr_2026_195_cases.py` (reference, codec,
+    validator, binary form), Go `cr195_test.go`, Java `CR2026195Test`, C# `CR2026_195Tests`.
+  - **Fixtures** `tlv-concat.yaml` (7 vectors: six round-trip, the spliced lists are
+    decode-only) and `repeat-flatten.yaml` (4, decode-only); mutation 100% both. Floors:
+    decode 2950 -> 2961 in Go, Java and C#; re-encode +6, all `tlv` (Python and Java
+    2329 -> 2335, C# 2330 -> 2336, Go 2347 -> 2353, plain 2319 -> 2325).
+  - **Measured:** no schema in the corpus, library, examples or registry (2ef53db) declares
+    `flatten` or `concat`, so nothing changes decode, encode or load.
 
 - **A tlv's `tag_key` defaults to its first tag field (Clause 4; PS-536, PS-523).** A tlv
   that declares `tag_fields` reads its tag through them and binds each component, by name and
