@@ -777,13 +777,14 @@ A match declares exactly one of `field`, `length` and `remaining` (PS-416).
 ```yaml
 - name: signed_value
   type: u16
-  encoding: sign_magnitude   # Also: bcd, gray
+  encoding: sign_magnitude   # Also: bcd, bcd_signed, gray
 ```
 
 | Encoding | Description |
 |----------|-------------|
 | `sign_magnitude` | Bit 15 is sign, bits 0-14 are magnitude |
 | `bcd` | Binary-coded decimal |
+| `bcd_signed` | M-Bus Type A BCD: a most-significant group of 0xF marks a negative value, the other groups its digits; otherwise `bcd` (PS-643, PS-644) |
 | `gray` | Gray code |
 
 `encoding` applies only to an unsigned integer type, reading it unsigned and then decoding

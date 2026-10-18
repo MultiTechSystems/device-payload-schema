@@ -1,0 +1,46 @@
+# Signed BCD, M-Bus Type A (PS-643, PS-644, CR-2026-200).
+#
+# `bcd_signed` reads a most-significant 4-bit group of 0xF as a minus sign and the groups
+# below it as the decimal magnitude, as `bcd` reads them; any other value is plain `bcd`.
+# The worked example of the CR: a u24 read little-endian with `div: 1000`, so the bytes
+# 34 12 F0 are the word F01234, which is -1234 and then -1.234.
+#
+# The encoders write 0xF above the magnitude of a negative value (PS-644), so the negative
+# and positive vectors round-trip. The third is a negative zero, F00000, which is reported
+# as 0 and written back as the positive zero, so it cannot round-trip (the same convention
+# as negative-zero.yaml). Each vector carries a big-endian u16 beside the flow, so a
+# mutation of either field's width or byte order is noticed. The shared encode cases,
+# including the rejections, are in tests/cr-2026-200-cases.yaml.
+name: probe_encoding_bcd_signed
+endian: big
+fields:
+- name: flow
+  type: u24
+  endian: little
+  encoding: bcd_signed
+  div: 1000
+- name: level
+  type: u16
+  encoding: bcd_signed
+test_vectors:
+- name: a_top_group_of_f_is_a_minus_sign
+  source: spec-example
+  payload: "3412F0 F123"
+  expected:
+    flow: -1.234
+    level: -123
+  expected_warnings: []
+- name: otherwise_the_digits_are_plain_bcd
+  source: spec-example
+  payload: "341200 0987"
+  expected:
+    flow: 1.234
+    level: 987
+  expected_warnings: []
+- name: a_negative_zero_is_zero
+  source: spec-example
+  payload: "0000F0 0001"
+  expected:
+    flow: 0
+    level: 1
+  expected_warnings: []

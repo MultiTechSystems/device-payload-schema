@@ -301,8 +301,8 @@ func checkFieldRules(field map[string]any, at string) error {
 		return fmt.Errorf("%s: match_value is withdrawn; write a signed type (sN), a signed bit range (sN[start:end]), encoding, match or guard instead (PS-426)", at)
 	}
 	if encoding, ok := field["encoding"]; ok {
-		if encoding != "sign_magnitude" && encoding != "bcd" && encoding != "gray" {
-			return fmt.Errorf("%s: encoding %v is not one of sign_magnitude, bcd, gray (PS-422)", at, encoding)
+		if encoding != "sign_magnitude" && encoding != "bcd" && encoding != "bcd_signed" && encoding != "gray" {
+			return fmt.Errorf("%s: encoding %v is not one of sign_magnitude, bcd, bcd_signed, gray (PS-422)", at, encoding)
 		}
 		if typ, _ := field["type"].(string); !unsignedTypes[typ] {
 			return fmt.Errorf("%s: encoding applies only to an unsigned integer type uN, not %v (PS-422)", at, field["type"])

@@ -197,7 +197,7 @@ C_UNSUPPORTED_KEYS = {
     "compute": "the C interpreter has no computed fields",
     "ref": "the C interpreter has no computed fields (ref)",
     "guard": "the C interpreter has no guard",
-    "encoding": "the C interpreter has no sign_magnitude/bcd/gray encodings",
+    "encoding": "the C interpreter has no sign_magnitude/bcd/bcd_signed/gray encodings",
     "nul": "the C interpreter has no nul modes on ascii (PS-534)",
     "terminator": "the C interpreter has no terminator-delimited ascii (PS-593)",
     "consume_terminator": "the C interpreter has no terminator-delimited ascii (PS-619)",

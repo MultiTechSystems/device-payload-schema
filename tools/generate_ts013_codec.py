@@ -639,6 +639,11 @@ function encEncoding(v, enc, size) {                  // _encode_encoding
     while (t > 0) { out += (t % 10) * scale; scale *= 16; t = Math.floor(t / 10); }
     return out;
   }
+  if (enc === "bcd_signed") {                        // PS-644 (CR-2026-200)
+    if (v >= 0) return encEncoding(v, "bcd", size);
+    if (-v > Math.pow(10, size * 2 - 1) - 1) encFail(v + " has no " + size * 8 + "-bit signed BCD representation (PS-644)");
+    return 15 * Math.pow(2, size * 8 - 4) + encEncoding(-v, "bcd", size);
+  }
   if (enc === "gray") return v ^ Math.floor(v / 2);
   return v;
 }
@@ -4398,7 +4403,7 @@ function toBase64(buf, pos, n) {
   return out;
 }
 
-/* The named encodings (PS-422 to PS-425), applied to the unsigned integer read and before
+/* The named encodings (PS-422 to PS-425, PS-643), applied to the unsigned integer read and before
  * the modifiers. A BCD group above 9 is an error, never a number (PS-424). */
 function decodeEncoding(v, enc, size) {
   var bits = size * 8, i, out;
@@ -4415,6 +4420,14 @@ function decodeEncoding(v, enc, size) {
       out = out * 10 + digit;
     }
     return out;
+  }
+  if (enc === 'bcd_signed') {                         // PS-643 (CR-2026-200): M-Bus Type A
+    var top = Math.pow(2, bits - 4);
+    if (Math.floor(v / top) % 16 === 15) {
+      out = decodeEncoding(v % top, 'bcd', size);     // the top group is 0, so plain bcd
+      return out === 0 ? 0 : -out;                    // a negative zero is 0
+    }
+    return decodeEncoding(v, 'bcd', size);
   }
   out = v;
   for (var shift = 1; shift < bits; shift *= 2) out = out ^ Math.floor(out / Math.pow(2, shift));

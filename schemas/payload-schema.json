@@ -21,6 +21,15 @@
           "minimum": 1,
           "description": "Byte length for bytes/string/hex/base64/bitfield_string/version_string types"
         },
+        "encoding": {
+          "enum": [
+            "sign_magnitude",
+            "bcd",
+            "bcd_signed",
+            "gray"
+          ],
+          "description": "On an unsigned integer uN: a named code applied to the integer read, before any arithmetic. bcd_signed is M-Bus Type A BCD, a most-significant group of 0xF marking a negative value (PS-422 to PS-425, PS-643, PS-644)."
+        },
         "numeral": {
           "enum": [
             "decimal",

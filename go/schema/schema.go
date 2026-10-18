@@ -115,7 +115,7 @@ const (
 type Field struct {
 	Name        string         `json:"name,omitempty" yaml:"name,omitempty"`
 	Type        FieldType      `json:"type" yaml:"type"`
-	// Encoding is a named code on an unsigned integer (PS-422): sign_magnitude, bcd, gray.
+	// Encoding is a named code on an unsigned integer (PS-422): sign_magnitude, bcd, bcd_signed, gray.
 	Encoding string `json:"encoding,omitempty" yaml:"encoding,omitempty"`
 	// Numeral is `decimal` or `hex` on an ascii field reported as an integer (PS-560).
 	Numeral string `json:"numeral,omitempty" yaml:"numeral,omitempty"`

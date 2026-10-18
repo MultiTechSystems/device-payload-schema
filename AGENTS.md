@@ -4433,6 +4433,43 @@ improved. The Go, Java and C# corpus runners write per-vector reports only when
     7289 registry vectors at 058e63f): no vector gains a PS-631 warning, none changes decode
     output or errors, so no `expected_warnings` needed changing.
 
+- **CR-2026-200 (PS-422 amended, PS-643, PS-644; la-payload-schema branch
+  `cr/0.5.8-apply-200`, 59b59c1, for 0.5.8): `encoding: bcd_signed`, M-Bus Type A BCD.** A
+  most-significant 4-bit group of 0xF is a minus sign over the BCD magnitude of the groups
+  below it; any other value is plain `bcd`. Another group above 9 is PS-424's error, and a
+  negative zero (`F00000`) is reported as 0. An encoder writes 0xF above a negative value's
+  magnitude and rejects one wider than the groups below the sign, in the prototype's words:
+  `-123456 has no 24-bit signed BCD representation (PS-644)`; zero or above is plain `bcd`
+  (PS-463). The CR's worked example, a u24 little-endian with `div: 1000`: `3412F0` is
+  -1.234, `341200` 1.234.
+  - **Where:** beside the other encodings, one helper per language: Python
+    `_decode_encoding`/`_encode_encoding` (`ENCODINGS` for the PS-422 load check, so the
+    validator and the generator too), the generator's `decodeEncoding` and the runtime's
+    `encEncoding`, Go `decodeEncoding`/`encodeEncoding` (`wave4.go`, load check in
+    `vocabulary.go`), Java `Wave4` (load check in `Schema`), C# `Wave4` (load check in
+    `SchemaParser`). Vocabulary: `tools/schema_vocabulary.py`, and `schemas/payload-schema.json`
+    gains an `encoding` enum on `definitions.field`.
+  - **Before:** every implementation rejected `bcd_signed` at load (PS-422). The Python
+    reference's PS-424 error was `Invalid BCD digit: 10` with no PS number; it now ends
+    `(PS-424)`, as the other four did.
+  - **C** has no encodings: `tools/schema_binary.py` already refused `encoding` (PS-446), and
+    its reason (and the C harness's) now names `bcd_signed`. A recorded C gap.
+  - **`encode-round-trip.py`** files a vector that does not re-encode and reports 0 in a
+    `sign_magnitude` or `bcd_signed` field under `negative-zero`, as CR-2026-154 does for
+    floats (PS-423, PS-643).
+  - **Cases:** `tests/cr-2026-200-cases.yaml` (the prototype's six `TestCR2026200SignedBcd`
+    tests and a few more: the widest negative, a positive too wide, a big-endian u16, the
+    PS-422 type check), read by `test_cr_2026_200_cases.py` (reference and codec), Go
+    `cr200_test.go`, Java `CR2026200Test`, C# `CR2026_200Tests`.
+  - **Fixture** `_language-conformance/encoding-bcd-signed.yaml`: negative, positive and
+    negative-zero vectors (mutation score 100%). Floors: decode 2962 -> 2965 in Go, Java and
+    C#; re-encode +2 everywhere, `plain fixed` +2 (Python and Java 2339 -> 2341, C# 2340 ->
+    2342, Go 2358 -> 2360, plain 2327 -> 2329); the negative-zero vector cannot re-encode.
+  - **Measured:** no corpus or registry schema declares `bcd_signed`, so nothing changes decode
+    or encode output or is rejected at load; plain `bcd` (registry mclimate) is unchanged but
+    for the Python PS-424 text. The elvaco cmi4110/cmi4111 `flow` and `power` the CR cites
+    become expressible; converting them is the registry's follow-up.
+
 - **A quoted numeric tlv case key is the number it spells, in all five.** `'0x0309':` and
   `'258':` reach an implementation as text where `0x0309:` reaches it as an integer (PyYAML,
   yaml.v3 and SnakeYAML resolve the unquoted form; YamlDotNet keeps the text either way). Python

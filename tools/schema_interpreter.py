@@ -2436,7 +2436,7 @@ def literal_errors(field_def):
     return errors
 
 
-ENCODINGS = ('sign_magnitude', 'bcd', 'gray')
+ENCODINGS = ('sign_magnitude', 'bcd', 'bcd_signed', 'gray')
 _UNSIGNED_INTEGER_TYPES = ('u8', 'u16', 'u24', 'u32', 'u64',
                            'uint8', 'uint16', 'uint24', 'uint32', 'uint64')
 
@@ -6741,12 +6741,21 @@ class SchemaInterpreter:
             for _ in range(size * 2):  # 2 nibbles per byte
                 digit = temp & 0x0F
                 if digit > 9:
-                    raise ValueError(f"Invalid BCD digit: {digit}")
+                    raise ValueError(f"Invalid BCD digit: {digit} (PS-424)")
                 result += digit * multiplier
                 multiplier *= 10
                 temp >>= 4
             return result
         
+        elif encoding == 'bcd_signed':
+            # PS-643 (CR-2026-200): M-Bus Type A. A most-significant group of 0xF is the
+            # sign and the groups below it the magnitude; otherwise plain bcd. -0 is 0.
+            top = size * 8 - 4
+            if (value >> top) & 0xF == 0xF:
+                magnitude = self._decode_encoding(value & ((1 << top) - 1), 'bcd', size)
+                return -magnitude if magnitude else 0
+            return self._decode_encoding(value, 'bcd', size)
+
         elif encoding == 'gray':
             # Gray code to binary: XOR with right-shifted versions
             result = value
@@ -6787,6 +6796,16 @@ class SchemaInterpreter:
                 temp //= 10
             return result
         
+        elif encoding == 'bcd_signed':
+            # PS-644 (CR-2026-200): a negative value takes 0xF in the top group and its
+            # magnitude in the groups below; zero or above is plain bcd.
+            if value >= 0:
+                return self._encode_encoding(value, 'bcd', size)
+            if -value > 10 ** (size * 2 - 1) - 1:
+                raise ValueError(f"{value} has no {size * 8}-bit signed BCD "
+                                 f"representation (PS-644)")
+            return (0xF << (size * 8 - 4)) | self._encode_encoding(-value, 'bcd', size)
+
         elif encoding == 'gray':
             # Binary to Gray code: XOR with right-shifted self
             return value ^ (value >> 1)
@@ -7024,7 +7043,7 @@ class SchemaInterpreter:
                         self._nested_warnings.append(mismatch)
                     else:
                         raise FieldError(mismatch)
-            # Apply encoding if specified (sign_magnitude, bcd, gray)
+            # Apply encoding if specified (sign_magnitude, bcd, bcd_signed, gray)
             encoding = field_def.get('encoding')
             if encoding:
                 # For encoded values, read as unsigned first
@@ -11665,7 +11684,7 @@ class SchemaInterpreter:
             size, signed = type_info[field_type]
             # PS-552: nearest, a tie to even, before any encoding; int() truncated.
             int_val = round_to_integer(value)
-            # Apply encoding if specified (sign_magnitude, bcd, gray)
+            # Apply encoding if specified (sign_magnitude, bcd, bcd_signed, gray)
             encoding = field_def.get('encoding')
             if encoding:
                 int_val = self._encode_encoding(int_val, encoding, size)

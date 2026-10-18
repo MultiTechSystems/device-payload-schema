@@ -474,9 +474,9 @@ public static partial class SchemaParser
                 + "type (sN), a signed bit range (sN[start:end]), encoding, match or guard instead (PS-426)");
         if (fm.TryGetValue("encoding", out var enc))
         {
-            if (Scalar(enc) is not ("sign_magnitude" or "bcd" or "gray"))
+            if (Scalar(enc) is not ("sign_magnitude" or "bcd" or "bcd_signed" or "gray"))
                 throw new InvalidOperationException($"Field '{name}': encoding {Scalar(enc)} is not one of "
-                    + "sign_magnitude, bcd, gray (PS-422)");
+                    + "sign_magnitude, bcd, bcd_signed, gray (PS-422)");
             if (!UnsignedTypes.Contains(type))
                 throw new InvalidOperationException($"Field '{name}': encoding applies only to an unsigned "
                     + $"integer type uN, not {type} (PS-422)");
