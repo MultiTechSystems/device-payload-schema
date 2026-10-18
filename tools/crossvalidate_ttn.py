@@ -116,6 +116,19 @@ def find_decoder(vendor_dir, codec_path, stem):
     return vendor_dir / ("%s.js" % stem)
 
 
+# Marks the line run_vendor_decoder's driver writes its result on, so output the vendor
+# codec prints itself (console.log) is ignored rather than failing the JSON parse.
+_RESULT_MARK = "@@crossvalidate_ttn result@@"
+
+
+def _vendor_result(stdout):
+    """The driver's result from the node process's stdout, or None if it wrote none."""
+    for line in reversed(stdout.splitlines()):
+        if line.startswith(_RESULT_MARK):
+            return json.loads(line[len(_RESULT_MARK) :])
+    return None
+
+
 def run_vendor_decoder(js_path, requests):
     """Decode payloads with the vendor's own JavaScript, in one node process."""
     driver = """
@@ -128,7 +141,9 @@ for (const req of REQUESTS) {
     out.push(r && r.data ? { data: r.data } : { errors: (r && r.errors) || ['no data'] });
   } catch (e) { out.push({ errors: [String((e && e.message) || e)] }); }
 }
-console.log(JSON.stringify(out));
+// The result goes on a marked line of its own: a vendor codec may write to stdout itself
+// (elvaco cmi4111 logs its hex array), which would otherwise corrupt the JSON read here.
+process.stdout.write("\\n" + RESULT_MARK + JSON.stringify(out) + "\\n");
 """
     code = js_path.read_text(encoding="utf-8", errors="replace")
     if "\n" not in code and code.count("\\n") > 3:
@@ -142,9 +157,10 @@ console.log(JSON.stringify(out));
             .replace("\\t", "\t")
             .replace('\\"', '"')
         )
-    script = "%s\nconst REQUESTS = %s;\n%s" % (
+    script = "%s\nconst REQUESTS = %s;\nconst RESULT_MARK = %s;\n%s" % (
         code,
         json.dumps(requests),
+        json.dumps(_RESULT_MARK),
         driver,
     )
     with tempfile.NamedTemporaryFile("w", suffix=".js", delete=False) as handle:
@@ -156,7 +172,7 @@ console.log(JSON.stringify(out));
         )
         if proc.returncode != 0:
             return None
-        return json.loads(proc.stdout.strip())
+        return _vendor_result(proc.stdout)
     except (OSError, subprocess.TimeoutExpired, ValueError):
         return None
     finally:
