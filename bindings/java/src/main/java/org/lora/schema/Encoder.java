@@ -3679,6 +3679,13 @@ final class Encoder {
             out[raw.length] = (byte) (int) terminator;
             return out;
         }
+        if (fixed != null && field.isTrim() && field.getType() == FieldType.ASCII
+                && (field.getRaw() == null || !field.getRaw().containsKey("nul"))) {
+            // PS-642 (CR-2026-199): a trimmed field with no `nul` pads with spaces.
+            byte[] out = pad(raw, fixed);
+            java.util.Arrays.fill(out, raw.length, out.length, (byte) ' ');
+            return out;
+        }
         return fixed == null ? raw : pad(raw, fixed);
     }
 

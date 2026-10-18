@@ -3632,6 +3632,49 @@ improved. The Go, Java and C# corpus runners write per-vector reports only when
     text as plain `ascii` today; with ASCII content the two agree, so adopting the key is a
     registry follow-up.
 
+- **CR-2026-199 (PS-641, PS-642; la-payload-schema `cr/0.5.8-apply-199` d6b2a8b, for 0.5.8):
+  trimmed text.** An `ascii` field may declare `trim: true`: decode removes leading and trailing
+  U+0020, U+0009, U+000A and U+000D after `nul`, `terminator` and `charset` (and before
+  `numeral`), so interior whitespace and other control characters stay; encode pads a fixed
+  `length` with spaces in place of 0x00 where the field declares no `nul` (a declared `nul`,
+  `trailing` included, keeps 0x00), writes a terminated value unpadded, and writes the value as
+  given - leading whitespace the decoder removed is not restored. The truvami name shape
+  (`20 54 41 47 20 ...` -> `TAG`, re-encoded `54 41 47 20 ...`).
+  - **Load (the prototype's text):** `Field 'n': trim is true or false, on an ascii field
+    (PS-641)` for a non-boolean value and for the key on any other type. Python `trim_errors`
+    (from `schema_iterator_errors`, so the validator and the TS013 generator too), Go
+    `checkTrim` (`go/schema/cr199.go`, from `checkFieldRules`), Java `AsciiText.checkTrim`
+    (from `checkWave4`), C# `AsciiText.CheckTrim` (from `CheckWave4`; a plain YAML 1.2 boolean
+    through `BooleanOf`).
+  - **Where:** Python `decode_ascii(..., trim)`, `ascii_padding` and `encode_ascii(..., pad)`;
+    the generator's ascii branch and the runtime's `encPad(..., pad)`; Go `trimText`/
+    `spacePadded` (`Field.Trim`); Java `AsciiText.trim` and `Encoder.encodeAscii`
+    (`Field.isTrim`); C# `AsciiText.Trim`/`SpacePadded` (`SchemaField.Trim`). A non-consuming
+    field's echo value (PS-588) is trimmed the same way.
+  - **C has it:** `field_def_t.ascii_trim` (in padding, so `sizeof(field_def_t)` stays 1640 and
+    `schema_t` 52536), built with `field_ascii_trimmed()`; decode trims after the trailing 0x00
+    padding, encode pads with spaces (C's ascii has no `nul`). `src/selftest_schema.c`'s
+    `test_ascii_trim`; the harness sets the flag, and builds `ascii-trim-padded.yaml` (C 586 ->
+    588 attempted, all passing). **The binary form has no slot for it**, so
+    `tools/schema_binary.py` refuses `trim` by name (PS-446).
+  - **Before:** every implementation ignored the key - whitespace stayed and padding was 0x00 -
+    and the validator refused it as unknown.
+  - **Round trip:** `encode-round-trip.py` files a vector of a `trim` field that does not
+    re-encode as the inherent reason `trimmed`.
+  - **Cases and fixtures:** `tests/cr-2026-199-cases.yaml` (11 decode, 8 encode, 4 load; the
+    prototype's `TestCR2026199TrimmedText` and more) read by `test_cr_2026_199_cases.py`
+    (reference, generated codec, validator and the binary converter), Go `cr199_test.go`, Java
+    `CR2026199Test`, C# `CR2026_199Tests`. Fixtures `ascii-trim` (trim alone, with `nul: stop`
+    and with a terminator; 3 vectors) and `ascii-trim-padded` (2 vectors), `source: generated`:
+    decode 2962 -> 2967 in Go, Java and C#; re-encode +3 everywhere, all `plain fixed` (Python
+    2339 -> 2342, `plain fixed` 265 -> 268; Java 2339 -> 2342; C# 2340 -> 2343; Java and C#
+    `plain fixed` 259 -> 262; Go 2358 -> 2361, plain 2327 -> 2330, `plain fixed` 259 -> 262);
+    the two vectors with leading whitespace, or a tab or line end before the padding, do not.
+  - **Measured:** no corpus, library, example or registry schema declares `trim` (a field named
+    `trim` in `bitfield-string-padded-signed.yaml` is a name, not the key), and every new path is
+    reached only through it, so none is rejected and no decode or encode output changes.
+    Adopting it in the registry's truvami tag-s-l name is a registry follow-up.
+
 - **CR-2026-175 (PS-453 and PS-015 amended, PS-588, PS-589; la-payload-schema main 9e8957a, for
   0.5.7): a byte string that does not consume reports its span again.** A `bytes`, `hex` or
   `ascii` field declaring `consume: 0` reads and reports its span and leaves the read position,

@@ -471,6 +471,7 @@ public static partial class SchemaParser
         AsciiText.Check(fm);                                            // PS-534, PS-593, PS-072
         AsciiText.CheckCharset(fm);                                     // PS-624
         FrameSource.Check(fm);                                          // PS-635
+        AsciiText.CheckTrim(fm);                                        // PS-641
         if (fm.Children.ContainsKey(new YamlScalarNode("match_value")))
             throw new InvalidOperationException($"Field '{name}': match_value is withdrawn; write a signed "
                 + "type (sN), a signed bit range (sN[start:end]), encoding, match or guard instead (PS-426)");
@@ -1067,6 +1068,8 @@ public static partial class SchemaParser
             f.Utf8 = Scalar(csNode) == "utf-8";
         if (fm.TryGetValue("source", out var srcNode))                            // PS-635
             f.Source = Scalar(srcNode);
+        if (fm.TryGetValue("trim", out var trimNode))                              // PS-641
+            f.Trim = AsciiText.BooleanOf(trimNode) == true;
         f.Checksum = PayloadSchema.Checksum.Parse(fm);                    // PS-585 (CR-2026-174)
         if (fm.TryGetValue("byte_group", out var bgNode))
         {

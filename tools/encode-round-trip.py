@@ -95,6 +95,11 @@ The `inherent` reasons, each of which is a decision recorded elsewhere:
                     value, not the payload: a float field of a vector that does not
                     re-encode and reports 0.
 
+  trimmed           An `ascii` field declared `trim: true` (PS-641, PS-642, CR-2026-199). The
+                    whitespace the decoder removed from both ends is not in the output; an
+                    encoder pads with spaces, so trailing space padding comes back and
+                    leading whitespace, or trailing tabs and line ends, do not. Judged from
+                    the schema, as nul-mode is.
   nul-mode          An `ascii` field declared `nul: stop` or `nul: drop` (PS-534, CR-2026-177).
                     `stop` leaves the bytes after the first 0x00 out of the value, and `drop`
                     removes the 0x00 bytes wherever they were, so neither is in the output
@@ -158,6 +163,7 @@ INHERENT = (
     "null-element",
     "shared-label",
     "negative-zero",
+    "trimmed",
     "nul-mode",
     "end-terminated",
     "checksum-mismatch",
@@ -318,6 +324,18 @@ def nul_mode_fields(schema, port=None):
             and f.get("nul") in ("stop", "drop")]
 
 
+def trimmed_fields(schema, port=None):
+    """Top-level ascii fields declared `trim: true` (PS-641, PS-642)."""
+    fields = schema.get("fields") or []
+    ports = schema.get("ports") or {}
+    if ports:
+        entry = ports.get(port, ports.get(str(port), ports.get("default")))
+        fields = (entry or {}).get("fields") or [] if isinstance(entry, dict) else []
+    return [f["name"] for f in fields
+            if isinstance(f, dict) and f.get("type") == "ascii" and f.get("name")
+            and f.get("trim") is True]
+
+
 def has_null_element(node):
     """A null inside an array: an `element` repeat's omitted value (PS-528)."""
     if isinstance(node, dict):
@@ -350,6 +368,8 @@ def classify(decoded, traits, schema=None, port=None):
         return "absent-value"
     if schema is not None and zero_floats(schema, decoded.data, port):
         return "negative-zero"                                           # PS-566
+    if schema is not None and trimmed_fields(schema, port):
+        return "trimmed"                                                 # PS-641, PS-642
     if schema is not None and nul_mode_fields(schema, port):
         return "nul-mode"                                                # PS-534, PS-595
     if schema is not None and end_terminated_fields(schema, port):

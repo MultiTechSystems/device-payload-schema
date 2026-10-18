@@ -1,0 +1,22 @@
+# An ascii field declaring `trim: true` and nothing else of the text rules: its leading and
+# trailing U+0020, U+0009, U+000A and U+000D are dropped after the trailing 0x00 padding
+# (PS-641, CR-2026-199), and an encoder pads it with spaces (PS-642). The C struct API
+# builds this one; ascii-trim.yaml adds the 0x00 rule and a terminator.
+name: probe_ascii_trim_padded
+endian: big
+fields:
+- name: label
+  type: ascii
+  length: 8
+  trim: true
+- name: level
+  type: u8
+test_vectors:
+- name: space_padding_comes_back
+  source: generated
+  payload: "4F4B2058202020202A"
+  expected: {label: "OK X", level: 42}
+- name: tabs_line_ends_and_nul_padding_are_dropped
+  source: generated
+  payload: "090A4F4B0D20000001"
+  expected: {label: "OK", level: 1}

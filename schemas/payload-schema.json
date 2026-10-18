@@ -74,6 +74,10 @@
           "type": "boolean",
           "description": "With terminator: true lets the end of the data (less any reserve, or a tlv entry's end) end the text too, which is then not an error (PS-619)."
         },
+        "trim": {
+          "type": "boolean",
+          "description": "On an ascii field: true removes leading and trailing U+0020, U+0009, U+000A and U+000D after nul, terminator and charset; an encoder pads with spaces where no nul is declared (PS-641, PS-642)."
+        },
         "charset": {
           "type": "string",
           "enum": [

@@ -203,6 +203,16 @@ as UTF-8, and `length` counts bytes, not characters: a value whose UTF-8 is long
 - {name: condition, type: ascii, length: 8, nul: stop, charset: utf-8}   # C3 85 6E 67 00 ... -> "Ång"
 ```
 
+An `ascii` field declaring `trim: true` loses leading and trailing whitespace (U+0020, U+0009,
+U+000A, U+000D) after `nul`, `terminator` and `charset` have been applied (PS-641). An encoder
+pads such a field with spaces instead of 0x00, unless the field declares `nul` (PS-642).
+Leading whitespace is not restored. `trim` with a value other than true or false, or on
+another type, is rejected at load.
+
+```yaml
+- {name: name, type: ascii, length: 10, trim: true}   # 20 54 41 47 20 20 ... -> "TAG"; encodes 54 41 47 20 ...
+```
+
 A `bytes` field reports a **lowercase** hex string by default (PS-281). Its `format:` is
 one of `hex`, `hex:upper`, `base64` or `array` (PS-079), and a `separator:` goes between
 the bytes of either hex format (PS-391). `hex:upper` is a format, not a type: `type:

@@ -345,6 +345,10 @@ func checkFieldRules(field map[string]any, at string) error {
 	if err := checkFrameSource(field); err != nil {
 		return err
 	}
+	// PS-641 (CR-2026-199): trim is true or false, on an ascii field.
+	if err := checkTrim(field); err != nil {
+		return err
+	}
 	// PS-585 (CR-2026-174): a checksum on an unsigned integer wide enough for its algo.
 	if err := checkChecksum(field); err != nil {
 		return err

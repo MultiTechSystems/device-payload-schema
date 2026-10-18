@@ -210,6 +210,8 @@ def field_source(field, schema_endian):
         if not isinstance(length, int):
             return None, f"{ftype} length is not a literal"
         lines.append(f"    f = {SIZED_CTORS[ftype]}({c_string(name)}, {length});")
+        if ftype == "ascii" and field.get("trim") is True:
+            lines.append("    f.ascii_trim = true;")              # PS-641, PS-642
     elif ftype == "enum":
         values = field.get("values")
         if not isinstance(values, dict):

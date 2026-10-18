@@ -692,8 +692,8 @@ function encUtf8(text, name) {
   }
   return u;
 }
-function encPad(out, bytes, length) {
-  for (var i = 0; i < length; i++) out.push(i < bytes.length ? bytes[i] & 0xFF : 0);
+function encPad(out, bytes, length, pad) {
+  for (var i = 0; i < length; i++) out.push(i < bytes.length ? bytes[i] & 0xFF : (pad || 0));
 }
 
 function encBase64(text) {
@@ -876,7 +876,9 @@ function encFieldInner(out, f, value, endian, ctx) {  // _encode_field_inner
       if (f.consume_terminator !== false) out.push(term);   // else the next field writes it
       return;
     }
-    encPad(out, u, fixed !== null ? fixed : u.length);
+    // PS-642 (CR-2026-199): a trimmed field with no `nul` pads with spaces.
+    encPad(out, u, fixed !== null ? fixed : u.length,
+           type === "ascii" && f.trim === true && f.nul === undefined ? 0x20 : 0);
     return;
   }
   if (type === "enum") {                             // _encode_enum
@@ -5658,6 +5660,9 @@ function writeS(buf, pos, size, value, endian) {
                     # PS-624: the bytes the byte rules leave, decoded as UTF-8.
                     lines.append(f'{i}  {js_name} = utf8Text({js_name}, '
                                  f'{json.dumps(str(field.get("name")))});')
+                if field.get('trim') is True:
+                    # PS-641 (CR-2026-199): after the byte rules and the character set.
+                    lines.append(f'{i}  {js_name} = {js_name}.replace(/^[ \\t\\n\\r]+|[ \\t\\n\\r]+$/g, "");')
                 if echo:
                     lines.append(f'{i}  pos = {js_name}_p0;')
                 elif field.get('terminator') is not None:

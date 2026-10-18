@@ -1495,6 +1495,46 @@ static void test_ascii_encodes_padded(void) {
     TCHECK(memcmp(out.data, p, sizeof(p)) == 0);
 }
 
+/* CR-2026-199 (PS-641, PS-642): `trim: true` drops the whitespace at both ends after the
+ * trailing 0x00 padding, and encode pads with spaces. The payloads are tests/cr-2026-199's. */
+static void test_ascii_trim(void) {
+    schema_t s;
+    decode_result_t r;
+    encode_inputs_t inputs;
+    encode_result_t out;
+    memset(&s, 0, sizeof(s));
+    field_def_t f = field_ascii_trimmed("name", 10);
+    schema_add_field(&s, &f);
+    const uint8_t truvami[] = {0x20, 'T', 'A', 'G', 0x20, 0x20, 0x20, 0x20, 0x20, 0x20};
+    TCHECK(schema_decode(&s, truvami, sizeof(truvami), &r) == SCHEMA_OK);
+    TCHECK(r.fields[0].text_len == 3 && strcmp(r.fields[0].value.str, "TAG") == 0);
+    TCHECK(r.bytes_consumed == 10);
+    const uint8_t mixed[] = {0x09, 0x0D, 0x0A, 'a', ' ', 'b', 0x0A, 0x20, 0x00, 0x00};
+    TCHECK(schema_decode(&s, mixed, sizeof(mixed), &r) == SCHEMA_OK);
+    TCHECK(r.fields[0].text_len == 3 && strcmp(r.fields[0].value.str, "a b") == 0);
+    const uint8_t blank[] = {0x20, 0x09, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x00};
+    TCHECK(schema_decode(&s, blank, sizeof(blank), &r) == SCHEMA_OK);
+    TCHECK(r.fields[0].text_len == 0 && r.fields[0].value.str[0] == 0);
+    /* Other control characters are not whitespace here. */
+    const uint8_t vt[] = {0x0B, 'a', 0x0C, 0, 0, 0, 0, 0, 0, 0};
+    TCHECK(schema_decode(&s, vt, sizeof(vt), &r) == SCHEMA_OK);
+    TCHECK(r.fields[0].text_len == 3 && memcmp(r.fields[0].value.str, "\x0B" "a\x0C", 3) == 0);
+
+    encode_inputs_init(&inputs);
+    TCHECK(encode_inputs_add_text(&inputs, "name", (const uint8_t*)"TAG", 3));
+    TCHECK(schema_encode(&s, &inputs, &out) == SCHEMA_OK);
+    TCHECK(out.len == 10 && memcmp(out.data, "TAG       ", 10) == 0);
+
+    /* Without trim, whitespace stays and the padding is 0x00. */
+    f = field_ascii("name", 10);
+    memset(&s, 0, sizeof(s));
+    schema_add_field(&s, &f);
+    TCHECK(schema_decode(&s, truvami, sizeof(truvami), &r) == SCHEMA_OK);
+    TCHECK(r.fields[0].text_len == 10);
+    TCHECK(schema_encode(&s, &inputs, &out) == SCHEMA_OK);
+    TCHECK(out.len == 10 && memcmp(out.data, "TAG\0\0\0\0\0\0\0", 10) == 0);
+}
+
 static void test_ascii_and_numbers_are_not_mixed(void) {
     schema_t s;
     encode_inputs_t inputs;
@@ -2322,6 +2362,7 @@ void selftest_schema(void) {
     test_ascii_reports_a_high_byte_as_itself();
     test_ascii_is_never_truncated();
     test_ascii_encodes_padded();
+    test_ascii_trim();
     test_ascii_and_numbers_are_not_mixed();
     test_a_byte_group_reads_one_value();
     test_a_byte_group_is_checked();
