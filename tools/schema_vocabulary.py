@@ -166,7 +166,7 @@ VOCABULARY: Dict[str, Dict[str, Tuple[Tuple[str, ...], str]]] = {
         "parts": (_DECODERS, "bitfield_string components"),
         "delimiter": (_DECODERS, "bitfield_string separator"),
         "prefix": (_DECODERS, "bitfield_string prefix"),
-        "encoding": (_DECODERS, "sign_magnitude | bcd | gray on a uN (PS-422)"),
+        "encoding": (_DECODERS, "sign_magnitude | bcd | bcd_signed | gray on a uN (PS-422, PS-643)"),
         "numeral": (_DECODERS, "decimal | hex: an ascii field reported as the integer its digits give (PS-560)"),
         "nul": (_DECODERS, "trailing | stop | drop: how an ascii field treats its 0x00 bytes (PS-534)"),
         "terminator": (_DECODERS, "a byte 0 to 255 that ends a variable-length ascii field, in place of length (PS-593)"),

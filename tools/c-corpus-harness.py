@@ -113,7 +113,7 @@ UNREACHABLE_KEYS = {
     "ref": "the interpreter has no computed fields (ref)",
     "guard": "the interpreter has no guard",
     "parts": "the interpreter has no bitfield_string/version_string",
-    "encoding": "the interpreter has no sign_magnitude/bcd/gray encodings",
+    "encoding": "the interpreter has no sign_magnitude/bcd/bcd_signed/gray encodings",
     "nul": "the interpreter has no nul modes on ascii (PS-534)",
     "terminator": "the interpreter has no terminator-delimited ascii (PS-593)",
     "consume_terminator": "the interpreter has no terminator-delimited ascii (PS-619)",

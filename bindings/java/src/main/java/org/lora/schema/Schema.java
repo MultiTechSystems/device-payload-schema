@@ -742,9 +742,9 @@ public class Schema {
         }
         if (fm.containsKey("encoding")) {
             Object encoding = fm.get("encoding");
-            if (!List.of("sign_magnitude", "bcd", "gray").contains(encoding)) {
+            if (!List.of("sign_magnitude", "bcd", "bcd_signed", "gray").contains(encoding)) {
                 throw new SchemaException(at + "encoding " + encoding
-                        + " is not one of sign_magnitude, bcd, gray (PS-422)");
+                        + " is not one of sign_magnitude, bcd, bcd_signed, gray (PS-422)");
             }
             if (!UNSIGNED_TYPES.contains(fm.get("type"))) {
                 throw new SchemaException(at + "encoding applies only to an unsigned integer type uN, not "
