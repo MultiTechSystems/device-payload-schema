@@ -671,6 +671,24 @@ operator (PS-126), so a range of values is two conditions, not one, and a condit
 none or two is rejected. The same conditions serve
 `present_if`.
 
+### Values of the frame (`source`)
+
+A `type: number` field may report a value no payload byte holds: `source: $fPort` (the
+uplink's FPort), `$payloadLength` (the payload's length in bytes) or `$remaining` (the bytes
+from the field's position to the end of the data, less any `reserve`; inside a tlv entry, to
+the entry's end, as `match: {remaining: true}` counts them). It reads no bytes; its
+modifiers apply once, and a reference to it binds the value (PS-635). With no FPort given, a
+`$fPort` field is omitted with a warning naming it (PS-636). An encoder writes nothing for it
+and checks a given value against the finished frame and the FPort it reports, rejecting one
+that differs (PS-637). Any other `source`, or one beside `value`, `compute`, `ref`,
+`polynomial` or `time` `parts`, is rejected at load.
+
+```yaml
+- {name: _header, type: bytes, length: 8}
+- {name: data_size, type: number, source: $remaining}   # 8 header bytes + AA BB CC -> 3
+- {name: port, type: number, source: $fPort}
+```
+
 ### Formula (Withdrawn)
 
 `formula` and `encode_formula` are withdrawn (CR-2026-159, PS-448): a schema declaring one is

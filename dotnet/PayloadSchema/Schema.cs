@@ -145,6 +145,9 @@ public class SchemaField
     public bool EndTerminates { get; set; }
     /// <summary><c>charset: utf-8</c>: the text is UTF-8 (PS-624, PS-625, CR-2026-190).</summary>
     public bool Utf8 { get; set; }
+    /// <summary><c>source</c>: <c>$fPort</c>, <c>$payloadLength</c> or <c>$remaining</c>, a value of
+    /// the frame (PS-635, CR-2026-196); null where none is declared.</summary>
+    public string? Source { get; set; }
     /// <summary>A check value over the bytes before the field (PS-585 to PS-587, CR-2026-174).</summary>
     public ChecksumSpec? Checksum { get; set; }
     /// <summary>A computed field written `type: integer` (PS-283); its Type is Number.</summary>

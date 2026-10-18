@@ -469,6 +469,9 @@ def check_echoes(frame) -> None:
                 found = None
             if found is not None and normalize_output(found) == normalize_output(given):
                 continue
+            if isinstance(field_def, dict) and 'source' in field_def:      # PS-637
+                raise ValueError(frame_source_mismatch(field_def.get('name'), given,
+                                                       normalize_output(found)))
             written = echo_text(found) if found is not None else 'too few bytes'
         rule = 'PS-604' if is_peeked_number(field_def) else 'PS-589'
         raise ValueError(f"Field '{field_def.get('name')}' is given {echo_text(given)}, but "
@@ -2706,6 +2709,47 @@ def charset_errors(node, _top=True):
     return errors
 
 
+#: PS-635 (CR-2026-196): the values of the frame a `type: number` field may report.
+FRAME_SOURCES = ('$fPort', '$payloadLength', '$remaining')
+
+
+def frame_source_message(name) -> str:
+    """PS-635's load-time rejection, in the spec prototype's text."""
+    return (f"Field '{name}': source is one of {', '.join(FRAME_SOURCES)}, on a type: "
+            f"number field that computes nothing else (PS-635)")
+
+
+def frame_source_errors(node, _top=True) -> List[str]:
+    """PS-635 (CR-2026-196), at load: `source` names the FPort, the payload length or the
+    bytes remaining, on a `type: number` (or `integer`) field that declares no `value`,
+    `compute`, `ref`, `polynomial` or `time` `parts`. Walked over the whole schema; a test
+    vector's provenance `source:` and a `metadata.include` entry's carry no `type`."""
+    errors = []
+    if isinstance(node, list):
+        for item in node:
+            errors.extend(frame_source_errors(item, False))
+    elif isinstance(node, dict):
+        if 'type' in node and 'source' in node:
+            clash = [k for k in ('value', 'compute', 'ref', 'polynomial') if k in node]
+            if isinstance(node.get('time'), dict) and 'parts' in node['time']:
+                clash.append('time parts')
+            if str(node.get('type')).lower() not in COMPUTED_TYPES \
+                    or node['source'] not in FRAME_SOURCES or clash:
+                errors.append(frame_source_message(node.get('name')))
+        for key, value in node.items():
+            if _top and key == 'test_vectors':
+                continue
+            errors.extend(frame_source_errors(value, False))
+    return errors
+
+
+def frame_source_mismatch(name, given, found) -> str:
+    """PS-637's rejection of a given value the finished frame does not bear out."""
+    gives = format_lookup_value(found) if isinstance(found, (int, float)) and \
+        not isinstance(found, bool) else ('no FPort' if found is None else echo_text(found))
+    return f"Field '{name}' is given {echo_text(given)}, but the frame gives {gives} (PS-637)"
+
+
 def terminated_span(field_def: Dict[str, Any], buf: bytes, pos: int) -> Tuple[int, int]:
     """PS-593, PS-619: the number of bytes of text before the field's terminator, and the
     number of terminator bytes the field consumes after it (1, or 0 with
@@ -4851,6 +4895,7 @@ def schema_iterator_errors(schema):
     errors.extend(packed_repeat_errors(schema))                      # PS-621
     errors.extend(ascii_text_errors(schema))                         # PS-534, PS-593
     errors.extend(charset_errors(schema))                            # PS-624
+    errors.extend(frame_source_errors(schema))                       # PS-635
     errors.extend(checksum_errors(schema))                           # PS-585
     errors.extend(checksum_placement_errors(schema))                 # PS-608
     errors.extend(bitfield_part_errors(schema))                      # PS-430
@@ -7923,6 +7968,60 @@ class SchemaInterpreter:
 
         return result, pos
     
+    def _frame_source(self, field_def: Dict[str, Any], buf: bytes, pos: int,
+                      warnings: List[str]) -> Any:
+        """PS-635 (CR-2026-196): the integer `source` names - the FPort, the payload's
+        length, or the bytes from `pos` to the end of `buf`, which already ends at any
+        reserve or tlv entry's end, as a `remaining` match counts (PS-414) - through the
+        field's modifiers, once. PS-636: with no FPort, OMITTED with a warning."""
+        self._produced(field_def)
+        source = field_def['source']
+        frame = getattr(self, '_frame', None) or {}
+        raw = max(0, len(buf) - pos) if source == '$remaining' else frame.get(source[1:])
+        if raw is None:
+            warnings.append(f"Field '{field_def.get('name')}': no FPort was given, so it "
+                            f"is omitted (PS-636)")
+            return OMITTED
+        return self._apply_modifiers(raw, field_def)
+
+    def _frame_source_value(self, field_def: Dict[str, Any], raw: Optional[int]) -> Any:
+        """PS-637: what a `source` field reports for `raw` on the encode side, through its
+        modifiers, with the decode's tables kept aside; None for no value."""
+        if raw is None:
+            return None
+        tables = {k: getattr(self, k, None)
+                  for k in ('_lookup_numbers', '_pre_lookup', '_labels')}
+        self._lookup_numbers, self._pre_lookup = IdentityTable(), IdentityTable()
+        try:
+            value = self._apply_modifiers(raw, field_def)
+            return None if value is OMITTED else normalize_output(value)
+        finally:
+            for key, table in tables.items():
+                if table is None:
+                    if hasattr(self, key):
+                        delattr(self, key)
+                else:
+                    setattr(self, key, table)
+
+    def _encode_frame_source(self, field_def: Dict[str, Any], data: Dict[str, Any],
+                             out: 'FrameBuffer') -> None:
+        """PS-637 (CR-2026-196): a `source` field writes nothing. A value the input gives
+        is checked against the finished frame: `$remaining` against the bytes after its
+        position where its frame closes (as a non-consuming byte string is, PS-589), and
+        `$payloadLength` and `$fPort` against the whole payload and the FPort the encode
+        reports, once it is finished."""
+        name = field_def.get('name')
+        if not name or data.get(name) is None:
+            return
+        given = data[name]
+        if field_def['source'] == '$remaining':
+            out.echoes.append((len(out.buf), field_def, given, None,
+                               lambda span: self._frame_source_value(field_def, len(span))))
+        else:
+            if not hasattr(self, '_frame_source_checks'):
+                self._frame_source_checks = []
+            self._frame_source_checks.append((field_def, given))
+
     def _decode_computed_field(self, field_def: Dict[str, Any]) -> Optional[float]:
         """Decode a computed field (type: number) - ref, polynomial, compute, guard.
 
@@ -8790,6 +8889,9 @@ class SchemaInterpreter:
         self._producers = {}
         self._meta_depth = 0
         
+        # PS-635 (CR-2026-196): the frame a `source` field reports from.
+        self._frame = {'fPort': fPort, 'payloadLength': len(payload)}
+
         pos = 0
         fields = self._resolve_fields(fPort)
         
@@ -9074,7 +9176,11 @@ class SchemaInterpreter:
             # operation - the defect CR-2026-006 removed from bitfields.
             if field_type in COMPUTED_TYPES:
                 try:
-                    if is_time_field(field_def) and 'parts' in field_def['time']:
+                    if 'source' in field_def:
+                        # PS-635, PS-636 (CR-2026-196): a value of the frame, not of
+                        # its bytes; with no FPort, `$fPort` is omitted with a warning.
+                        value = self._frame_source(field_def, payload, pos, result.warnings)
+                    elif is_time_field(field_def) and 'parts' in field_def['time']:
                         # PS-614 (CR-2026-186): the instant its parts name. Parts naming
                         # no date omit the field with a warning (amended 2026-10-15).
                         try:
@@ -9404,17 +9510,23 @@ class SchemaInterpreter:
         self._ps564 = []            # PS-564: each `remaining` match's chosen case
         self._ps564_depth = 0       # inside a tlv or repeat, where it is not checked
         self._checksum_apart = 0    # inside a tlv entry or repeat element (CR-2026-185)
+        self._frame_source_checks = []      # PS-637: (field, given) of $payloadLength, $fPort
         if self._load_errors:
             result.errors.extend(self._load_errors)
             return result
 
         # PS-581: which port entry this encode uses, and the FPort it reports.
+        caller_fport = fPort
         try:
             fPort = self._choose_encode_port(fPort, direction)
         except ValueError as e:
             result.errors.append(str(e))
             return result
-        if fPort is None:
+        if fPort is None and caller_fport is not None and not self.schema.get('ports'):
+            # PS-581: a schema without `ports` reports the caller's FPort. It reported
+            # the document's alone, which PS-637's check of a `$fPort` field reads.
+            result.fport = caller_fport
+        elif fPort is None:
             doc = self.schema.get('fPort', self.schema.get('fport'))
             result.fport = doc if isinstance(doc, int) and not isinstance(doc, bool) else None
         else:
@@ -9560,6 +9672,9 @@ class SchemaInterpreter:
             # own. This required the deprecated `formula` spelling, so a field using
             # `ref`, `compute`, `polynomial` or `guard` fell through to "Cannot encode
             # type: number" - every schema with a computed field failed to encode.
+            if 'source' in field_def and field_type in COMPUTED_TYPES:
+                self._encode_frame_source(field_def, data, output)     # PS-637
+                continue
             if field_type in COMPUTED_TYPES:
                 continue
             
@@ -9684,6 +9799,17 @@ class SchemaInterpreter:
                 check_peeks(frame)                          # PS-551 (CR-2026-141)
             except ValueError as e:
                 result.errors.append(str(e))
+        if not result.errors:
+            # PS-637 (CR-2026-196): a given payload length or FPort is the finished
+            # frame's; the encoder neither pads the frame nor chooses the FPort to agree.
+            for source_field, given in self._frame_source_checks:
+                raw = len(frame) if source_field['source'] == '$payloadLength' \
+                    else result.fport
+                found = self._frame_source_value(source_field, raw)
+                if found is None or found != normalize_output(given):
+                    result.errors.append(frame_source_mismatch(
+                        source_field.get('name'), given, found))
+                    break
         if not result.errors:
             # PS-564: the bytes from each `remaining` match to the end select its case.
             for check in self._ps564:
@@ -10830,6 +10956,9 @@ class SchemaInterpreter:
                     # PS-551: its members were written as zeros.
                     raise ValueError(missing_field_message(key))
                 out.extend(self._encode_object_members(f.get('fields') or [], nested))
+                continue
+            if 'source' in f and ftype in COMPUTED_TYPES:
+                self._encode_frame_source(f, data, out)                # PS-637
                 continue
             if ftype in COMPUTED_TYPES:
                 # Derived: computed from other fields, no bytes of its own.

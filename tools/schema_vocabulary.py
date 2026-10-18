@@ -172,6 +172,7 @@ VOCABULARY: Dict[str, Dict[str, Tuple[Tuple[str, ...], str]]] = {
         "consume_terminator": (_DECODERS, "with terminator: false leaves the terminator unread for the next field (PS-619, PS-620)"),
         "end_terminates": (_DECODERS, "with terminator: true lets the end of the data end the text too (PS-619)"),
         "charset": (_DECODERS, "utf-8 on an ascii field: its bytes are UTF-8 text, length counting bytes (PS-624, PS-625)"),
+        "source": (_DECODERS, "$fPort | $payloadLength | $remaining on a type: number field: a value of the frame, reading no bytes (PS-635 to PS-637)"),
         "checksum": (_DECODERS, "a check value over earlier bytes, verified on decode and computed on encode (PS-585)"),
         "bit_labels": (_DECODERS, "{bit: label} on an unsigned integer or bit range: the labels of its set bits, a list or joined text (PS-616 to PS-618)"),
         "join": (_DECODERS, "with bit_labels: the text between labels; the field reports one string (PS-616, PS-617)"),

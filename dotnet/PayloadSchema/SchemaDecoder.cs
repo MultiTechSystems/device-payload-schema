@@ -120,7 +120,11 @@ public static class SchemaDecoder
             SchemaDirection.Check(schema, fPort.Value, direction);
             fields = ResolveFields(schema, fPort.Value);
         }
-        var ctx = new DecodeContext(data, schema.Endian) { RepeatOnlyNames = schema.RepeatOnlyNames, Trace = trace };
+        var ctx = new DecodeContext(data, schema.Endian)
+        {
+            RepeatOnlyNames = schema.RepeatOnlyNames, Trace = trace,
+            FrameFPort = fPort, PayloadLength = data.Length,            // PS-635
+        };
         var result = new Dictionary<string, object?>();
 
         MergeTo(result, DecodeFields(fields, ctx, schema));
@@ -497,6 +501,16 @@ public static class SchemaDecoder
     /// <summary>What a whole number that does not consume decodes from <paramref name="span"/>
     /// (PS-604, CR-2026-182): its type, arithmetic and lookup, as a decoder applies them;
     /// null where it has no value.</summary>
+    /// <summary>PS-637: what a `source` field reports for <paramref name="raw"/>, through its
+    /// modifiers; null where it reports no number.</summary>
+    internal static object? FrameSourceValue(SchemaField field, long? raw)
+    {
+        if (raw == null) return null;
+        var value = ApplyPostRead(raw.Value, field, new DecodeContext(Array.Empty<byte>()));
+        if (value is double d && d == 0) return 0.0;
+        return value is string or bool || Helpers.ToFloat64(value).Item1 ? value : null;
+    }
+
     internal static object? PeekedNumberValue(SchemaField field, byte[] span, string endian)
     {
         var value = DecodeFieldBody(field, new DecodeContext(span, endian), null);
@@ -757,6 +771,16 @@ public static class SchemaDecoder
                     partStrs.Add(BitfieldParts.FormatPart(raw, bitLen, format));
                 }
                 value = prefix + string.Join(delimiter, partStrs);
+                break;
+            }
+
+            case FieldType.Number when field.Source != null:
+            {
+                // PS-635, PS-636 (CR-2026-196): a value of the frame, through the modifiers
+                // below once; with no FPort, `$fPort` is omitted with a warning.
+                var raw = FrameSource.Raw(field, ctx);
+                if (raw == null) return Omitted;
+                value = raw.Value;
                 break;
             }
 

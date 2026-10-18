@@ -81,6 +81,15 @@
           ],
           "description": "On an ascii field: its bytes, after length, nul and terminator, are UTF-8 text; an encoder writes UTF-8 and length counts bytes (PS-624, PS-625)."
         },
+        "source": {
+          "type": "string",
+          "enum": [
+            "$fPort",
+            "$payloadLength",
+            "$remaining"
+          ],
+          "description": "On a type: number field: the uplink's FPort, the payload's length in bytes, or the bytes from the field's position to the end of the data; it reads no bytes, and its modifiers apply (PS-635 to PS-637)."
+        },
         "checksum": {
           "type": "object",
           "description": "On an unsigned integer field: the check value over the bytes from `from` to the byte before it, verified on decode and computed on encode (PS-585 to PS-587).",

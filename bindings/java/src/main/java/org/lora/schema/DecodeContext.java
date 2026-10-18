@@ -94,7 +94,15 @@ public class DecodeContext {
     void exitMetaLevel() { metaDepth--; }
     Map<String, Map<String, Object>> getProducers() { return producers; }
 
+    /** PS-635 (CR-2026-196): the frame's FPort, null where none was given, and length. */
+    private Integer framePort;
+    private int payloadLength;
+    Integer getFramePort() { return framePort; }
+    void setFramePort(Integer port) { this.framePort = port; }
+    int getPayloadLength() { return payloadLength; }
+
     public DecodeContext(byte[] data, String endian) {
+        this.payloadLength = data.length;
         this.data = data;
         this.limit = data.length;
         this.offset = 0;
