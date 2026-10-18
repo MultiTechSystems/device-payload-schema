@@ -234,6 +234,10 @@ public class DecodeContext
     }
 
     public int Remaining => Data.Length - Offset;
+    /// <summary>The FPort the decode was given, null for none (PS-635, PS-636).</summary>
+    internal int? FrameFPort { get; set; }
+    /// <summary>The whole payload's length, whatever data is in view (PS-635).</summary>
+    internal long PayloadLength { get; set; }
 
     public ReadOnlySpan<byte> Read(int n)
     {

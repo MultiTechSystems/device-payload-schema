@@ -24,16 +24,16 @@ GATE_VERDICTS_ARGS ?=
 .PHONY: gate-verdicts gate-verdicts-changed gate-verdicts-baseline
 
 gate-verdicts:
-	@mkdir -p .cache/go .cache/m2 .cache/nuget build/verdicts
-	DOCKER="$(or $(DOCKER),docker)" $(VERDICTS_PYTHON) tools/verdicts-gate.py --run \
+	@mkdir -p $(CACHE_DIR)/go $(CACHE_DIR)/m2 $(CACHE_DIR)/nuget build/verdicts
+	DOCKER="$(or $(DOCKER),docker)" CACHE_DIR="$(CACHE_DIR)" $(VERDICTS_PYTHON) tools/verdicts-gate.py --run \
 		--base $(BASE) $(GATE_VERDICTS_ARGS)
 
 gate-verdicts-changed:
-	@mkdir -p .cache/go .cache/m2 .cache/nuget build/verdicts
-	DOCKER="$(or $(DOCKER),docker)" $(VERDICTS_PYTHON) tools/verdicts-gate.py --run \
+	@mkdir -p $(CACHE_DIR)/go $(CACHE_DIR)/m2 $(CACHE_DIR)/nuget build/verdicts
+	DOCKER="$(or $(DOCKER),docker)" CACHE_DIR="$(CACHE_DIR)" $(VERDICTS_PYTHON) tools/verdicts-gate.py --run \
 		--base $(BASE) --only-changed $(GATE_VERDICTS_ARGS)
 
 gate-verdicts-baseline:
-	@mkdir -p .cache/go .cache/m2 .cache/nuget build/verdicts
-	DOCKER="$(or $(DOCKER),docker)" $(VERDICTS_PYTHON) tools/verdicts-gate.py --run \
+	@mkdir -p $(CACHE_DIR)/go $(CACHE_DIR)/m2 $(CACHE_DIR)/nuget build/verdicts
+	DOCKER="$(or $(DOCKER),docker)" CACHE_DIR="$(CACHE_DIR)" $(VERDICTS_PYTHON) tools/verdicts-gate.py --run \
 		--write-baseline $(GATE_VERDICTS_ARGS)

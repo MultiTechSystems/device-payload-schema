@@ -156,9 +156,9 @@ func TestCR110RejectedAtLoad(t *testing.T) {
 		{"cases:\n        1: [{name: e, type: u8, on_repeat: last}]\n        2: [{name: e, type: u8}]",
 			"tlv: the fields reporting 'e' declare different `on_repeat`, last and collect (PS-526)"},
 		{"on_repeat: first\n      cases:\n        1: [{name: e, type: u8}]",
-			"tlv `on_repeat` is one of collect, merge, last, not 'first' (PS-525)"},
+			"tlv `on_repeat` is one of collect, merge, last, concat, not 'first' (PS-525)"},
 		{"cases:\n        1: [{name: e, type: u8, on_repeat: keep}]",
-			"Field 'e': `on_repeat` is one of collect, merge, last, not 'keep' (PS-525)"},
+			"Field 'e': `on_repeat` is one of collect, merge, last, concat, not 'keep' (PS-525)"},
 	}
 	for _, c := range cases {
 		_, err := ParseSchema("name: t\nfields:\n  - tlv:\n      " + c.tlv + "\n")

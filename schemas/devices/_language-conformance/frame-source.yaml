@@ -1,0 +1,60 @@
+# A type: number field declaring `source` reports a value of the frame, reading no bytes
+# (PS-635, CR-2026-196): the FPort, the payload's length (here less one, through `add`), or
+# the bytes from its position to the end of the data - within an entry, to the entry's end.
+# With no FPort the port is omitted with a warning naming it (PS-636). An encoder writes
+# nothing for these and checks each given value against the finished frame (PS-637), so each
+# vector re-encodes to its payload. Load rejections and mismatches are held by
+# tests/cr-2026-196-cases.yaml.
+name: probe_frame_source
+endian: big
+fields:
+- name: kind
+  type: u8
+- name: port
+  type: number
+  source: $fPort
+- name: body_length
+  type: number
+  source: $payloadLength
+  add: -1
+- name: left
+  type: number
+  source: $remaining
+- tlv:
+    tag_size: 1
+    length_size: 1
+    cases:
+      1:
+      - name: count
+        type: number
+        source: $remaining
+      - name: data
+        type: hex
+        length: remaining
+      2:
+      - name: level
+        type: u8
+test_vectors:
+- name: every_value_with_an_fport
+  source: generated
+  fPort: 5
+  payload: "07 01 02 AABB 02 01 09"
+  expected: {kind: 7, port: 5, body_length: 7, left: 7, count: 2, data: "aabb", level: 9}
+  expected_warnings: []
+- name: no_fport_omits_the_port
+  source: generated
+  payload: "03 02 01 2A"
+  expected: {kind: 3, port: null, body_length: 3, left: 3, level: 42}
+  expected_warnings: ["Field 'port'"]
+- name: nothing_after_the_header
+  source: generated
+  fPort: 200
+  payload: "09"
+  expected: {kind: 9, port: 200, body_length: 0, left: 0}
+  expected_warnings: []
+- name: an_entry_of_three_bytes
+  source: generated
+  fPort: 1
+  payload: "02 01 03 112233"
+  expected: {kind: 2, port: 1, body_length: 5, left: 5, count: 3, data: "112233"}
+  expected_warnings: []

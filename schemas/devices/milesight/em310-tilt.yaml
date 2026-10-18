@@ -68,6 +68,22 @@ fields:
             type: u8
             lookup: {1: "on", default: "on"}
             # raw: readDeviceStatus(1)
+        # ANGLE ALARM CONDITION (downlink response, channel 0xFE or 0xFF)
+        # The vendor reads it under either channel; an encoder writes the first, 0xFF.
+        "[255, 99]":
+          - name: angle_alarm_condition
+            type: ascii
+            length: 8
+            nul: stop
+            charset: utf-8
+            # raw: readUtf8(bytes.slice(offset, offset + 8)), which stops at 0x00
+        "[254, 99]":
+          - name: angle_alarm_condition
+            type: ascii
+            length: 8
+            nul: stop
+            charset: utf-8
+            # raw: readUtf8(bytes.slice(offset, offset + 8)), which stops at 0x00
         # BATTERY
         "[1, 117]":
           - name: battery
@@ -289,3 +305,61 @@ test_vectors:
       threshold_x: "normal"
       threshold_y: "normal"
       threshold_z: "trigger"
+  - name: angle_alarm_condition_ascii
+    description: "Channel 0xFF type 0x63: eight bytes of UTF-8 text padded with 0x00, beside a battery channel"
+    payload: "FF63783E333000000000017564"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      angle_alarm_condition: "x>30"
+      battery: 100
+    expected_warnings: []
+  - name: angle_alarm_condition_two_byte_characters
+    description: "Channel 0xFF type 0x63 holding U+00C5 and U+00B0, two UTF-8 bytes each"
+    payload: "FF63C3856E6700000000"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      angle_alarm_condition: "Ång"
+  - name: angle_alarm_condition_degree_sign
+    description: "Channel 0xFF type 0x63: x>30 followed by U+00B0"
+    payload: "FF63783E3330C2B00000"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      angle_alarm_condition: "x>30°"
+  - name: angle_alarm_condition_three_byte_character
+    description: "Channel 0xFF type 0x63 holding U+20AC, three UTF-8 bytes"
+    payload: "FF63E282AC3130000000"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      angle_alarm_condition: "€10"
+  - name: angle_alarm_condition_four_byte_character
+    description: "Channel 0xFF type 0x63 holding U+1F600, a four-byte UTF-8 character"
+    payload: "FF63F09F988000000000"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      angle_alarm_condition: "\U0001F600"
+  - name: angle_alarm_condition_full_length_fe
+    description: "Channel 0xFE type 0x63: eight characters and no 0x00, so the whole field is text"
+    payload: "FE634142434445464748"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      angle_alarm_condition: "ABCDEFGH"
+  - name: angle_alarm_condition_stops_at_nul
+    description: "Channel 0xFF type 0x63: readUtf8 stops at the first 0x00, so the bytes after it are not reported"
+    payload: "FF634142000058590000"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      angle_alarm_condition: "AB"
+  - name: angle_alarm_condition_empty
+    description: "Channel 0xFF type 0x63 of eight 0x00 bytes: empty text"
+    payload: "FF630000000000000000"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      angle_alarm_condition: ""

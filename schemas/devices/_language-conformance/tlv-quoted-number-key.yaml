@@ -1,0 +1,41 @@
+# A tlv case key written as a quoted number is the number it spells: '0x0309' is the
+# tag 0x0309 and '258' the tag 258, exactly as the unquoted 0x0B is the tag 0x000B.
+# YAML hands an implementation a quoted key as text and an unquoted one as an integer,
+# so a lookup comparing the tag's decimal text found the unquoted keys only: Go and Java
+# read the quoted ones as unknown tags and reported nothing for them, while Python and
+# C# read the text as a number. Hex takes a 0x prefix; anything else is decimal.
+name: probe_tlv_quoted_number_key
+endian: big
+fields:
+  - tlv:
+      tag_size: 2
+      cases:
+        '0x0309':
+          - {name: temperature, type: s16, div: 10}
+        '0x0A01':
+          - {name: humidity, type: u8}
+        '258':
+          - {name: battery, type: u8}
+        0x0B:
+          - {name: status, type: u8}
+test_vectors:
+  - name: quoted_hex_key
+    source: generated
+    payload: "0309 00E7"
+    expected: {temperature: 23.1}
+    expected_warnings: []
+  - name: quoted_hex_key_upper_digits
+    source: generated
+    payload: "0A01 32"
+    expected: {humidity: 50}
+    expected_warnings: []
+  - name: quoted_decimal_key
+    source: generated
+    payload: "0102 5A"
+    expected: {battery: 90}
+    expected_warnings: []
+  - name: every_key_in_one_frame
+    source: generated
+    payload: "0309 FF9C 0A01 0F 0102 64 000B 01"
+    expected: {temperature: -10.0, humidity: 15, battery: 100, status: 1}
+    expected_warnings: []

@@ -20,7 +20,7 @@ import (
 )
 
 // onRepeatModes is the closed set PS-525 allows, in the order the messages list them.
-var onRepeatModes = []string{"collect", "merge", "last"}
+var onRepeatModes = []string{"collect", "merge", "last", "concat"} // concat: PS-632
 
 func isOnRepeatMode(v any) bool {
 	s, ok := v.(string)

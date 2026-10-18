@@ -98,7 +98,8 @@ public static class SchemaEncoder
             return rejected;
         }
         SchemaDirection.Check(schema, used, direction);
-        var result = new Encoding(schema, ResolveFieldsForEncode(schema, used), order).Run(data, decodeRecord);
+        var result = new Encoding(schema, ResolveFieldsForEncode(schema, used), order) { FrameFPort = used }
+            .Run(data, decodeRecord);
         result.FPort = used;
         return result;
     }
@@ -257,6 +258,12 @@ public static class SchemaEncoder
         readonly IReadOnlyList<string>? _order;
         readonly string _endian;
         readonly EncodeResult _result = new();
+        /// <summary>The FPort the encode reports (PS-581), 0 for none: a `$fPort` field's
+        /// given value is checked against it (PS-637).</summary>
+        internal int FrameFPort { get; init; }
+        /// <summary>PS-637: each `$payloadLength` or `$fPort` field given a value, checked
+        /// against the finished payload and the FPort reported.</summary>
+        readonly List<(SchemaField Field, object? Given)> _sourceChecks = new();
 
         internal Encoding(PayloadSchemaDefinition schema, List<SchemaField> fields,
             IReadOnlyList<string>? order)
@@ -326,6 +333,23 @@ public static class SchemaEncoder
                 catch (InvalidOperationException e)
                 {
                     _result.Errors.Add(e.Message);
+                }
+            }
+
+            if (_result.Errors.Count == 0)
+            {
+                // PS-637 (CR-2026-196): a given payload length or FPort is the finished
+                // frame's; the encoder neither pads the frame nor chooses the FPort to agree.
+                foreach (var (field, given) in _sourceChecks)
+                {
+                    long? raw = field.Source == "$payloadLength" ? frame.Length
+                        : FrameFPort != 0 ? FrameFPort : null;
+                    var found = SchemaDecoder.FrameSourceValue(field, raw);
+                    if (found == null || !FrameMeta.SameValue(found, given))
+                    {
+                        _result.Errors.Add(FrameSource.Mismatch(field, FrameMeta.ValueText(given), found));
+                        break;
+                    }
                 }
             }
 
@@ -435,6 +459,18 @@ public static class SchemaEncoder
                         throw new InvalidOperationException(MissingFieldMessage(objectKey));
                     return EncodeObjectMembers(field.Fields, members);
                 }
+                case FieldType.Number when field.Source != null:
+                    // PS-637 (CR-2026-196): a value of the frame writes nothing. A given one
+                    // is checked against the finished frame: `$remaining` where its frame
+                    // closes, as a non-consuming byte string is (PS-589); the others once the
+                    // whole payload is written.
+                    if (!string.IsNullOrEmpty(field.Name)
+                        && data.TryGetValue(field.Name, out var sourceGiven) && sourceGiven != null)
+                    {
+                        if (field.Source == "$remaining") frame?.AddEcho(field, data, _endian);
+                        else _sourceChecks.Add((field, sourceGiven));
+                    }
+                    return Array.Empty<byte>();
                 case FieldType.Number:
                     // Derived from other fields: no bytes of its own.
                     return Array.Empty<byte>();
@@ -1680,6 +1716,8 @@ public static class SchemaEncoder
                         + $"and '{sibling}', which identifies them, "
                         + $"{(given is System.Collections.IList l ? l.Count.ToString() : "none")} (PS-550)");
             }
+            if (field.Flatten != null)
+                throw Cr195.FlattenError(field.Name);                              // PS-634
             if (RecordsReachable(field.Fields))
                 // PS-542: the records do not say which element they came from.
                 throw new InvalidOperationException($"Repeat '{field.Name}' has elements that yield "
@@ -2641,6 +2679,17 @@ public static class SchemaEncoder
                 {
                     var n = f.Name;
                     if (!data.TryGetValue(n, out var v) || queues.ContainsKey(n) || ModeOf(n) == "merge") continue;
+                    if (ModeOf(n) == "concat")
+                    {
+                        // PS-634 (CR-2026-195): each element is one entry's value, unless a
+                        // case reports a list, which cannot be split back into entries.
+                        if (f.Type == FieldType.Repeat || (f.Type == FieldType.Bytes && f.Format == "array"))
+                            throw Cr195.ConcatListError(n);
+                        queues[n] = v is System.Collections.IList cl
+                            ? new Queue<object?>(cl.Cast<object?>())
+                            : new Queue<object?>(new[] { v });
+                        continue;
+                    }
                     bool collected = v is System.Collections.IList && !(f.Type == FieldType.Repeat
                         || (f.Type == FieldType.Bytes && f.Format == "array")) && ModeOf(n) == "collect";
                     queues[n] = collected
@@ -2802,15 +2851,17 @@ public static class SchemaEncoder
         /// </remarks>
         byte[] EncodeTLVTag(string caseKey, SchemaField tlv)
         {
-            if (tlv.TagFields.Count > 0 && tlv.TagKey != null)
+            if (tlv.TagFields.Count > 0)
             {
                 var text = caseKey.Trim();
                 if (text.StartsWith("["))
                     text = text.TrimStart('[').TrimEnd(']');
                 var parts = text.Split(',');
+                // tag_key defaults to the first tag field (Clause 4); with none declared the
+                // tag was written as `tag_size` bytes whatever its components' widths.
                 var names = tlv.TagKey is List<object?> keyList
                     ? keyList.Select(k => k?.ToString() ?? "").ToList()
-                    : new List<string> { tlv.TagKey.ToString() ?? "" };
+                    : new List<string> { tlv.TagKey?.ToString() ?? tlv.TagFields[0].Name ?? "" };
                 if (parts.Length != names.Count)
                     throw new InvalidOperationException(
                         $"TLV case '{caseKey}' does not match tag_key [{string.Join(", ", names)}]");
@@ -3591,7 +3642,8 @@ internal sealed class FrameBuffer
         if (string.IsNullOrEmpty(field.Name)
             || !data.TryGetValue(field.Name, out var given) || given == null) return;
         int? length;
-        if (field.IsPeekedNumber) length = SchemaField.WholeNumberSize(field.Type);   // PS-604
+        if (field.Source != null) length = null;                        // PS-637: to the end
+        else if (field.IsPeekedNumber) length = SchemaField.WholeNumberSize(field.Type);   // PS-604
         else if (field.LengthRef != null)
         {
             if (!data.TryGetValue(field.LengthRef, out var n)
@@ -3834,6 +3886,13 @@ internal sealed class FrameMeta
     {
         foreach (var e in meta.Echoes)
         {
+            if (e.Field.Source != null)
+            {
+                // PS-637 (CR-2026-196): a `$remaining` field's value is the bytes after it.
+                var bytesAfter = SchemaDecoder.FrameSourceValue(e.Field, Math.Max(0, frame.Length - e.Position));
+                if (bytesAfter != null && EchoEquals(bytesAfter, e.Given)) continue;
+                throw new FieldErrorException(FrameSource.Mismatch(e.Field, EchoText(e.Given), bytesAfter));
+            }
             int length = e.Length ?? Math.Max(0, frame.Length - e.Position);
             string written;
             if (e.Position + length > frame.Length)
@@ -3876,6 +3935,9 @@ internal sealed class FrameMeta
             }
         }
     }
+
+    internal static bool SameValue(object found, object? given) => EchoEquals(found, given);
+    internal static string ValueText(object? value) => EchoText(value);
 
     static bool EchoEquals(object found, object? given)
     {
