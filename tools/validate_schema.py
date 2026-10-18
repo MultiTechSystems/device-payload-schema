@@ -576,17 +576,33 @@ def correction_errors(tv: Dict[str, Any]) -> List[str]:
     if 'correction' not in tv:
         return ["source vendor-codec-corrected requires 'correction', naming each field "
                 "whose expected value differs from the codec's (PS-514)"] if corrected else []
+    name = tv.get('name', '<unnamed>')
     if not corrected:
-        return ["'correction' is only for source vendor-codec-corrected (PS-514)"]
+        # The spec prototype's words (key_vocabulary.check_correction, CR-2026-197).
+        return [f"Vector '{name}': correction belongs to a vector with "
+                f"source: vendor-codec-corrected (PS-514)"]
     entries = tv['correction']
     if not isinstance(entries, list) or not entries:
         return ["'correction' must be a non-empty list of {field, codec, reason} (PS-514)"]
     errors, expected = [], tv.get('expected') or {}
+    if expects_error(tv):
+        # PS-514 as amended and PS-638 (CR-2026-197): on a vector that expects an error,
+        # one entry without `field`, whose `codec` is the vendor codec's whole output.
+        if (len(entries) != 1 or not isinstance(entries[0], dict) or 'field' in entries[0]
+                or not {'codec', 'reason'} <= set(entries[0])):
+            return [f"Vector '{name}': a vector that expects an error carries one "
+                    f"correction entry, without field, whose codec is the vendor's "
+                    f"whole output (PS-514, PS-638)"]
+        extra = sorted(set(entries[0]) - {'codec', 'reason'})
+        return [f"correction 0: unknown key(s) {', '.join(extra)}"] if extra else []
+    if any(isinstance(e, dict) and 'field' not in e for e in entries):
+        errors.append(f"Vector '{name}': a correction entry without field belongs to a "
+                      f"vector that expects an error (PS-514, PS-638)")
     for n, entry in enumerate(entries):
         if not isinstance(entry, dict):
             errors.append(f"correction {n}: must be a mapping of field, codec and reason")
             continue
-        missing = [k for k in ('field', 'codec', 'reason') if k not in entry]
+        missing = [k for k in ('codec', 'reason') if k not in entry]
         extra = sorted(set(entry) - {'field', 'codec', 'reason'})
         if missing:
             errors.append(f"correction {n}: missing {', '.join(missing)} (PS-514)")
@@ -610,6 +626,10 @@ def is_independent_vector(tv: Dict[str, Any], independent_sources) -> bool:
     if source in independent_sources:
         return True
     if source != CORRECTED_SOURCE or correction_errors(tv):
+        return False
+    if expects_error(tv):
+        # PS-638: the entry corrects the codec's whole output, so nothing the vector
+        # asserts is the codec's - PS-515's "names every field it asserts".
         return False
     named = [correction_path(c.get('field')) for c in tv['correction']]
     depth = max(len(path) for path in named)
@@ -1229,10 +1249,11 @@ def validate_field_list(fields: List[Dict], path: str, errors: List[str],
             
             # Computed field (type: number - supports ref, polynomial, compute, guard)
             if ftype == 'number':
-                has_valid_source = any(key in fld for key in ('ref', 'compute', 'value')) or (
+                has_valid_source = any(key in fld for key in ('ref', 'compute', 'value',
+                                                              'source')) or (   # PS-635
                     isinstance(fld.get('time'), dict) and 'parts' in fld['time'])  # PS-614
                 if not has_valid_source:
-                    errors.append(f"{path}[{i}] ({name}): type 'number' requires 'ref', 'compute' or 'value'")
+                    errors.append(f"{path}[{i}] ({name}): type 'number' requires 'ref', 'compute', 'value' or 'source'")
                 
                 # Validate ref field reference
                 if 'ref' in fld:

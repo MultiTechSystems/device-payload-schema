@@ -145,6 +145,9 @@ public class SchemaField
     public bool EndTerminates { get; set; }
     /// <summary><c>charset: utf-8</c>: the text is UTF-8 (PS-624, PS-625, CR-2026-190).</summary>
     public bool Utf8 { get; set; }
+    /// <summary><c>source</c>: <c>$fPort</c>, <c>$payloadLength</c> or <c>$remaining</c>, a value of
+    /// the frame (PS-635, CR-2026-196); null where none is declared.</summary>
+    public string? Source { get; set; }
     /// <summary><c>trim: true</c>: whitespace is removed from both ends on decode, and encode pads with spaces where no <c>nul</c> is declared (PS-641, PS-642, CR-2026-199).</summary>
     public bool Trim { get; set; }
     /// <summary>A check value over the bytes before the field (PS-585 to PS-587, CR-2026-174).</summary>
@@ -250,6 +253,9 @@ public class SchemaField
     /// CR-2026-189).
     /// </summary>
     public int PackedBits { get; set; }
+    /// <summary>The inner repeat whose arrays this repeat reports, concatenated, in place
+    /// of its elements (PS-633, CR-2026-195).</summary>
+    public string? Flatten { get; set; }
     internal int PackedWidth { get; set; }
     internal bool PackedSigned { get; set; }
     /// <summary>

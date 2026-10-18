@@ -1,0 +1,49 @@
+# CR-2026-197 (PS-514 amended, PS-638): on a vector that expects an error, one
+# `correction` entry without `field` holds the vendor codec's whole output.
+#
+# Mirrors the spec prototype's TestCR2026197CorrectedErrorVector. Each case is one test
+# vector added to the schema below; `error` is a fragment of the validator's message.
+# Read by tests/test_cr_2026_197_cases.py. Go, Java and C# read no `correction`, so they
+# have no reader.
+schema: |
+  name: t
+  version: 1
+  fields:
+    - {name: x, type: u8}
+cases:
+  - name: whole_output_correction_on_an_error_vector_loads
+    vector:
+      source: vendor-codec-corrected
+      expected_error: {requirement: PS-586}
+      correction:
+        - codec: {valid: false, err: -1}
+          reason: the vendor reports a failed CRC
+  - name: an_entry_naming_a_field_on_an_error_vector
+    vector:
+      source: vendor-codec-corrected
+      expected_error: {requirement: PS-586}
+      correction:
+        - {field: err, codec: -1, reason: r}
+    error: "a vector that expects an error carries one correction entry, without field, whose codec is the vendor's whole output (PS-514, PS-638)"
+  - name: two_entries_on_an_error_vector
+    vector:
+      source: vendor-codec-corrected
+      expected_error: {requirement: PS-586}
+      correction:
+        - {codec: {valid: false, err: -1}, reason: the vendor reports a failed CRC}
+        - {codec: {valid: false, err: -1}, reason: the vendor reports a failed CRC}
+    error: "a vector that expects an error carries one correction entry, without field, whose codec is the vendor's whole output (PS-514, PS-638)"
+  - name: a_field_less_entry_on_a_vector_that_expects_values
+    vector:
+      source: vendor-codec-corrected
+      expected: {x: 1}
+      correction:
+        - {codec: {valid: false, err: -1}, reason: the vendor reports a failed CRC}
+    error: "a correction entry without field belongs to a vector that expects an error (PS-514, PS-638)"
+  - name: a_correction_on_a_vendor_codec_vector
+    vector:
+      source: vendor-codec
+      expected_error: {requirement: PS-586}
+      correction:
+        - {codec: {valid: false, err: -1}, reason: the vendor reports a failed CRC}
+    error: "correction belongs to a vector with source: vendor-codec-corrected (PS-514)"

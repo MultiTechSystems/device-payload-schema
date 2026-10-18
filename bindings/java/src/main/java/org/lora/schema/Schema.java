@@ -731,8 +731,10 @@ public class Schema {
         Numeral.check(fm);                                    // PS-560
         BitLabels.check(fm);                                  // PS-616, PS-617
         Packed.check(fm);                                     // PS-621
+        FlatLists.check(fm);                                  // PS-633
         AsciiText.check(fm);                                  // PS-534, PS-593, PS-072
         AsciiText.checkCharset(fm);                           // PS-624
+        FrameSource.check(fm);                                // PS-635
         AsciiText.checkTrim(fm);                              // PS-641
         if (fm.containsKey("match_value")) {
             throw new SchemaException(at + "match_value is withdrawn; write a signed type (sN), a "
@@ -1268,6 +1270,7 @@ public class Schema {
         f.setKeepTerminator(Boolean.FALSE.equals(fm.get("consume_terminator")));   // PS-619
         f.setEndTerminates(Boolean.TRUE.equals(fm.get("end_terminates")));         // PS-619
         f.setUtf8("utf-8".equals(fm.get("charset")));                               // PS-624
+        if (fm.get("source") instanceof String src) f.setSource(src);                // PS-635
         f.setTrim(Boolean.TRUE.equals(fm.get("trim")));                              // PS-641
         if (fm.get("checksum") instanceof Map<?, ?> checksum) {                 // PS-585
             f.setChecksum((Map<String, Object>) checksum, String.valueOf(fm.get("type")));
@@ -1417,6 +1420,7 @@ public class Schema {
         InputContext context = in != null ? in : new InputContext(null, null, null);
         Integer fPort = context.fPort();
         DecodeContext ctx = new DecodeContext(data, endian);
+        ctx.setFramePort(fPort);                            // PS-635
         ctx.setRepeatOnlyNames(repeatOnlyNames);
         if (decodeRecord) ctx.setRecord(new DecodeRecord(pointers, null));
         List<Field> selected;
@@ -1520,6 +1524,7 @@ public class Schema {
         List<Field> resolvedFields = resolveFields(fPort);
         
         DecodeContext ctx = new DecodeContext(data, endian);
+        ctx.setFramePort(fPort);                            // PS-635
         ctx.setRepeatOnlyNames(repeatOnlyNames);
         Map<String, Object> result = new LinkedHashMap<>();
 
@@ -1583,7 +1588,9 @@ public class Schema {
             return new EncodeResult(new byte[0], null, new ArrayList<>(List.of(e.getMessage())));
         }
         checkDirection(used, direction);
-        EncodeResult result = new Encoder(this, resolveFields(used)).run(data, decodeRecord);
+        Encoder encoder = new Encoder(this, resolveFields(used));
+        encoder.setFramePort(used);                         // PS-637: the FPort reported
+        EncodeResult result = encoder.run(data, decodeRecord);
         result.setFPort(used);
         return result;
     }
@@ -2856,7 +2863,9 @@ public class Schema {
                         String k = entry.getKey();
                         Object v = entry.getValue();
                         String mode = modes.mode(k);
-                        if (!result.containsKey(k)) {
+                        if ("concat".equals(mode)) {                         // PS-632
+                            result.put(k, FlatLists.concat(result.get(k), v));
+                        } else if (!result.containsKey(k)) {
                             result.put(k, v);
                         } else if (!"collect".equals(mode)) {               // PS-525
                             result.put(k, OnRepeat.combine(k, result.get(k), v, mode, modes.last(k)));
@@ -3338,6 +3347,8 @@ public class Schema {
         ctx.getVariables().putAll(carryState);                              // PS-379
         Map<String, Object> element;
         boolean keep;
+        String flatten = repeat.getRaw() != null && repeat.getRaw().get("flatten") instanceof String t ? t : null;
+        Object flattened = null;
         // PS-541: the records this element's `records` entry yields, if it reaches one.
         List<Map<String, Object>> savedRecords = ctx.getPendingRecords();
         List<Map<String, Object>> records = new ArrayList<>();
@@ -3347,6 +3358,12 @@ public class Schema {
         boolean pushed = rec != null && rec.push(repeat.getRaw(), "repeat", iterations[0]);
         try {
             element = decodeFields(members, ctx);
+            if (flatten != null) {
+                // PS-633 (CR-2026-195): the element reports its inner repeat's members in
+                // place of itself, read from the element or, where internal, its scope.
+                flattened = element.containsKey(flatten) ? element.get(flatten)
+                        : ctx.getVariables().get(flatten);
+            }
             for (String carried : carryState.keySet()) {
                 if (ctx.getVariables().containsKey(carried)) {
                     carryState.put(carried, ctx.getVariable(carried));
@@ -3364,7 +3381,9 @@ public class Schema {
             if (rec != null) rec.pop(pushed);
         }
         iterations[0]++;
-        if (keep && !records.isEmpty()) {
+        if (keep && flatten != null) {
+            if (flattened instanceof List<?> list) result.addAll(list);
+        } else if (keep && !records.isEmpty()) {
             // PS-541: the records, as consecutive elements, in place of the element; the
             // element's other reported fields go into each, before its own.
             for (Map<String, Object> record : records) {
@@ -3723,6 +3742,8 @@ public class Schema {
     private Object decodeComputed(Field field, DecodeContext ctx) {
         // PS-614 (CR-2026-186): the instant its parts name; null where a part has no value.
         if (TimeField.hasParts(field)) return TimeField.fromParts(field, ctx);
+        // PS-635, PS-636 (CR-2026-196): a value of the frame, not of its bytes.
+        if (field.getSource() != null) return FrameSource.decode(field, ctx);
         boolean computed = field.getRef() != null || field.getCompute() != null;
         if (computed && field.getGuard() != null && !guardPasses(field.getGuard(), ctx, false)) {
             // PS-444: a failing guard reports the declared fallback untouched - no

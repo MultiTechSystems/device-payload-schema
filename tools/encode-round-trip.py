@@ -61,6 +61,10 @@ The `inherent` reasons, each of which is a decision recorded elsewhere:
   several-records   A repeat element yields several records through `records` (PS-541),
                     reported as consecutive elements; nothing in them says which element
                     each came from, so an encoder refuses the schema (PS-542).
+  flat-list         A repeat declaring `flatten` (PS-633), or a tlv name concatenated from
+                    entries whose case reports a list (PS-632), reports one flat array that
+                    does not say where each group or entry ended, so an encoder refuses the
+                    schema (PS-634).
   absent-value      A declared field was left out of the output because it had no value to
                     report - a zero divisor (PS-100), the log of a non-positive number
                     (PS-117), a failed guard with no `else` (PS-400), an unmapped lookup
@@ -145,6 +149,7 @@ CORPUS = REPO_ROOT / "schemas" / "devices"
 
 INHERENT = (
     "several-records",
+    "flat-list",
     "dropped-element",
     "pattern-tag",
     "absent-value",
@@ -202,6 +207,9 @@ def schema_traits(schema):
             traits.add("dropped-element")
         if "records" in node and not node.get("type"):
             traits.add("several-records")                              # PS-542
+        if node.get("type") == "repeat" and (
+                node.get("flatten") or node.get("on_repeat") == "concat"):
+            traits.add("flat-list")                                    # PS-634
         if node.get("type") in ("version_string", "bitfield_string"):
             covered = 0
             for part in node.get("parts") or []:

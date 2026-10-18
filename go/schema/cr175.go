@@ -143,6 +143,18 @@ func echoText(v any) string {
 func (ctx *EncodeContext) checkEchoes(from int) error {
 	frame := append(append([]byte(nil), ctx.Buffer...), ctx.pending...)
 	for _, e := range ctx.echoes[from:] {
+		if e.field.Source != "" {
+			// PS-637 (CR-2026-196): a `$remaining` field's value is the bytes after it.
+			n := len(frame) - e.pos
+			if n < 0 {
+				n = 0
+			}
+			found, ok := frameSourceValue(e.field, n, e.endian)
+			if !ok || !frameSourceAgrees(e.given, found) {
+				return frameSourceMismatch(e.field, e.given, found, ok)
+			}
+			continue
+		}
 		length := e.length
 		if length < 0 {
 			length = len(frame) - e.pos

@@ -17,7 +17,7 @@ import java.util.Set;
  * always has. Every declaration of one name must agree (PS-526).
  */
 final class OnRepeat {
-    static final List<String> MODES = List.of("collect", "merge", "last");
+    static final List<String> MODES = List.of("collect", "merge", "last", "concat"); // concat: PS-632
     private static final List<String> REPORTING = List.of("match", "byte_group", "flagged", "tlv");
 
     /**
@@ -45,7 +45,7 @@ final class OnRepeat {
     static Modes of(Map<?, ?> tlv) {
         Object rawDefault = tlv.containsKey("on_repeat") ? tlv.get("on_repeat") : "collect";
         if (!(rawDefault instanceof String d) || !MODES.contains(d)) {
-            throw new SchemaException("tlv `on_repeat` is one of collect, merge, last, not "
+            throw new SchemaException("tlv `on_repeat` is one of collect, merge, last, concat, not "
                     + pyRepr(rawDefault) + " (PS-525)");
         }
         String dflt = (String) rawDefault;
@@ -62,7 +62,7 @@ final class OnRepeat {
                     Object own = field.get("on_repeat");
                     if (own != null && !(own instanceof String s && MODES.contains(s))) {
                         throw new SchemaException("Field '" + name + "': `on_repeat` is one of "
-                                + "collect, merge, last, not " + pyRepr(own) + " (PS-525)");
+                                + "collect, merge, last, concat, not " + pyRepr(own) + " (PS-525)");
                     }
                     boolean isObject = "object".equals(field.get("type"));
                     if ("merge".equals(own) && !isObject) {

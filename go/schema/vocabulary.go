@@ -329,12 +329,20 @@ func checkFieldRules(field map[string]any, at string) error {
 	if err := packedRepeatError(field); err != nil {
 		return err
 	}
+	// PS-633 (CR-2026-195): flatten names an inner repeat; the element's others internal.
+	if err := flattenError(field); err != nil {
+		return err
+	}
 	// PS-534, PS-593 (CR-2026-177): nul and terminator on an ascii field.
 	if err := checkAsciiText(field); err != nil {
 		return err
 	}
 	// PS-624 (CR-2026-190): charset is utf-8, on an ascii field.
 	if err := checkCharset(field); err != nil {
+		return err
+	}
+	// PS-635 (CR-2026-196): source names a value of the frame, on a type: number field.
+	if err := checkFrameSource(field); err != nil {
 		return err
 	}
 	// PS-641 (CR-2026-199): trim is true or false, on an ascii field.

@@ -57,6 +57,10 @@ public class Field {
     private boolean utf8;
     public boolean isUtf8() { return utf8; }
     public void setUtf8(boolean utf8) { this.utf8 = utf8; }
+    /** {@code source}: a value of the frame on a type: number field (PS-635, CR-2026-196). */
+    private String source;
+    public String getSource() { return source; }
+    public void setSource(String source) { this.source = source; }
     /** CR-2026-199 (PS-641, PS-642): an ascii field's {@code trim: true}. */
     private boolean trim;
     public boolean isTrim() { return trim; }
