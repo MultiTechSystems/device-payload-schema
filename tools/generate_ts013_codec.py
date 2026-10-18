@@ -1711,6 +1711,10 @@ function encRepeatElementsBody(out, f, data, records, count, ctx) {
       var w = {}; w[en] = v; return w;
     });
   }
+  if (f.flatten) {
+    // PS-634 (CR-2026-195): the flat list does not say which group each member came from.
+    encFail("Repeat '" + name + "' flattens its groups into one list, which cannot be split back into groups; the schema decodes but is not encoded (PS-634)");
+  }
   if (encReachesRecords(rf)) {
     // PS-542: the records do not say which element they came from.
     encFail("Repeat '" + name + "' has elements that yield several records, which cannot be encoded (PS-542)");
@@ -1971,14 +1975,15 @@ function encCaseTakes(f, value) {
 function has_(o, k) { return Object.prototype.hasOwnProperty.call(o, k); }
 
 function encTlvTag(out, key, tlv, ctx) {              // _encode_tlv_tag
-  if (tlv.tag_fields && tlv.tag_key) {
+  if (tlv.tag_fields && tlv.tag_fields.length) {
     var text = String(key).trim();
     if (text.charAt(0) === "[") text = text.charAt(text.length - 1) === "]" ? text.slice(1, -1) : text.slice(1);
     var parts = text.split(",").map(function (p) { return p.trim().replace(/^["']|["']$/g, ""); });
     if (parts.some(function (p) { return p === "*" || p.charAt(0) === "!"; })) {
       encFail("TLV case " + JSON.stringify(key) + " matches a range of tags, so encoding cannot choose one");
     }
-    var names = Array.isArray(tlv.tag_key) ? tlv.tag_key : [tlv.tag_key];
+    // tag_key defaults to the first tag field (Clause 4), as tlv_tag_key does.
+    var names = !tlv.tag_key ? [tlv.tag_fields[0].name] : Array.isArray(tlv.tag_key) ? tlv.tag_key : [tlv.tag_key];
     if (parts.length !== names.length) encFail("TLV case " + JSON.stringify(key) + " does not match tag_key");
     var values = {};
     for (var i = 0; i < names.length; i++) values[names[i]] = encParseInt0(parts[i]);
@@ -2117,6 +2122,13 @@ function encTlvBody(out, f, data, ctx) {
       var n = c.name;
       if (!has.call(data, n) || has.call(queues, n) || modes[n] === "merge") return;
       var v = data[n];
+      if (modes[n] === "concat") {
+        // PS-634 (CR-2026-195): each element is one entry's value, unless a case reports
+        // a list, which cannot be split back into entries.
+        if (c.type === "repeat" || (c.type === "bytes" && c.format === "array")) encFail("tlv: '" + n + "' is concatenated from lists, which cannot be split back into entries; the schema decodes but is not encoded (PS-634)");
+        queues[n] = Array.isArray(v) ? v.slice() : [v];
+        return;
+      }
       var collected = Array.isArray(v) && c.type !== "repeat" && !(c.type === "bytes" && c.format === "array") && (modes[n] || "collect") === "collect";
       queues[n] = collected ? v.slice() : [v];
     });
@@ -4008,6 +4020,11 @@ function tlvFold(outer, entry, modes, lastMembers, collected) {
     var v = entry[k];
     if (v === undefined) continue;
     var mode = modes[k] || "collect";
+    if (mode === "concat") {                // PS-632 (CR-2026-195): always one array
+      if (!Object.prototype.hasOwnProperty.call(outer, k) || outer[k] === undefined) outer[k] = [];
+      if (Array.isArray(v)) Array.prototype.push.apply(outer[k], v); else outer[k].push(v);
+      continue;
+    }
     if (!Object.prototype.hasOwnProperty.call(outer, k) || outer[k] === undefined) {
       outer[k] = v;
     } else if (mode === "last") {
@@ -5188,6 +5205,13 @@ function writeS(buf, pos, size, value, endian) {
             if packed:
                 lines.append(f'{i}    buf = {arr}_pbuf; pos = {arr}_ppos;')
             lines.append(f'{i}    var {arr}_rec = d; d = {arr}_outer;')
+            flatten = field.get('flatten')
+            if flatten:
+                # PS-633 (CR-2026-195): the element reports its inner repeat's members in
+                # place of itself, from the record or, where internal, from its scope.
+                fl = to_js_name(flatten)
+                lines.append(f'{i}    var {arr}_fl = {arr}_rec.{fl} !== undefined ? '
+                             f'{arr}_rec.{fl} : vars.{fl};')
             for member in members:
                 if str(member.get('name', '')).startswith('_'):
                     # Internal members stay out of the record.
@@ -5201,7 +5225,10 @@ function writeS(buf, pos, size, value, endian) {
             keep = condition_to_js(field['present_if']) if field.get('present_if') else 'true'
             lines.append(f'{i}    var {arr}_keep = {keep};')
             lines.append(f'{i}    vars = {arr}_vars; lbl = {arr}_lbl; {arr}_i++;')
-            if yields_records:
+            if flatten:
+                lines.append(f'{i}    if ({arr}_keep && Array.isArray({arr}_fl)) '
+                             f'Array.prototype.push.apply({arr}, {arr}_fl);')
+            elif yields_records:
                 # PS-541: each record, after the element's other reported fields.
                 r = f'{arr}_r'
                 lines.append(f'{i}    if ({arr}_keep && {arr}_rs.length) {{ '

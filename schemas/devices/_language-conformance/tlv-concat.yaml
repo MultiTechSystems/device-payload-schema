@@ -1,0 +1,76 @@
+# A name reported as one flat array however many entries carry it (PS-632, CR-2026-195):
+# one entry still gives an array, two give one array of two, and an entry whose value is
+# itself a list has its elements spliced in. A name no entry reports is absent.
+#
+# The single values and the objects round-trip, one entry per element (PS-634). The list
+# entries cannot: the flat array does not say where one entry ended, so an encoder refuses
+# that schema's name and still decodes it.
+name: probe_concat_entries
+endian: big
+fields:
+- tlv:
+    tag_size: 1
+    cases:
+      1:
+      - name: reading
+        type: s16
+        div: 10
+        on_repeat: concat
+      2:
+      - name: response
+        type: object
+        on_repeat: concat
+        fields:
+        - name: status
+          type: u8
+          lookup: [success, unsupported, error]
+        - name: command
+          type: u16
+      3:
+      - name: codes
+        type: repeat
+        count: 2
+        on_repeat: concat
+        element:
+          type: u16
+test_vectors:
+- name: one_reading_is_an_array
+  source: generated
+  payload: "01 00E7"
+  expected:
+    reading: [23.1]
+- name: two_readings_are_one_array
+  source: generated
+  payload: "01 00E7 01 FF9C"
+  expected:
+    reading: [23.1, -10]
+- name: one_response_is_an_array
+  source: generated
+  payload: "02 00 1234"
+  expected:
+    response:
+    - {status: success, command: 4660}
+- name: two_responses_are_one_array
+  source: generated
+  payload: "02 00 1234 02 02 8102"
+  expected:
+    response:
+    - {status: success, command: 4660}
+    - {status: error, command: 33026}
+- name: a_name_no_entry_reports_is_absent
+  source: generated
+  payload: "02 01 ABCD"
+  expected:
+    reading: null
+- name: readings_then_a_response
+  source: generated
+  payload: "01 00E7 01 0001 02 01 0005"
+  expected:
+    reading: [23.1, 0.1]
+    response:
+    - {status: unsupported, command: 5}
+- name: list_entries_are_spliced
+  source: generated
+  payload: "03 0001 0203 03 0405 0607"
+  expected:
+    codes: [1, 515, 1029, 1543]

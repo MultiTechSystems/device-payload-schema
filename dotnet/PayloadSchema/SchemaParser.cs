@@ -467,6 +467,7 @@ public static partial class SchemaParser
         Numeral.Check(fm);                                              // PS-560
         BitLabels.Check(fm);                                            // PS-616, PS-617
         Cr189.Check(fm);                                                // PS-621
+        Cr195.Check(fm);                                                // PS-633
         AsciiText.Check(fm);                                            // PS-534, PS-593, PS-072
         AsciiText.CheckCharset(fm);                                     // PS-624
         FrameSource.Check(fm);                                          // PS-635
@@ -1009,6 +1010,8 @@ public static partial class SchemaParser
         if (fm.TryGetValue("identity", out var identityNode)) f.Identity = Scalar(identityNode);
         if (f.Type == FieldType.Repeat)
             f.SiblingNames = SiblingReferences(fm).Select(r => r.name).Distinct().ToList();   // PS-546
+        if (f.Type == FieldType.Repeat && fm.TryGetValue("flatten", out var flattenNode))
+            f.Flatten = Scalar(flattenNode);                                                   // PS-633
         if (fm.TryGetValue("reserve", out var reserveNode)) f.Reserve = Int(reserveNode);
         if (fm.TryGetValue("trailer", out var trailerNode) && trailerNode is YamlSequenceNode trailerSeq)
             f.Trailer = ParseFields(trailerSeq);

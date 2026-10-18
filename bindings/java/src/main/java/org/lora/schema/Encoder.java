@@ -1328,6 +1328,9 @@ final class Encoder {
                 }
             }
         }
+        if (field.getRaw() != null && field.getRaw().containsKey("flatten")) {
+            throw FlatLists.flattenError(name);                             // PS-634
+        }
         if (field.getRaw() != null && Wave6a.recordsReachable(Wave6a.repeatMembers(field.getRaw()))) {
             // PS-542: the records do not say which element they came from.
             throw new SchemaException.EncodeException("Repeat '" + name + "' has elements that yield "
@@ -2799,7 +2802,13 @@ final class Encoder {
                 if (!data.containsKey(n) || queues.containsKey(n) || "merge".equals(modes.mode(n))) continue;
                 Object v = data.get(n);
                 java.util.ArrayDeque<Object> q = new java.util.ArrayDeque<>();
-                if (v instanceof List<?> list && !OnRepeat.reportsList(f) && "collect".equals(modes.mode(n))) {
+                if ("concat".equals(modes.mode(n))) {
+                    // PS-634 (CR-2026-195): each element is one entry's value, unless a
+                    // case reports a list, which cannot be split back into entries.
+                    if (OnRepeat.reportsList(f)) throw FlatLists.concatListError(n);
+                    if (v instanceof List<?> list) q.addAll(list);
+                    else q.add(v);
+                } else if (v instanceof List<?> list && !OnRepeat.reportsList(f) && "collect".equals(modes.mode(n))) {
                     q.addAll(list);
                 } else {
                     q.add(v);
@@ -3004,7 +3013,7 @@ final class Encoder {
         List<Field> tagFields = tlv.getTagFields();
         Object tagKey = tlv.getTagKey();
 
-        if (tagFields != null && !tagFields.isEmpty() && tagKey != null) {
+        if (tagFields != null && !tagFields.isEmpty()) {
             String text = caseKey.trim();
             if (text.startsWith("[")) {
                 text = text.endsWith("]") ? text.substring(1, text.length() - 1)
@@ -3014,8 +3023,12 @@ final class Encoder {
             List<String> names = new ArrayList<>();
             if (tagKey instanceof List<?> keyList) {
                 for (Object k : keyList) names.add(String.valueOf(k));
-            } else {
+            } else if (tagKey != null) {
                 names.add(String.valueOf(tagKey));
+            } else {
+                // tag_key defaults to the first tag field (Clause 4); with none declared
+                // the tag was written as `tag_size` bytes whatever its components' widths.
+                names.add(tagFields.get(0).getName());
             }
             Map<String, Long> values = new LinkedHashMap<>();
             if (parts.length != names.size()) {

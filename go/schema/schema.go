@@ -255,6 +255,9 @@ type Field struct {
 	// BitOffset where its first element starts; packedWidth and packedSigned are the
 	// element type's (PS-621, CR-2026-189).
 	PackedBits   int  `json:"-" yaml:"-"`
+	// Flatten names the inner repeat whose arrays this repeat reports, concatenated, in
+	// place of its elements (PS-633, CR-2026-195).
+	Flatten string `json:"-" yaml:"-"`
 	packedWidth  int
 	packedSigned bool
 	ElementName string `json:"-" yaml:"-"`
@@ -3792,6 +3795,9 @@ func decodeTLV(field Field, ctx *DecodeContext) (map[string]any, error) {
 					existing, ok := result[k]
 					mode := repeat.mode(k)
 					switch {
+					case mode == "concat":
+						// PS-632 (CR-2026-195): always one array, a list value spliced.
+						result[k] = concatValue(existing, ok, v)
 					case !ok:
 						result[k] = v
 					case mode != "collect":
@@ -3888,6 +3894,25 @@ func findTLVCaseKey(cases map[string][]Field, tag []int) string {
 		key := strconv.Itoa(tag[0])
 		if _, ok := cases[key]; ok {
 			return key
+		}
+		// A key written as a quoted number - '0x0309' or '777' - is text to yaml.v3,
+		// where an unquoted one arrives as an integer, so the comparison above missed
+		// it and the entry read as an unknown tag. Read it as a number, hex with a 0x
+		// prefix and decimal otherwise, as the reference's _match_case_pattern does;
+		// the encoder already parsed such a key with parseIntAny. Sorted, so a schema
+		// declaring one number twice picks the same case on every run.
+		keys := make([]string, 0, len(cases))
+		for candidate := range cases {
+			keys = append(keys, candidate)
+		}
+		sort.Strings(keys)
+		for _, candidate := range keys {
+			if strings.HasPrefix(strings.TrimSpace(candidate), "[") {
+				continue
+			}
+			if v, err := parseIntAny(candidate); err == nil && v == int64(tag[0]) {
+				return candidate
+			}
 		}
 	}
 
@@ -4829,13 +4854,19 @@ func claimableFields(fields []Field, out []Field) []Field {
 // than one (PS-270), so it cannot be encoded.
 func encodeTLVTag(caseKey string, field Field, ctx *EncodeContext) ([]byte, error) {
 	text := strings.TrimSpace(caseKey)
-	if strings.HasPrefix(text, "[") {
+	// A tlv with tag_fields writes its tag through them whether or not the key is
+	// bracketed ("0x0307" against one u16 component); it wrote `tag_size` bytes.
+	if strings.HasPrefix(text, "[") || len(field.TagFields) > 0 {
 		text = strings.TrimSuffix(strings.TrimPrefix(text, "["), "]")
 		parts := strings.Split(text, ",")
 		if len(field.TagFields) == 0 {
 			return nil, fmt.Errorf("composite tlv case %q with no tag_fields", caseKey)
 		}
 		names := tagKeyNames(field.TagKey)
+		if len(names) == 0 {
+			// tag_key defaults to the first tag field (Clause 4).
+			names = []string{field.TagFields[0].Name}
+		}
 		if len(names) != len(parts) {
 			return nil, fmt.Errorf("tlv case %q does not match tag_key %v", caseKey, names)
 		}
@@ -4967,6 +4998,19 @@ func encodeTLV(field Field, data map[string]any, ctx *EncodeContext) error {
 		for _, f := range append(append([]Field{}, e.required...), e.opt...) {
 			value, ok := data[f.Name]
 			if _, queued := queues[f.Name]; !ok || queued || repeat.mode(f.Name) == "merge" {
+				continue
+			}
+			if repeat.mode(f.Name) == "concat" {
+				// PS-634 (CR-2026-195): each element is one entry's value, unless a case
+				// reports a list, which cannot be split back into entries.
+				if reportsList(f) {
+					return concatListError(f.Name)
+				}
+				if list, isList := value.([]any); isList {
+					queues[f.Name] = append([]any{}, list...)
+				} else {
+					queues[f.Name] = []any{value}
+				}
 				continue
 			}
 			if list, isList := value.([]any); isList && !reportsList(f) && repeat.mode(f.Name) == "collect" {
@@ -5611,6 +5655,9 @@ func encodeRepeat(field Field, data map[string]any, ctx *EncodeContext, siblings
 func encodeRepeatRecords(field Field, records []any, ctx *EncodeContext, count int) error {
 	ctx.ps564Depth++ // PS-564 is not checked inside a repeat (tail_unchecked)
 	defer func() { ctx.ps564Depth-- }()
+	if field.Flatten != "" {
+		return flattenEncodeError(field.Name)
+	}
 	if recordsReachable(field.Fields) {
 		// PS-542: the records do not say which element they came from.
 		return fmt.Errorf("Repeat '%s' has elements that yield several records, which cannot be encoded (PS-542)", field.Name)

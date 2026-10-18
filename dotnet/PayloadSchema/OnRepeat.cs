@@ -13,7 +13,7 @@ namespace PayloadSchema;
 /// </summary>
 public static partial class SchemaParser
 {
-    static readonly string[] OnRepeatModes = { "collect", "merge", "last" };
+    static readonly string[] OnRepeatModes = { "collect", "merge", "last", "concat" }; // concat: PS-632
 
     /// <summary>The constructs whose fields report into the enclosing object.</summary>
     static readonly string[] ReportingConstructs = { "match", "byte_group", "flagged", "tlv" };
@@ -87,7 +87,7 @@ public static partial class SchemaParser
             if (YamlString(d) is { } ds && OnRepeatModes.Contains(ds))
                 fallback = ds;
             else
-                errors.Add($"tlv `on_repeat` is one of collect, merge, last, not {ReprOnRepeat(d)} (PS-525)");
+                errors.Add($"tlv `on_repeat` is one of collect, merge, last, concat, not {ReprOnRepeat(d)} (PS-525)");
         }
         if (Get(tlv, "cases") is not YamlMappingNode cases) return (modes, last, errors);
         foreach (var kv in cases.Children)
@@ -101,7 +101,7 @@ public static partial class SchemaParser
                     own = YamlString(o);
                     if (own == null || !OnRepeatModes.Contains(own))
                     {
-                        errors.Add($"Field '{name}': `on_repeat` is one of collect, merge, last, "
+                        errors.Add($"Field '{name}': `on_repeat` is one of collect, merge, last, concat, "
                             + $"not {ReprOnRepeat(o)} (PS-525)");
                         continue;
                     }

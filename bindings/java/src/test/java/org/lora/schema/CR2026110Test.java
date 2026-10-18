@@ -112,10 +112,10 @@ public class CR2026110Test {
     public void anUnknownModeIsRejected() {
         rejected("name: t\nfields:\n- tlv:\n    on_repeat: first\n    cases:\n"
                         + "      1: [{name: e, type: u8}]\n",
-                "tlv `on_repeat` is one of collect, merge, last, not 'first' (PS-525)");
+                "tlv `on_repeat` is one of collect, merge, last, concat, not 'first' (PS-525)");
         rejected("name: t\nfields:\n- tlv:\n    cases:\n"
                         + "      1: [{name: e, type: u8, on_repeat: keep}]\n",
-                "Field 'e': `on_repeat` is one of collect, merge, last, not 'keep' (PS-525)");
+                "Field 'e': `on_repeat` is one of collect, merge, last, concat, not 'keep' (PS-525)");
     }
 
     /** Integers widened to long, so the assertions do not depend on the boxing. */

@@ -1,0 +1,57 @@
+# Groups, each a count, a shared time and that many counters, reported as one list of
+# every group's counters (PS-633, CR-2026-195). The groups' own fields are internal; the
+# shared time reaches each counter through a reference.
+#
+# Decode only: the flat list does not say which group each counter came from, so an
+# encoder refuses the schema (PS-634).
+name: probe_flattened_groups
+endian: big
+fields:
+- name: counters
+  type: repeat
+  until: end
+  flatten: _members
+  fields:
+  - name: _count
+    type: u8
+  - name: _time
+    type: u32
+  - name: _members
+    type: repeat
+    count: $_count
+    fields:
+    - name: id
+      type: u8[0:3]
+      consume: 1
+    - name: value
+      type: u16
+    - name: time
+      type: number
+      compute: {op: add, a: $_time, b: 0}
+test_vectors:
+- name: one_group_of_two
+  source: generated
+  payload: "02 00000064 01 000A 02 0014"
+  expected:
+    counters:
+    - {id: 1, value: 10, time: 100}
+    - {id: 2, value: 20, time: 100}
+- name: two_groups_are_one_list
+  source: generated
+  payload: "01 00000064 01 000A 01 12345678 03 1234"
+  expected:
+    counters:
+    - {id: 1, value: 10, time: 100}
+    - {id: 3, value: 4660, time: 305419896}
+- name: an_empty_group_adds_nothing
+  source: generated
+  payload: "00 00000064 01 000000C8 05 0001"
+  expected:
+    counters:
+    - {id: 5, value: 1, time: 200}
+- name: the_upper_bits_of_the_id_byte_are_not_read
+  source: generated
+  payload: "01 00000001 F2 0001"
+  expected:
+    counters:
+    - {id: 2, value: 1, time: 1}

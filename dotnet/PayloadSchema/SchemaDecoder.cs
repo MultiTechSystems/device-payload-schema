@@ -1667,7 +1667,9 @@ public static class SchemaDecoder
                 {
                     // The reference reads a composite tag's components as fields, which
                     // records them (PS-490); a case member of the same name overwrites it.
-                    if (field.TagKey != null) ctx.Produced(tf);
+                    // tag_key defaults to the first tag field (Clause 4), so a tlv
+                    // declaring none reads and records its components all the same.
+                    ctx.Produced(tf);
                     int val;
                     if (tf.Type == FieldType.Bits)
                     {
@@ -1794,7 +1796,12 @@ public static class SchemaDecoder
                     foreach (var kv in caseResult)
                     {
                         var mode = field.TLVRepeatModes.TryGetValue(kv.Key, out var m) ? m : "collect";
-                        if (!result.ContainsKey(kv.Key))
+                        if (mode == "concat")                                     // PS-632
+                        {
+                            result[kv.Key] = Cr195.Concat(result.TryGetValue(kv.Key, out var had) ? had : null,
+                                kv.Value);
+                        }
+                        else if (!result.ContainsKey(kv.Key))
                         {
                             result[kv.Key] = kv.Value;
                         }
@@ -2088,6 +2095,7 @@ public static class SchemaDecoder
                 ctx.Variables[kv.Key] = kv.Value;                                  // PS-379
             Dictionary<string, object?> element;
             bool keep;
+            object? flattened = null;
             // PS-541: the records this element's `records` entry yields, if it reaches one.
             var savedRecords = ctx.PendingRecords;
             var records = new List<Dictionary<string, object?>>();
@@ -2097,6 +2105,11 @@ public static class SchemaDecoder
             try
             {
                 element = DecodeFields(field.Fields, ctx, schema);
+                if (field.Flatten != null)
+                    // PS-633 (CR-2026-195): the element reports its inner repeat's members in
+                    // place of itself, read from the element or, where internal, its scope.
+                    flattened = element.TryGetValue(field.Flatten, out var fv) ? fv
+                        : ctx.Variables.TryGetValue(field.Flatten, out var vv) ? vv : null;
                 foreach (var name in carryState.Keys.ToList())
                     if (ctx.Variables.TryGetValue(name, out var carried))
                         carryState[name] = carried;
@@ -2117,7 +2130,12 @@ public static class SchemaDecoder
                 ctx.Trace?.Pop(pushed);
             }
             iterations++;
-            if (keep && records.Count > 0)
+            if (keep && field.Flatten != null)
+            {
+                if (flattened is System.Collections.IList members)
+                    foreach (var member in members) result.Add(member);
+            }
+            else if (keep && records.Count > 0)
             {
                 // PS-541: the records, as consecutive elements, in place of the element;
                 // the element's other reported fields go into each, before its own.
