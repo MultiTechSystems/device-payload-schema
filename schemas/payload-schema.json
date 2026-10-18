@@ -444,14 +444,15 @@
             "type": "integer",
             "minimum": 1,
             "maximum": 32,
-            "description": "`type: repeat` with `element`: the elements are packed end to end in this many bits each, most significant bit first, read as the element type's integer (sign-extended where it is signed), so its sentinel, modifiers and lookup apply. The element's type is an integer type at least this wide, and the repeat declares `count` or `byte_length` (PS-621). The read position then moves to the next byte, or to the end of `byte_length` where that is further (PS-622). An encoder rejects an element that does not fit (PS-623)."
+            "description": "`type: repeat` with `element`: the elements are packed end to end in this many bits each, most significant bit first, read as the element type's integer (sign-extended where it is signed), so its sentinel, modifiers and lookup apply. The element's type is an integer type at least this wide, and the repeat declares `count` or `byte_length` (PS-621). On each field of a repeat's `fields` instead (every field, and not on the repeat as well), the element is a packed record: the fields' bits in order, each read as its own type's integer (PS-639). The read position then moves to the next byte, or to the end of `byte_length` where that is further, unless the repeat declares `consume: 0` (PS-622, PS-640). An encoder rejects a value that does not fit (PS-623)."
           },
           "bit_offset": {
-            "type": "integer",
-            "minimum": 0,
-            "maximum": 7,
+            "oneOf": [
+              {"type": "integer", "minimum": 0},
+              {"type": "string", "pattern": "^\\$.+"}
+            ],
             "default": 0,
-            "description": "With `packed_bits`: how many bits into the byte at the read position the first element starts; fields before the repeat read those bits as bit ranges that consume nothing (PS-621, PS-622). On any other field it is rejected."
+            "description": "On a packed repeat: how many bits after the read position the first element starts, or a `$` reference to a field decoded before the repeat; fields before the repeat read those bits as bit ranges that consume nothing (PS-621, PS-622). An encoder takes a referenced offset from the input, and refuses a repeat whose offset is not there, as a computed one is not (PS-623). On any other field it is rejected."
           },
           "flatten": {
             "type": "string",

@@ -1622,14 +1622,18 @@ public static class SchemaEncoder
                 var packed = EncodeRepeatElements(field, data, list, count);
                 var length = RepeatSize(field.ByteLength, data, siblings);
                 var covered = Enumerable.Repeat((byte)0xFF, Math.Max(packed.Length, (int)(length ?? 0))).ToArray();
-                if (packed.Length > 0) covered[0] = (byte)(0xFF >> field.BitOffset);
+                int offset = PackedEncodeOffset(field, data);
+                for (int z = 0; z < covered.Length && z < offset >> 3; z++) covered[z] = 0;
+                if ((offset >> 3) < covered.Length) covered[offset >> 3] = (byte)(0xFF >> (offset & 7));
                 if (length != null && packed.Length < length)
                     packed = packed.Concat(new byte[(int)length - packed.Length]).ToArray();
                 if (length != null && packed.Length != length)
                     throw new InvalidOperationException($"Repeat '{field.Name}' encodes to {packed.Length} "
                         + $"bytes for a byte_length of {length} (PS-551)");
                 _frameBytes = packed;
-                _framePending = 0;
+                // PS-640 (CR-2026-198): with `consume: 0` the bytes stay pending, so the fields
+                // after it write over them, as a peek's are.
+                _framePending = field.PackedInPlace ? packed.Length : 0;
                 _frameMeta = new FrameMeta(covered.Take(packed.Length).ToArray(), new List<Peek>());
                 return packed;
             }
@@ -1750,7 +1754,7 @@ public static class SchemaEncoder
                 // PS-551: the count and the list must agree; nothing is padded or cut.
                 throw new InvalidOperationException($"Repeat '{field.Name}' is given {list.Count} "
                     + $"values for a count of {count} (PS-551)");
-            if (field.PackedBits > 0) return EncodePacked(field, list);
+            if (field.PackedBits > 0) return EncodePacked(field, list, data);
 
             var output = new List<byte>();
             int position = 0;
@@ -1777,16 +1781,27 @@ public static class SchemaEncoder
             return output.ToArray();
         }
 
-        /// <summary>
-        /// PS-623 (CR-2026-189): each element, inverted through its modifiers as any element
-        /// is, in `packed_bits` bits, most significant bit first, from `bit_offset`, the last
-        /// byte padded with 0 bits. A null is the element's first sentinel, raw (PS-544).
-        /// </summary>
-        byte[] EncodePacked(SchemaField field, List<object?> list)
+        /// <summary>A packed repeat's bit offset on encode (PS-623, CR-2026-198): literal, or
+        /// the referenced field's value in the input; a computed one is not there, and such a
+        /// repeat decodes but is not encoded.</summary>
+        static int PackedEncodeOffset(SchemaField field, Dictionary<string, object?> data)
         {
-            int bits = field.PackedBits, offset = field.BitOffset;
-            bool signed = field.PackedSigned;
-            long low = signed ? -(1L << (bits - 1)) : 0, high = signed ? (1L << (bits - 1)) - 1 : (1L << bits) - 1;
+            if (field.BitOffsetRef is not { } r) return field.BitOffset;
+            if (!data.TryGetValue(r.TrimStart('$'), out var v) || v == null)
+                throw new FieldErrorException($"Repeat '{field.Name}': its bit_offset {r} is not in the input; "
+                    + "a repeat whose offset is computed decodes but is not encoded (PS-623)");
+            return Cr189.BitCount(v) ?? throw new FieldErrorException(Cr189.OffsetError(field.Name, r, v));
+        }
+
+        /// <summary>
+        /// PS-623 (CR-2026-189, CR-2026-198): each element's parts - the element, or each
+        /// field of a packed record (PS-639) - inverted through their modifiers as any field
+        /// is, in their `packed_bits` bits, most significant bit first, from `bit_offset`, the
+        /// last byte padded with 0 bits. A null is the element's first sentinel, raw (PS-544).
+        /// </summary>
+        byte[] EncodePacked(SchemaField field, List<object?> list, Dictionary<string, object?> data)
+        {
+            int bits = field.PackedBits, offset = PackedEncodeOffset(field, data);
             int span = (offset + list.Count * bits + 7) / 8;
             if (field.ByteLength is int literal) span = Math.Max(span, literal);
             var output = new byte[span];
@@ -1796,24 +1811,30 @@ public static class SchemaEncoder
                 if (!string.IsNullOrEmpty(field.Index))
                     asMap = new Dictionary<string, object?>(asMap) { [field.Index!] = position + field.IndexBase };
                 var pushed = _trace?.Push(field.Node, "repeat", position) ?? false;
-                byte[] element;
-                try { element = EncodeObjectMembers(field.Fields, asMap); }
-                finally { _trace?.Pop(pushed); }
-                long number = 0;
-                for (int i = 0; i < element.Length; i++)
+                try
                 {
-                    if (i == 0 && signed && (element[0] & 0x80) != 0) number = -1;
-                    number = (number << 8) | element[i];
-                }
-                if (number < low || number > high)
-                    throw new FieldErrorException($"Repeat '{field.Name}': element {position} is {number}, "
-                        + $"which does not fit in {bits} bits (PS-623)");
-                for (int b = 0; b < bits; b++)
-                    if (((number >> (bits - 1 - b)) & 1) != 0)
+                    int at = offset + position * bits;
+                    for (int p = 0; p < field.PackedParts.Count; p++)
                     {
-                        int at = offset + position * bits + b;
-                        output[at >> 3] |= (byte)(1 << (7 - (at & 7)));
+                        var (partBits, _, signed) = field.PackedParts[p];
+                        long low = signed ? -(1L << (partBits - 1)) : 0;
+                        long high = signed ? (1L << (partBits - 1)) - 1 : (1L << partBits) - 1;
+                        var element = EncodeObjectMembers(new List<SchemaField> { field.Fields[p] }, asMap);
+                        long number = 0;
+                        for (int i = 0; i < element.Length; i++)
+                        {
+                            if (i == 0 && signed && (element[0] & 0x80) != 0) number = -1;
+                            number = (number << 8) | element[i];
+                        }
+                        if (number < low || number > high)
+                            throw new FieldErrorException($"Repeat '{field.Name}': element {position} is {number}, "
+                                + $"which does not fit in {partBits} bits (PS-623)");
+                        for (int b = 0; b < partBits; b++, at++)
+                            if (((number >> (partBits - 1 - b)) & 1) != 0)
+                                output[at >> 3] |= (byte)(1 << (7 - (at & 7)));
                     }
+                }
+                finally { _trace?.Pop(pushed); }
             }
             return output;
         }
@@ -3724,11 +3745,11 @@ internal sealed class FrameBuffer
             for (int i = 0; i < written; i++) _buf.Add(merged[i]);
             var tail = new List<byte>();
             for (int i = written; i < merged.Length; i++) tail.Add(merged[i]);
-            for (int i = 0; i < _pending.Count; i++)
-            {
-                if (i < tail.Count) tail[i] |= _pending[i];
-                else tail.Add(_pending[i]);
-            }
+            // What is still pending lies after `data` (the shared part was ORed in above),
+            // so it follows the tail. It was ORed into the tail's first bytes, which no list
+            // reached until a packed repeat that consumes nothing (PS-640, CR-2026-198) came
+            // after a wider peek.
+            tail.AddRange(_pending);
             _pending.Clear();
             _pending.AddRange(tail);
             return;

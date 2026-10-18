@@ -264,6 +264,12 @@ type Field struct {
 	Flatten string `json:"-" yaml:"-"`
 	packedWidth  int
 	packedSigned bool
+	// packedParts are a packed element's parts in order - the element (PS-621) or each
+	// field of a packed record (PS-639) - and PackedBits their sum; bitOffsetRef is a `$`
+	// bit_offset (PS-621), and packedInPlace a `consume: 0` (PS-640, CR-2026-198).
+	packedParts   []packedPart
+	bitOffsetRef  string
+	packedInPlace bool
 	ElementName string `json:"-" yaml:"-"`
 	// Siblings are the repeats a `$name[i]` reference in this repeat names (PS-546): each
 	// must report as many values as this one.
@@ -4233,8 +4239,13 @@ func decodeRepeat(field Field, ctx *DecodeContext) ([]any, error) {
 		// count was clamped here, so the next field read from inside an element the
 		// clamp had discarded.
 		if field.PackedBits > 0 {
-			// PS-621, PS-622 (CR-2026-189): the elements are read from one bit stream.
-			if err := decodePacked(field, elements, ctx, count, 0, maxIterations); err != nil {
+			// PS-621, PS-622 (CR-2026-189), PS-639, PS-640 (CR-2026-198): the elements
+			// are read from one bit stream.
+			offset, err := packedDecodeOffset(field, ctx)
+			if err != nil {
+				return nil, err
+			}
+			if err := decodePacked(field, elements, ctx, offset, count, 0, maxIterations); err != nil {
 				return nil, err
 			}
 			count = 0
@@ -4272,11 +4283,15 @@ func decodeRepeat(field Field, ctx *DecodeContext) ([]any, error) {
 		endOffset := ctx.Offset + byteLength
 		if field.PackedBits > 0 {
 			// PS-621: as many elements as fit whole after the bit offset (CR-2026-189).
-			count := (byteLength*8 - field.BitOffset) / field.PackedBits
+			offset, err := packedDecodeOffset(field, ctx)
+			if err != nil {
+				return nil, err
+			}
+			count := (byteLength*8 - offset) / field.PackedBits
 			if count < 0 {
 				count = 0
 			}
-			if err := decodePacked(field, elements, ctx, count, byteLength, maxIterations); err != nil {
+			if err := decodePacked(field, elements, ctx, offset, count, byteLength, maxIterations); err != nil {
 				return nil, err
 			}
 			endOffset = ctx.Offset

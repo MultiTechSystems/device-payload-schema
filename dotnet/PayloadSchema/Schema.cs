@@ -258,6 +258,15 @@ public class SchemaField
     public string? Flatten { get; set; }
     internal int PackedWidth { get; set; }
     internal bool PackedSigned { get; set; }
+    /// <summary>Each part of one packed element, in order: the element itself (PS-621), or
+    /// each field of a packed record (PS-639, CR-2026-198) - its bits, its type's width in
+    /// bits and signedness. PackedBits is their sum.</summary>
+    internal List<(int bits, int width, bool signed)> PackedParts { get; set; } = new();
+    /// <summary>A `$` reference for a packed repeat's bit offset (PS-621, CR-2026-198), else
+    /// null and BitOffset holds it.</summary>
+    internal string? BitOffsetRef { get; set; }
+    /// <summary>`consume: 0` on a packed repeat: it reads in place (PS-640).</summary>
+    internal bool PackedInPlace { get; set; }
     /// <summary>
     /// A `records` entry (PS-541): field lists, each yielding one record that the enclosing
     /// repeat reports in place of its element. Null where the entry is not one.

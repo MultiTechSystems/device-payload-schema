@@ -4697,6 +4697,60 @@ improved. The Go, Java and C# corpus runners write per-vector reports only when
     (Python and Java 2329 -> 2333, C# 2330 -> 2334, Go 2347 -> 2351, plain 2319 -> 2323).
   - **Measured:** no corpus, library, example or registry (2ef53db, 546 schemas) schema
     declares a field `source`, so none is rejected and no decode or encode output changes.
+- **CR-2026-198 (PS-621 to PS-623 amended, PS-639, PS-640; la-payload-schema
+  `cr/0.5.8-apply-198`, 0004dcb, for 0.5.8): packed records, any bit offset, reading in place.**
+  A repeat with `fields` packs a record where every field declares `packed_bits`: an element is
+  the fields' bits in order, each read as its own type's integer, sign-extended where signed
+  (PS-639). `bit_offset` is any bit count from 0, counted from the read position, or a `$`
+  reference to a field decoded before (PS-621). With `consume: 0` a packed repeat reads in
+  place, so two runs can share one block (PS-640). An encoder writes a record part by part,
+  each checked against its own width (`Repeat 'v': element 0 is 8, which does not fit in 3
+  bits (PS-623)`), takes a referenced offset from the input or refuses (`Repeat 'points': its
+  bit_offset $_pad is not in the input; a repeat whose offset is computed decodes but is not
+  encoded (PS-623)`), and under `consume: 0` leaves its bytes pending for the next fields.
+  - **Load, the prototype's text and order:** `packed_bits and bit_offset belong to a packed
+    repeat (PS-621, PS-639)`, `a packed record declares packed_bits on each field, not on the
+    repeat (PS-639)`, `bit_offset is a bit count, 0 or more, or a $ reference (PS-621)`, `a
+    packed repeat declares consume: 0 or no consume (PS-640)` (the record's departure: any
+    `consume` but 0), `every field of a packed record declares packed_bits (PS-639)`, `a
+    packed part is an integer type at least N bits wide (PS-621, PS-639)`. Decode: `Repeat
+    'x': bit_offset variable not found: y` and `... bit_offset $y is V, not a bit count
+    (PS-621)` (V as JavaScript's String(n), where the prototype writes Python's float).
+  - **Where:** Python `is_packed`, `packed_parts`, `packed_repeat_error(s)` (with the
+    in-record walk), `packed_layout`, `packed_covered`, the packed branch of `_decode_repeat`
+    and `_encode_packed_elements`; the generator's packed decode (per part, `_off`) and the
+    runtime's `encIsPacked`/`encPackedElements`; Go `cr198.go` (`isPackedRepeat`,
+    `packedRepeatError`, `packedDecodeOffset`, `packedEncodeOffset`) with `cr189.go`'s decode
+    and encode; Java `Packed`, `Schema.decodePacked`, `Encoder.encodePacked`; C# `Cr189.cs`,
+    `DecodeRepeat`'s packed path, `SchemaEncoder.EncodePacked`. The CR-2026-189 cases' texts
+    changed with it (`bit_offset: 8` is valid now, so that case is -1).
+  - **Departure: `bit_offset` is a PS-539 reference key** in all four (`REFERENCE_KEYS`,
+    `references.go`, `References`), so `$nowhere` is refused at load; the prototype does not
+    list it and accepts it, as it did `interval` (CR-2026-156).
+  - **Found on the way, in all five encoders:** a field list's carried tail (`Frame.pending`)
+    shorter than the bytes still pending had the rest ORed into the tail's first bytes, where
+    they belong after it (`FrameBuffer.extend`, the runtime's `encEmit`, Go `extendRaw`, Java
+    and C# `FrameBuffer`). An in-place packed repeat after a wider peek is the first thing to
+    reach it. Measured: no corpus vector changes; 15 registry gwf sonico-nano vectors, which
+    already failed to encode, fail with different PS-551 texts.
+  - **Open, as in the prototype:** an in-place repeat's bits are ORed with what the fields
+    after it write, and a field writing a 1 where the repeat wrote 0 is not detected.
+  - **Mutation harness:** a packed part's byte order and a wider part type are static
+    equivalents (`schema-mutation.py`); a narrower one is refused at load.
+  - **C:** no repeat; `tools/schema_binary.py` refuses `packed_bits` and `bit_offset` by name.
+  - **Cases:** `tests/cr-2026-198-cases.yaml` (the prototype's `TestCR2026198PackedRecords`:
+    TE Connectivity's peaks, Terabee's two runs, people-flow's computed offset, four load
+    rejections; plus an offset from a field, one past the first byte, a part that does not
+    fit, a field re-reading in-place bytes, three more load cases), read by
+    `test_cr_2026_198_cases.py` (reference and codec), Go `cr198_test.go`, Java
+    `CR2026198Test`, C# `CR2026_198Tests`. Fixture `_language-conformance/repeat-packed-parts.yaml`
+    (5 ports, 9 vectors, mutation 100%; the computed-offset vector is decode-only).
+  - **Floors:** decode 2983 -> 2992 in Go, Java and C#; re-encode +8 everywhere, all `repeat`
+    49 -> 57 (Python and Java 2355 -> 2363, C# 2356 -> 2364, Go 2374 -> 2382, plain 2343 -> 2351).
+  - **Measured** (Python, every vector of the corpus and the private registry, decode and
+    re-encode against master 9a28e97): no corpus schema and no registry schema (two nexelec
+    schemas use CR-189's form) changes decode output or is rejected; encode output changes
+    only in the error texts above.
 
 ## Converting a vendor codec
 

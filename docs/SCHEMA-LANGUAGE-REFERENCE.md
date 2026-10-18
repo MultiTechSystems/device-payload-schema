@@ -1039,8 +1039,9 @@ writes `FFFF`); with no sentinel it reports an error naming the repeat and the p
 ```
 
 A repeat with `element` may pack its elements end to end: one bit stream, most significant
-bit first, the first element starting `bit_offset` bits (0 to 7, default 0) into the byte at
-the read position. Each element is the next `packed_bits` bits (1 to 32), read unsigned or,
+bit first, the first element starting `bit_offset` bits (any count from 0, default 0) after
+the read position, or as many as a field decoded before the repeat holds (`bit_offset:
+$pad`). Each element is the next `packed_bits` bits (1 to 32), read unsigned or,
 for a signed element type, sign-extended, and then decoded as the element type's integer, so
 its `sentinel`, modifiers and `lookup` apply. The element is an integer type at least
 `packed_bits` wide, and the repeat declares `count` or `byte_length`; with `byte_length` the
@@ -1050,6 +1051,29 @@ position moves to the next byte, or to the end of `byte_length` where that is fu
 ranges that consume nothing. Either key anywhere else is rejected at load. An encoder writes
 each element through its modifiers inverted, rejects one that does not fit in `packed_bits`,
 ORs the first byte into the bits the fields before it left, and pads with 0 bits (PS-623).
+
+A repeat with `fields` packs a record when every field declares `packed_bits` (PS-639): an
+element is the fields' bits in order, each read as its own type's integer. With
+`consume: 0` (PS-640) a packed repeat reads in place and the fields after it read the same
+bytes, so two runs can share one block:
+
+```yaml
+- {name: point_1, type: repeat, count: 2, packed_bits: 10, bit_offset: 7,
+   consume: 0, element: {type: u16}}
+- {name: point_2, type: repeat, count: 2, packed_bits: 10, bit_offset: 27,
+   consume: 0, element: {type: u16}}
+- {type: skip, length: 6}
+- name: peaks
+  type: repeat
+  count: $peak_count
+  fields:
+    - {name: freq, type: u16, packed_bits: 11}
+    - {name: mag, type: u8, packed_bits: 8}
+```
+
+An encoder writes a record's fields in order, each checked against its own `packed_bits`;
+takes a referenced offset from the input and refuses a repeat whose offset is computed; and,
+with `consume: 0`, leaves its bits for the fields after it to write over (PS-623).
 
 ### Groups reported as one list (`flatten`)
 

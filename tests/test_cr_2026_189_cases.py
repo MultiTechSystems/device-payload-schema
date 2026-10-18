@@ -97,5 +97,5 @@ def test_load_reference(case):
 
 @pytest.mark.parametrize("case", LOAD, ids=[c["name"] for c in LOAD])
 def test_load_generator(case):
-    with pytest.raises(Exception, match=r"PS-621"):
+    with pytest.raises(Exception, match=r"PS-621|PS-639"):
         TS013Generator(yaml.safe_load(case["schema"])).generate()

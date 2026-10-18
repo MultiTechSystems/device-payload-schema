@@ -1244,7 +1244,9 @@ final class Encoder {
                         + packed.length + " bytes for a byte_length of " + length + " (PS-551)");
             }
             frameMeta.put(packed, meta);
-            return packed;
+            // PS-640 (CR-2026-198): with `consume: 0` the bytes stay pending, so the fields
+            // after it write over them, as a peek's are.
+            return field.isPackedInPlace() ? carrying(packed, packed.length) : packed;
         }
         ByteBuf out = new ByteBuf();
         out.write(encodeRepeatElements(field, data, list, count));
@@ -1383,7 +1385,7 @@ final class Encoder {
             throw new SchemaException.EncodeException("Repeat '" + name + "' is given "
                     + list.size() + " values for a count of " + count + " (PS-551)");
         }
-        if (field.getPackedBits() > 0) return encodePacked(field, list);
+        if (field.getPackedBits() > 0) return encodePacked(field, list, data);
 
         String index = field.getIndex();
         ByteBuf out = new ByteBuf();
@@ -1416,21 +1418,40 @@ final class Encoder {
     }
 
     /**
-     * PS-623 (CR-2026-189): each element, inverted through its modifiers as any element is,
-     * in {@code packed_bits} bits, most significant bit first, from {@code bit_offset}, the
-     * last byte padded with 0 bits. A null is the element's first sentinel, raw (PS-544).
-     * The bits before {@code bit_offset} are marked unwritten, so the bits the fields before
-     * it left pending are ORed into them (PS-551, PS-622).
+     * PS-623 (CR-2026-189, CR-2026-198): each element's parts - the element, or each field
+     * of a packed record (PS-639) - inverted through their modifiers as any field is, in
+     * their {@code packed_bits} bits, most significant bit first, from {@code bit_offset},
+     * the last byte padded with 0 bits. A null is the element's first sentinel, raw
+     * (PS-544). The bits before {@code bit_offset} are marked unwritten, so the bits the
+     * fields before it left pending are ORed into them (PS-551, PS-622). A referenced offset
+     * is taken from the input; a computed one is not there, and such a repeat decodes but is
+     * not encoded. With {@code consume: 0} (PS-640) the bytes stay pending, so the fields
+     * after it write over them.
      */
-    private byte[] encodePacked(Field field, List<Object> list) {
+    private byte[] encodePacked(Field field, List<Object> list, Map<String, Object> data) {
         String name = field.getName();
         int bits = field.getPackedBits(), offset = field.getBitOffset();
-        boolean signed = field.isPackedSigned();
-        long low = signed ? -(1L << (bits - 1)) : 0, high = signed ? (1L << (bits - 1)) - 1 : (1L << bits) - 1;
-        int span = (offset + list.size() * bits + 7) / 8;
+        String ref = field.getPackedOffsetRef();
+        if (ref != null) {
+            Object value = data == null ? null : data.get(ref.substring(1));
+            if (value == null) {
+                throw new SchemaException.FieldEncodeException("Repeat '" + name + "': its bit_offset "
+                        + ref + " is not in the input; a repeat whose offset is computed decodes but "
+                        + "is not encoded (PS-623)");
+            }
+            long v = Packed.offsetValue(value);
+            if (v < 0 || v > Integer.MAX_VALUE) {
+                throw new SchemaException.FieldEncodeException(Packed.offsetError(name, ref, value));
+            }
+            offset = (int) v;
+        }
+        List<int[]> parts = field.getPackedParts();
+        List<Field> members = field.getFields();
+        int span = (int) ((offset + (long) list.size() * bits + 7) / 8);
         if (field.getByteLength() instanceof Number n) span = Math.max(span, n.intValue());
         byte[] out = new byte[span];
         String index = field.getIndex();
+        long at = offset;
         for (int position = 0; position < list.size(); position++) {
             Map<String, Object> element = stringKeyed((Map<?, ?>) list.get(position));
             if (index != null) {
@@ -1438,33 +1459,40 @@ final class Encoder {
                 element.put(index, (long) position + field.getIndexBase());   // PS-530
             }
             boolean pushed = rec != null && rec.push(field.getRaw(), "repeat", position);
-            byte[] encoded;
             try {
-                encoded = encodeObjectMembers(field.getFields(), element);
+                for (int pi = 0; pi < parts.size(); pi++) {
+                    int partBits = parts.get(pi)[0];
+                    boolean signed = parts.get(pi)[2] == 1;
+                    long low = signed ? -(1L << (partBits - 1)) : 0;
+                    long high = signed ? (1L << (partBits - 1)) - 1 : (1L << partBits) - 1;
+                    byte[] encoded = encodeObjectMembers(List.of(members.get(pi)), element);
+                    frameMeta.remove(encoded);
+                    carriedTail.remove(encoded);
+                    long number = 0;
+                    for (int i = 0; i < encoded.length; i++) {
+                        if (i == 0 && signed && (encoded[0] & 0x80) != 0) number = -1;
+                        number = (number << 8) | (encoded[i] & 0xFF);
+                    }
+                    if (number < low || number > high) {
+                        throw new SchemaException.FieldEncodeException("Repeat '" + name + "': element "
+                                + position + " is " + number + ", which does not fit in " + partBits
+                                + " bits (PS-623)");
+                    }
+                    for (int b = 0; b < partBits; b++, at++) {
+                        if (((number >> (partBits - 1 - b)) & 1) != 0) {
+                            out[(int) (at >> 3)] |= (byte) (1 << (7 - (at & 7)));
+                        }
+                    }
+                }
             } finally {
                 if (rec != null) rec.pop(pushed);
             }
-            frameMeta.remove(encoded);
-            carriedTail.remove(encoded);
-            long number = 0;
-            for (int i = 0; i < encoded.length; i++) {
-                if (i == 0 && signed && (encoded[0] & 0x80) != 0) number = -1;
-                number = (number << 8) | (encoded[i] & 0xFF);
-            }
-            if (number < low || number > high) {
-                throw new SchemaException.FieldEncodeException("Repeat '" + name + "': element "
-                        + position + " is " + number + ", which does not fit in " + bits + " bits (PS-623)");
-            }
-            for (int b = 0; b < bits; b++) {
-                if (((number >> (bits - 1 - b)) & 1) != 0) {
-                    int at = offset + position * bits + b;
-                    out[at >> 3] |= (byte) (1 << (7 - (at & 7)));
-                }
-            }
         }
+        // The bits a packed repeat writes: every bit from the offset on (PS-622).
         byte[] covered = new byte[span];
-        java.util.Arrays.fill(covered, (byte) 0xFF);
-        if (span > 0) covered[0] = (byte) (0xFF >> offset);
+        for (int i = 0; i < span; i++) {
+            covered[i] = i < offset / 8 ? 0 : i == offset / 8 ? (byte) (0xFF >> (offset % 8)) : (byte) 0xFF;
+        }
         frameMeta.put(out, new FrameMeta(covered, List.of()));
         return out;
     }
@@ -4039,9 +4067,13 @@ final class Encoder {
             }
             if (carried > 0) {
                 buf.write(java.util.Arrays.copyOfRange(data, 0, data.length - carried));
-                byte[] tail = java.util.Arrays.copyOfRange(data, data.length - carried, data.length);
-                if (pending.length > tail.length) tail = java.util.Arrays.copyOf(tail, pending.length);
-                for (int i = 0; i < pending.length; i++) tail[i] = (byte) (tail[i] | pending[i]);
+                // What is still pending lies after `data` (the shared part was ORed in above),
+                // so it follows the tail; it was ORed into the tail's first bytes, which no
+                // list reached until a packed repeat reading in place (PS-640) followed a
+                // wider peek (FrameBuffer.extend).
+                byte[] tail = java.util.Arrays.copyOfRange(data, data.length - carried,
+                        data.length + pending.length);
+                System.arraycopy(pending, 0, tail, carried, pending.length);
                 pending = tail;
                 return;
             }

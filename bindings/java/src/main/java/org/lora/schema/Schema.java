@@ -1001,7 +1001,11 @@ public class Schema {
             f.setValidRange(new double[] {lo.doubleValue(), hi.doubleValue()});
         }
         f.setByteOffset(toInt(fm.get("byte_offset"), 0));
-        f.setBitOffset(toInt(fm.get("bit_offset"), 0));
+        if (fm.get("bit_offset") instanceof String ref && ref.startsWith("$")) {
+            f.setPackedOffsetRef(ref);                        // PS-621 (CR-2026-198)
+        } else {
+            f.setBitOffset(toInt(fm.get("bit_offset"), 0));
+        }
         if (fm.get("bit") != null) {
             f.setBoolBit(toInt(fm.get("bit"), 0));
         }
@@ -1175,6 +1179,20 @@ public class Schema {
         Object fieldsRaw = fm.get("fields");
         if (fieldsRaw instanceof List) {
             f.setFields(parseFields((List<Map<String, Object>>) fieldsRaw));
+            if ("repeat".equals(fm.get("type")) && Packed.isPacked(fm)) {
+                // PS-639 (CR-2026-198): a packed record; each field reads its integer from
+                // bytes of its own width, big-endian, laid out from the bit stream.
+                List<int[]> parts = new ArrayList<>();
+                for (int k = 0; k < f.getFields().size(); k++) {
+                    Map<?, ?> member = ((List<Map<?, ?>>) fieldsRaw).get(k);
+                    int[] width = Packed.width(member);
+                    parts.add(new int[] {((Number) member.get("packed_bits")).intValue(),
+                            width[0], width[1]});
+                    f.getFields().get(k).setEndian("big");
+                }
+                f.setPackedParts(parts);
+                f.setPackedInPlace(fm.containsKey("consume"));
+            }
         } else if ("repeat".equals(fm.get("type")) && fm.get("element") instanceof Map<?, ?> element) {
             // PS-528: a repeat of single values decodes its element as a one-field record
             // under the element's name, or "element", and reports the value. Wave6a has
@@ -1187,7 +1205,11 @@ public class Schema {
                 // PS-621 (CR-2026-189): the element reads its integer from bytes of its own
                 // width, big-endian, laid out from the bit stream (Packed.decode).
                 int[] width = Packed.width(element);
-                if (width != null) f.setPacked(bits.intValue(), width[0], width[1] == 1);
+                if (width != null) {
+                    f.setPacked(bits.intValue(), width[0], width[1] == 1);
+                    f.setPackedParts(List.of(new int[] {bits.intValue(), width[0], width[1]}));
+                }
+                f.setPackedInPlace(fm.containsKey("consume"));            // PS-640
                 member.put("endian", "big");
             }
             List<Map<String, Object>> one = new ArrayList<>();
@@ -3157,7 +3179,7 @@ public class Schema {
             }
             if (field.getPackedBits() > 0) {
                 // PS-621, PS-622 (CR-2026-189): the elements are read from one bit stream.
-                decodePacked(field, ctx, count, 0, iterations, carryState, result);
+                decodePacked(field, ctx, count, 0, packedOffset(field, ctx), iterations, carryState, result);
                 count = 0;
             }
             
@@ -3182,12 +3204,13 @@ public class Schema {
             int endOffset = ctx.getOffset() + byteLen;
             if (field.getPackedBits() > 0) {
                 // PS-621: as many elements as fit whole after the bit offset (CR-2026-189).
-                int count = Math.max(byteLen * 8 - field.getBitOffset(), 0) / field.getPackedBits();
+                int offset = packedOffset(field, ctx);
+                int count = Math.max(byteLen * 8 - offset, 0) / field.getPackedBits();
                 if (count > maxIterations) {
                     throw repeatLimitError(field, maxIterations, "count " + count,
                             ctx.getOffset(), ctx.getLimit());
                 }
-                decodePacked(field, ctx, count, byteLen, iterations, carryState, result);
+                decodePacked(field, ctx, count, byteLen, offset, iterations, carryState, result);
                 endOffset = ctx.getOffset();
             }
 
@@ -3292,10 +3315,10 @@ public class Schema {
      * sentinel, modifiers and lookup apply as to any element. The read position then moves
      * to the next byte, or to the end of {@code byteLength} where that is further.
      */
-    private void decodePacked(Field field, DecodeContext ctx, int count, int byteLength,
+    private void decodePacked(Field field, DecodeContext ctx, int count, int byteLength, int offset,
                               int[] iterations, Map<String, Object> carryState, List<Object> result) {
-        int bits = field.getPackedBits(), offset = field.getBitOffset();
-        int span = Math.max((offset + count * bits + 7) / 8, byteLength);
+        int bits = field.getPackedBits();
+        int span = (int) Math.max((offset + (long) count * bits + 7) / 8, byteLength);
         int at = ctx.getOffset();
         if (at + span > ctx.getLimit()) {
             throw new SchemaException.BufferUnderflow(String.format(
@@ -3304,18 +3327,28 @@ public class Schema {
         }
         byte[] data = ctx.getData();
         int limit = ctx.getLimit();
-        int width = field.getPackedWidth() / 8;
+        List<int[]> parts = field.getPackedParts();
+        int width = 0;
+        for (int[] part : parts) width += part[1] / 8;
         try {
             for (int i = 0; i < count; i++) {
-                long raw = 0;
-                for (int b = offset + i * bits; b < offset + (i + 1) * bits; b++) {
-                    raw = (raw << 1) | ((data[at + (b >> 3)] >> (7 - (b & 7))) & 1);
-                }
-                if (field.isPackedSigned() && raw >= (1L << (bits - 1))) raw -= 1L << bits;
+                // PS-639 (CR-2026-198): each part - the element, or each field of a packed
+                // record - laid out as its type's bytes in turn.
                 byte[] element = new byte[width];
-                for (int k = width - 1; k >= 0; k--) {
-                    element[k] = (byte) raw;
-                    raw >>= 8;
+                long b = offset + (long) i * bits;
+                int end = 0;
+                for (int[] part : parts) {
+                    int partBits = part[0];
+                    long raw = 0;
+                    for (int k = 0; k < partBits; k++, b++) {
+                        raw = (raw << 1) | ((data[at + (int) (b >> 3)] >> (7 - (int) (b & 7))) & 1);
+                    }
+                    if (part[2] == 1 && raw >= (1L << (partBits - 1))) raw -= 1L << partBits;
+                    end += part[1] / 8;
+                    for (int k = end - 1; k >= end - part[1] / 8; k--) {
+                        element[k] = (byte) raw;
+                        raw >>= 8;
+                    }
                 }
                 ctx.setData(element, width);
                 ctx.setOffset(0);
@@ -3323,8 +3356,28 @@ public class Schema {
             }
         } finally {
             ctx.setData(data, limit);
-            ctx.setOffset(at + span);
+            // PS-640 (CR-2026-198): with `consume: 0` the read position does not move.
+            ctx.setOffset(field.isPackedInPlace() ? at : at + span);
         }
+    }
+
+    /**
+     * A packed repeat's bit offset (PS-621, CR-2026-198): the literal, or the value of the
+     * field a {@code $} reference names, which must be a whole bit count.
+     */
+    private static int packedOffset(Field field, DecodeContext ctx) {
+        String ref = field.getPackedOffsetRef();
+        if (ref == null) return field.getBitOffset();
+        Object value = ctx.getVariable(ref.substring(1));
+        if (value == null) {
+            throw new SchemaException.DecodeException("Repeat '" + field.getName()
+                    + "': bit_offset variable not found: " + ref.substring(1));
+        }
+        long offset = Packed.offsetValue(value);
+        if (offset < 0 || offset > Integer.MAX_VALUE) {
+            throw new SchemaException.DecodeException(Packed.offsetError(field.getName(), ref, value));
+        }
+        return (int) offset;
     }
 
     /**

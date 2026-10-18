@@ -25,7 +25,10 @@ import (
 // referenceKeys are the keys whose string value may be a `$` reference.
 var referenceKeys = map[string]bool{"ref": true, "a": true, "b": true, "field": true,
 	"count": true, "byte_length": true, "carry": true, "instance": true, "unit": true,
-	"identity": true, "interval": true}
+	"identity": true, "interval": true,
+	// CR-2026-198 (PS-621): a field decoded before the repeat. The spec prototype does not
+	// list it; PS-621's text says the field is decoded before, as PS-539 checks.
+	"bit_offset": true}
 
 // referenceDataKeys hold data, not declarations or references. A `default` is data too,
 // except a match's, which is a field list.
