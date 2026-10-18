@@ -453,7 +453,8 @@ def docker_command(
     impl: str, report: str, only: Optional[str], corpus_root: Optional[Path]
 ) -> List[str]:
     """The Makefile's test-go / test-java / test-dotnet invocation, for one test only."""
-    cache = REPO_ROOT / ".cache"
+    # The Makefile's CACHE_DIR, which mk/gate-verdicts.mk passes on; .cache by default.
+    cache = Path(os.environ.get("CACHE_DIR") or REPO_ROOT / ".cache")
     docker = os.environ.get("DOCKER") or "docker"  # as the Makefile's DOCKER ?= docker
     command = [docker, "run", "--rm", "-v", "%s:/work" % REPO_ROOT]
     # The same run also writes each vector's interpreter `_meta` (CR-2026-096), for rule 3.

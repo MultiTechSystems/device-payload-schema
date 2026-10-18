@@ -1,0 +1,48 @@
+# A tlv that declares `tag_fields` reads its tag through them, and `tag_key` defaults to the
+# first tag field (Clause 4). Each component binds by name and by `var` as the entry's tag is
+# read (PS-536, PS-523), and an encoder writes the tag through the components.
+#
+# Read by the reference and the generated codec (tests/test_tag_fields_default_key.py), Go
+# (go/schema/tag_fields_default_key_test.go), Java (TagFieldsDefaultKeyTest.java) and C#
+# (TagFieldsDefaultKeyTests.cs). The fixture _language-conformance/tag-fields-default-key.yaml
+# holds the decode and the round trip; these add what a round trip cannot show: an encode
+# from input alone, and a declared `tag_key` with an unbracketed case key.
+#
+#   decode: `schema` (YAML text), `payload` (hex), `expected` (the whole decoded data) and
+#           `warnings` (none).
+#   cases:  `schema`, `input` (JSON text) and `payload` (hex).
+#
+# Before: the reference read `tag_size` bytes and bound nothing where `tag_key` was absent;
+# its encoder, the generated codec's and C#'s wrote `tag_size` bytes; Go's wrote `tag_size`
+# bytes for an unbracketed key whether or not `tag_key` was declared.
+
+decode:
+
+- name: u16_component_with_no_tag_key_binds_its_name_and_var
+  schema: "name: t\nendian: big\nfields:\n  - tlv:\n      tag_fields: [{name: _t, type: u16, var: tt}]\n      cases:\n        0x0309: [{name: b, type: u8}, {name: r, type: number, ref: $_t}, {name: v, type: number, ref: $tt}]\n"
+  payload: "0309AA"
+  expected: {b: 170, r: 777, v: 777}
+  warnings: []
+
+- name: second_component_is_read_but_not_keyed
+  schema: "name: t\nendian: big\nfields:\n  - tlv:\n      tag_fields: [{name: _t, type: u8}, {name: _n, type: u8}]\n      cases:\n        3: [{name: a, type: u8}, {name: n, type: number, ref: $_n}]\n"
+  payload: "030507"
+  expected: {a: 7, n: 5}
+  warnings: []
+
+cases:
+
+- name: u16_component_with_no_tag_key_writes_two_bytes
+  schema: "name: t\nendian: big\nfields:\n  - tlv:\n      tag_fields: [{name: _t, type: u16, var: tt}]\n      cases:\n        0x0307: [{name: a, type: u8}]\n        0x0309: [{name: b, type: u8}, {name: r, type: number, ref: $_t}]\n"
+  input: '{"a": 7, "b": 170}'
+  payload: "0307070309aa"
+
+- name: declared_tag_key_with_an_unbracketed_case_key
+  schema: "name: t\nendian: big\nfields:\n  - tlv:\n      tag_fields: [{name: _t, type: u16}]\n      tag_key: _t\n      cases:\n        0x0309: [{name: b, type: u8}]\n"
+  input: '{"b": 170}'
+  payload: "0309aa"
+
+- name: u8_component_with_no_tag_key
+  schema: "name: t\nendian: big\nfields:\n  - tlv:\n      tag_fields: [{name: _t, type: u8, var: tt}]\n      cases:\n        9: [{name: b, type: u8}, {name: v, type: number, ref: $tt}]\n"
+  input: '{"b": 170}'
+  payload: "09aa"

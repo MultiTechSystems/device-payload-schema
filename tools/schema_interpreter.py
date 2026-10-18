@@ -6343,6 +6343,19 @@ def normalize(decoded: Dict[str, Any], schema: Dict[str, Any],
 
 
 
+def tlv_tag_key(tlv_def: Dict[str, Any]) -> Any:
+    """A tlv's `tag_key`: as declared, else the first `tag_fields` entry's name (Clause 4,
+    PS-536). None where the tlv has no `tag_fields`."""
+    tag_fields = tlv_def.get('tag_fields')
+    if not tag_fields:
+        return None
+    tag_key = tlv_def.get('tag_key')
+    if tag_key:
+        return tag_key
+    first = tag_fields[0]
+    return [first.get('name', 'unknown')] if isinstance(first, dict) else None
+
+
 class SchemaInterpreter:
     """
     Runtime interpreter for Payload Schema definitions.
@@ -8409,7 +8422,10 @@ class SchemaInterpreter:
         unknown_mode = tlv_def.get('unknown', 'skip')
         cases = tlv_def.get('cases', {})
         tag_fields = tlv_def.get('tag_fields')
-        tag_key = tlv_def.get('tag_key')
+        # `tag_key` defaults to the first tag field (Clause 4). Without the default a tlv
+        # declaring `tag_fields` and no `tag_key` read `tag_size` bytes and bound no
+        # component, so `$t` was unbound in every case and a u16 component misread.
+        tag_key = tlv_tag_key(tlv_def)
         
         result = {}
         channels = []
@@ -8427,14 +8443,13 @@ class SchemaInterpreter:
             # PS-477: a tag is never partly read. Fewer bytes than the tag at the start of
             # an entry is an error identifying the tlv; this used to stop the loop and
             # report a complete decode. A composite tag's width is its tag_fields'.
-            width = (fixed_element_size(tag_fields) if tag_fields and tag_key else None) \
-                or tag_size
+            width = (fixed_element_size(tag_fields) if tag_fields else None) or tag_size
             if pos + width > len(buf):
                 raise ValueError(
                     f"tlv entry at offset {pos}: {len(buf) - pos} byte(s) remain, fewer "
                     f"than its {width}-byte tag (PS-477)")
             
-            if tag_fields and tag_key:
+            if tag_fields:
                 # Composite tag: read sub-fields
                 tag_parts = {}
                 tag_start = pos
@@ -10722,9 +10737,9 @@ class SchemaInterpreter:
         """
         byteorder = 'little' if self.endian == Endian.LITTLE else 'big'
         tag_fields = tlv_def.get('tag_fields')
-        tag_key = tlv_def.get('tag_key')
+        tag_key = tlv_tag_key(tlv_def)      # defaults to the first tag field (Clause 4)
 
-        if tag_fields and tag_key:
+        if tag_fields:
             text = str(case_key).strip()
             if text.startswith('['):
                 text = text[1:-1] if text.endswith(']') else text[1:]

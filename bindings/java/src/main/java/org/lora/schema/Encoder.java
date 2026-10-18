@@ -2957,7 +2957,7 @@ final class Encoder {
         List<Field> tagFields = tlv.getTagFields();
         Object tagKey = tlv.getTagKey();
 
-        if (tagFields != null && !tagFields.isEmpty() && tagKey != null) {
+        if (tagFields != null && !tagFields.isEmpty()) {
             String text = caseKey.trim();
             if (text.startsWith("[")) {
                 text = text.endsWith("]") ? text.substring(1, text.length() - 1)
@@ -2967,8 +2967,12 @@ final class Encoder {
             List<String> names = new ArrayList<>();
             if (tagKey instanceof List<?> keyList) {
                 for (Object k : keyList) names.add(String.valueOf(k));
-            } else {
+            } else if (tagKey != null) {
                 names.add(String.valueOf(tagKey));
+            } else {
+                // tag_key defaults to the first tag field (Clause 4); with none declared
+                // the tag was written as `tag_size` bytes whatever its components' widths.
+                names.add(tagFields.get(0).getName());
             }
             Map<String, Long> values = new LinkedHashMap<>();
             if (parts.length != names.size()) {
