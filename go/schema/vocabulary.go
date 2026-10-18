@@ -329,6 +329,10 @@ func checkFieldRules(field map[string]any, at string) error {
 	if err := packedRepeatError(field); err != nil {
 		return err
 	}
+	// PS-633 (CR-2026-195): flatten names an inner repeat; the element's others internal.
+	if err := flattenError(field); err != nil {
+		return err
+	}
 	// PS-534, PS-593 (CR-2026-177): nul and terminator on an ascii field.
 	if err := checkAsciiText(field); err != nil {
 		return err

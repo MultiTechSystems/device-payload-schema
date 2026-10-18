@@ -248,6 +248,9 @@ public class SchemaField
     /// CR-2026-189).
     /// </summary>
     public int PackedBits { get; set; }
+    /// <summary>The inner repeat whose arrays this repeat reports, concatenated, in place
+    /// of its elements (PS-633, CR-2026-195).</summary>
+    public string? Flatten { get; set; }
     internal int PackedWidth { get; set; }
     internal bool PackedSigned { get; set; }
     /// <summary>

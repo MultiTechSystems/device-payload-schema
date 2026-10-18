@@ -1691,6 +1691,10 @@ function encRepeatElementsBody(out, f, data, records, count, ctx) {
       var w = {}; w[en] = v; return w;
     });
   }
+  if (f.flatten) {
+    // PS-634 (CR-2026-195): the flat list does not say which group each member came from.
+    encFail("Repeat '" + name + "' flattens its groups into one list, which cannot be split back into groups; the schema decodes but is not encoded (PS-634)");
+  }
   if (encReachesRecords(rf)) {
     // PS-542: the records do not say which element they came from.
     encFail("Repeat '" + name + "' has elements that yield several records, which cannot be encoded (PS-542)");
@@ -2097,6 +2101,13 @@ function encTlvBody(out, f, data, ctx) {
       var n = c.name;
       if (!has.call(data, n) || has.call(queues, n) || modes[n] === "merge") return;
       var v = data[n];
+      if (modes[n] === "concat") {
+        // PS-634 (CR-2026-195): each element is one entry's value, unless a case reports
+        // a list, which cannot be split back into entries.
+        if (c.type === "repeat" || (c.type === "bytes" && c.format === "array")) encFail("tlv: '" + n + "' is concatenated from lists, which cannot be split back into entries; the schema decodes but is not encoded (PS-634)");
+        queues[n] = Array.isArray(v) ? v.slice() : [v];
+        return;
+      }
       var collected = Array.isArray(v) && c.type !== "repeat" && !(c.type === "bytes" && c.format === "array") && (modes[n] || "collect") === "collect";
       queues[n] = collected ? v.slice() : [v];
     });
@@ -3969,6 +3980,11 @@ function tlvFold(outer, entry, modes, lastMembers, collected) {
     var v = entry[k];
     if (v === undefined) continue;
     var mode = modes[k] || "collect";
+    if (mode === "concat") {                // PS-632 (CR-2026-195): always one array
+      if (!Object.prototype.hasOwnProperty.call(outer, k) || outer[k] === undefined) outer[k] = [];
+      if (Array.isArray(v)) Array.prototype.push.apply(outer[k], v); else outer[k].push(v);
+      continue;
+    }
     if (!Object.prototype.hasOwnProperty.call(outer, k) || outer[k] === undefined) {
       outer[k] = v;
     } else if (mode === "last") {
@@ -5137,6 +5153,13 @@ function writeS(buf, pos, size, value, endian) {
             if packed:
                 lines.append(f'{i}    buf = {arr}_pbuf; pos = {arr}_ppos;')
             lines.append(f'{i}    var {arr}_rec = d; d = {arr}_outer;')
+            flatten = field.get('flatten')
+            if flatten:
+                # PS-633 (CR-2026-195): the element reports its inner repeat's members in
+                # place of itself, from the record or, where internal, from its scope.
+                fl = to_js_name(flatten)
+                lines.append(f'{i}    var {arr}_fl = {arr}_rec.{fl} !== undefined ? '
+                             f'{arr}_rec.{fl} : vars.{fl};')
             for member in members:
                 if str(member.get('name', '')).startswith('_'):
                     # Internal members stay out of the record.
@@ -5150,7 +5173,10 @@ function writeS(buf, pos, size, value, endian) {
             keep = condition_to_js(field['present_if']) if field.get('present_if') else 'true'
             lines.append(f'{i}    var {arr}_keep = {keep};')
             lines.append(f'{i}    vars = {arr}_vars; lbl = {arr}_lbl; {arr}_i++;')
-            if yields_records:
+            if flatten:
+                lines.append(f'{i}    if ({arr}_keep && Array.isArray({arr}_fl)) '
+                             f'Array.prototype.push.apply({arr}, {arr}_fl);')
+            elif yields_records:
                 # PS-541: each record, after the element's other reported fields.
                 r = f'{arr}_r'
                 lines.append(f'{i}    if ({arr}_keep && {arr}_rs.length) {{ '

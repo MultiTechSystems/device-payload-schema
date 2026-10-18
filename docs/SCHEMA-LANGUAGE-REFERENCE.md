@@ -1022,6 +1022,34 @@ ranges that consume nothing. Either key anywhere else is rejected at load. An en
 each element through its modifiers inverted, rejects one that does not fit in `packed_bits`,
 ORs the first byte into the bits the fields before it left, and pads with 0 bits (PS-623).
 
+### Groups reported as one list (`flatten`)
+
+```yaml
+- name: counters
+  type: repeat
+  until: end
+  flatten: _members                 # report every group's members as one list (PS-633)
+  fields:
+    - {name: _count, type: u8}
+    - {name: _time, type: u16}
+    - name: _members
+      type: repeat
+      count: $_count
+      fields:
+        - {name: id, type: u8}
+        - {name: time, type: number, compute: {op: add, a: $_time, b: 0}}
+# 02 0064 01 02  01 00C8 05  ->  {"counters": [{"id": 1, "time": 100},
+#                                              {"id": 2, "time": 100}, {"id": 5, "time": 200}]}
+```
+
+A repeat with `fields` may name, in `flatten`, one of its element's fields that is a
+`repeat`. It then reports, in place of its elements, the concatenation of that field's
+arrays in payload order. The element's other fields must be internal; a value they hold,
+such as a group's shared time, reaches the members through a reference. A `flatten` naming
+no `repeat` among the element's fields, or an element reporting another field, is rejected
+at load (PS-633). The flat list does not say which group each member came from, so an
+encoder refuses the schema, which still decodes (PS-634).
+
 ### Several records from one element (`records`)
 
 ```yaml
@@ -1375,8 +1403,9 @@ bytes than `reserve` at the start is an error.
 
 With `merge: true`, a name two entries report - whether they share a tag or not - is
 combined as its `on_repeat` says (PS-157, PS-525): `collect` (the default) gathers the
-values into an array in payload order, `last` keeps the value reported last, and `merge`
-combines `type: object` values member by member.
+values into an array in payload order, `last` keeps the value reported last, `merge`
+combines `type: object` values member by member, and `concat` always reports one flat
+array (PS-632).
 
 ```yaml
 - tlv:
@@ -1395,6 +1424,20 @@ unless that member declares `on_repeat: last`. `on_repeat` anywhere else - outsi
 or on a member of an object that is not merged - is rejected (PS-525).
 
 Merged cases may share a member only where it declares `on_repeat: last` (PS-526).
+
+`concat` reports the name as one array however many entries report it, one included; a
+value that is itself an array has its elements appended, and a name no entry reports is
+absent (PS-632). An encoder writes one entry per element of the array where the case
+reports a scalar or an object; where the case reports an array, the flat list cannot be
+split back into entries and the schema is refused for encoding (PS-634).
+
+```yaml
+- tlv:
+    tag_size: 1
+    cases:
+      0xFE: [{name: request_result, type: object, on_repeat: concat, fields: [{name: cmd, type: u8}]}]
+# FE 01  ->  {"request_result": [{"cmd": 1}]}
+```
 
 The encoder writes each value - a scalar, each element of an array PS-157 collected, a
 `last` value, a merged object's members - under the first case whose declared fields it

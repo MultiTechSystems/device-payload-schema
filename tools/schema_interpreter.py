@@ -1965,7 +1965,7 @@ def arithmetic_schema_errors(node, _top=True):
 
 
 #: CR-2026-110 (PS-525): how a name reported by more than one tlv entry combines.
-ON_REPEAT = ('collect', 'merge', 'last')
+ON_REPEAT = ('collect', 'merge', 'last', 'concat')                    # concat: PS-632
 
 #: The constructs whose fields report into the enclosing object, so a tlv case reports
 #: their names as its own (the spec prototype's STRUCTURAL_KEYS).
@@ -4195,6 +4195,42 @@ def packed_repeat_errors(node, _top=True):
     return errors
 
 
+def flatten_error(node):
+    """PS-633 (CR-2026-195) for one field: `flatten` names an inner repeat among the
+    element's fields of a repeat with `fields`, whose other element fields are internal.
+    The spec prototype's `check_flatten`, in its text."""
+    where = f"Repeat '{node.get('name')}'"
+    target = node['flatten']
+    fields = node.get('fields') if node.get('type') == 'repeat' else None
+    inner = [f for f in fields or [] if isinstance(f, dict) and f.get('name') == target]
+    if not isinstance(fields, list) or not inner or inner[0].get('type') != 'repeat':
+        return f"{where}: flatten names a repeat among its element's fields (PS-633)"
+    others = [f.get('name') for f in fields if isinstance(f, dict) and 'type' in f
+              and f.get('name') != target and not str(f.get('name', '_')).startswith('_')]
+    if others:
+        return (f"{where}: with flatten, its element's other fields are internal; "
+                f"{', '.join(map(repr, others))} would be reported (PS-633)")
+    return None
+
+
+def flatten_errors(node, _top=True):
+    """flatten_error over the whole schema (PS-633)."""
+    errors = []
+    if isinstance(node, list):
+        for item in node:
+            errors.extend(flatten_errors(item, False))
+    elif isinstance(node, dict):
+        if 'type' in node and 'flatten' in node:
+            error = flatten_error(node)
+            if error:
+                errors.append(error)
+        for key, value in node.items():
+            if _top and key == 'test_vectors':
+                continue
+            errors.extend(flatten_errors(value, False))
+    return errors
+
+
 def packed_layout(field_def, count, byte_length=None):
     """(bits, offset, span in bytes) of a packed repeat of `count` elements (PS-622): the
     elements end at the next byte boundary, or at the end of `byte_length` where that is
@@ -4849,6 +4885,7 @@ def schema_iterator_errors(schema):
     errors.extend(numeral_errors(schema))                            # PS-560
     errors.extend(bit_labels_errors(schema))                         # PS-616, PS-617
     errors.extend(packed_repeat_errors(schema))                      # PS-621
+    errors.extend(flatten_errors(schema))                            # PS-633
     errors.extend(ascii_text_errors(schema))                         # PS-534, PS-593
     errors.extend(charset_errors(schema))                            # PS-624
     errors.extend(checksum_errors(schema))                           # PS-585
@@ -7307,6 +7344,14 @@ class SchemaInterpreter:
                 if scratch.errors:
                     raise reraise_text(scratch.errors[0])
                 records = self._pending_records
+                if field_def.get('flatten'):
+                    # PS-633 (CR-2026-195): the element reports its inner repeat's members
+                    # in place of itself, read from the element or, where the inner
+                    # repeat is internal, from its scope.
+                    target = field_def['flatten']
+                    members = (scratch.data[target] if target in scratch.data
+                               else self._variables.get(target))
+                    records = None
                 for carried in carry_state:
                     if carried in self._variables:
                         carry_state[carried] = self._variables[carried]
@@ -7325,7 +7370,9 @@ class SchemaInterpreter:
                 if self._trace is not None:
                     self._trace.pop(pushed)
             iterations += 1
-            if keep and records:
+            if keep and field_def.get('flatten'):
+                result.extend(members if isinstance(members, list) else [])
+            elif keep and records:
                 # PS-541: the records, as consecutive elements, in place of the element;
                 # the element's other reported fields go into each, before its own.
                 result.extend({**scratch.data, **record} for record in records)
@@ -8608,6 +8655,10 @@ class SchemaInterpreter:
             if merge:
                 for k, v in tag_result.items():
                     mode = modes.get(k, 'collect')
+                    if mode == 'concat':
+                        # PS-632 (CR-2026-195): always one array, a list value spliced.
+                        result.setdefault(k, []).extend(v if isinstance(v, list) else [v])
+                        continue
                     if k not in result:
                         result[k] = v
                     elif mode != 'collect':                         # PS-525
@@ -10921,6 +10972,12 @@ class SchemaInterpreter:
                 raise ValueError(f"Repeat '{name}' is given {len(records)} values and "
                                  f"'{sibling}', which identifies them, {have} (PS-550)")
         record_fields, element_name = repeat_members(field_def)
+        if 'flatten' in field_def:
+            # PS-634 (CR-2026-195): the flat list does not say which group each member
+            # came from.
+            raise ValueError(f"Repeat '{name}' flattens its groups into one list, which "
+                             f"cannot be split back into groups; the schema decodes but is "
+                             f"not encoded (PS-634)")
         if records_reachable(record_fields):
             # PS-542: the records do not say which element they came from.
             raise ValueError(f"Repeat '{name}' has elements that yield several "
@@ -11393,6 +11450,15 @@ class SchemaInterpreter:
                 n = f['name']
                 if n in data and n not in queues and modes.get(n) != 'merge':
                     value = data[n]
+                    if modes.get(n) == 'concat':
+                        # PS-634 (CR-2026-195): each element is one entry's value, unless
+                        # a case reports a list, which cannot be split back into entries.
+                        if _reports_list(f):
+                            raise ValueError(f"tlv: '{n}' is concatenated from lists, which "
+                                             f"cannot be split back into entries; the "
+                                             f"schema decodes but is not encoded (PS-634)")
+                        queues[n] = list(value) if isinstance(value, list) else [value]
+                        continue
                     collected = isinstance(value, list) and not _reports_list(f) \
                         and modes.get(n, 'collect') == 'collect'
                     queues[n] = list(value) if collected else [value]

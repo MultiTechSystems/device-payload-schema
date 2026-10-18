@@ -180,10 +180,10 @@ REJECTIONS = [
         DISAGREE,
         "tlv: the fields reporting 'e' declare different `on_repeat`, last and collect (PS-526)",
     ),
-    (BAD_VALUE, "tlv `on_repeat` is one of collect, merge, last, not 'first' (PS-525)"),
+    (BAD_VALUE, "tlv `on_repeat` is one of collect, merge, last, concat, not 'first' (PS-525)"),
     (
         BAD_FIELD_VALUE,
-        "Field 'e': `on_repeat` is one of collect, merge, last, not 'keep' (PS-525)",
+        "Field 'e': `on_repeat` is one of collect, merge, last, concat, not 'keep' (PS-525)",
     ),
 ]
 

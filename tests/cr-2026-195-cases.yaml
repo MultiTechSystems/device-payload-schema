@@ -1,0 +1,94 @@
+# CR-2026-195 (PS-525 amended, PS-632 to PS-634): flat lists. With `on_repeat: concat` a tlv
+# reports a name as one array however many entries report it, one included, splicing a value
+# that is itself a list (PS-632). A repeat with `fields` may declare `flatten`, naming an
+# inner repeat of its element: it reports the concatenation of that repeat's arrays, and the
+# element's other fields are internal (PS-633). An encoder writes a `concat` of single values
+# or objects as one entry per element; a `concat` whose case reports a list, and a `flatten`
+# repeat, decode but are refused for encoding (PS-634).
+#
+# The cases are the spec prototype's TestCR2026195FlatLists (eight: five tests and three
+# load rejections), plus a concat of scalars, a one-element encode and an unknown mode. They
+# are read by the reference and the generated codec (tests/test_cr_2026_195_cases.py), Go
+# (go/schema/cr195_test.go), Java (CR2026195Test.java) and C# (CR2026_195Tests.cs). C has no
+# repeat and no on_repeat; tools/schema_binary.py refuses both keys by name (PS-446).
+#
+#   decode: `schema` (YAML text), `payload` (hex) and `expected` (JSON text, the whole data).
+#   cases:  `schema`, `input` (JSON text) and either `payload` (hex) or `error`.
+#   load:   `schema` and `error`, the prototype's text.
+
+decode:
+
+- name: one_entry_is_still_an_array
+  schema: &tlv "name: t\nversion: 1\nfields:\n  - tlv:\n      tag_size: 1\n      cases:\n        0xFE:\n          - {name: request_result, type: object, on_repeat: concat, fields: [{name: cmd, type: u8}]}\n        0x02:\n          - {name: codes, type: repeat, count: 2, on_repeat: concat, element: {type: u8}}\n        0x01:\n          - {name: t, type: u8}\n"
+  payload: "fe01"
+  expected: '{"request_result": [{"cmd": 1}]}'
+
+- name: two_entries_are_one_array
+  schema: *tlv
+  payload: "fe01fe02"
+  expected: '{"request_result": [{"cmd": 1}, {"cmd": 2}]}'
+
+- name: no_entry_leaves_the_name_absent
+  schema: *tlv
+  payload: "0105"
+  expected: '{"t": 5}'
+
+- name: list_values_are_spliced
+  schema: *tlv
+  payload: "020102020304"
+  expected: '{"codes": [1, 2, 3, 4]}'
+
+- name: a_concat_of_scalars
+  schema: &scalars "name: t\nversion: 1\nfields:\n  - tlv:\n      tag_size: 1\n      on_repeat: concat\n      cases:\n        0x03:\n          - {name: n, type: u8}\n"
+  payload: "0307"
+  expected: '{"n": [7]}'
+
+- name: flatten_reports_one_list_of_the_groups_members
+  schema: &comtac "name: t\nversion: 1\nfields:\n  - name: counters\n    type: repeat\n    until: end\n    flatten: _members\n    fields:\n      - {name: _count, type: u8}\n      - {name: _time, type: u16}\n      - name: _members\n        type: repeat\n        count: $_count\n        fields:\n          - {name: id, type: u8}\n          - {name: time, type: number, compute: {op: add, a: $_time, b: 0}}\n"
+  payload: "02006401020100c805"
+  expected: '{"counters": [{"id": 1, "time": 100}, {"id": 2, "time": 100}, {"id": 5, "time": 200}]}'
+
+cases:
+
+- name: concat_of_single_values_encodes_one_entry_each
+  schema: *tlv
+  input: '{"request_result": [{"cmd": 1}, {"cmd": 2}]}'
+  payload: "fe01fe02"
+
+- name: concat_of_one_value
+  schema: *tlv
+  input: '{"request_result": [{"cmd": 1}]}'
+  payload: "fe01"
+
+- name: concat_of_scalars_encodes_one_entry_each
+  schema: *scalars
+  input: '{"n": [7, 8]}'
+  payload: "03070308"
+
+- name: concat_of_lists_decodes_only
+  schema: *tlv
+  input: '{"codes": [1, 2, 3]}'
+  error: "tlv: 'codes' is concatenated from lists, which cannot be split back into entries; the schema decodes but is not encoded (PS-634)"
+
+- name: flatten_decodes_only
+  schema: *comtac
+  input: '{"counters": [{"id": 1, "time": 100}, {"id": 2, "time": 100}, {"id": 5, "time": 200}]}'
+  error: "Repeat 'counters' flattens its groups into one list, which cannot be split back into groups; the schema decodes but is not encoded (PS-634)"
+
+load:
+
+- name: flatten_naming_a_field_that_is_not_a_repeat
+  schema: "name: t\nversion: 1\nfields:\n  - {name: v, type: repeat, count: 1, flatten: _members, fields: [{name: _members, type: u8}]}\n"
+  error: "Repeat 'v': flatten names a repeat among its element's fields (PS-633)"
+
+- name: flatten_naming_no_field
+  schema: "name: t\nversion: 1\nfields:\n  - {name: v, type: repeat, count: 1, flatten: nope, fields: [{name: _members, type: repeat, count: 1, element: {type: u8}}]}\n"
+  error: "Repeat 'v': flatten names a repeat among its element's fields (PS-633)"
+
+- name: flatten_with_another_reported_field
+  schema: "name: t\nversion: 1\nfields:\n  - {name: v, type: repeat, count: 1, flatten: _members, fields: [{name: shown, type: u8}, {name: _members, type: repeat, count: 1, element: {type: u8}}]}\n"
+  error: "Repeat 'v': with flatten, its element's other fields are internal; 'shown' would be reported (PS-633)"
+
+- name: an_unknown_mode_lists_concat
+  schema: "name: t\nversion: 1\nfields:\n  - tlv:\n      tag_size: 1\n      cases:\n        0x01:\n          - {name: n, type: u8, on_repeat: append}\n"
+  error: "Field 'n': `on_repeat` is one of collect, merge, last, concat, not 'append' (PS-525)"

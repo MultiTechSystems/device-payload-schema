@@ -75,6 +75,7 @@ func parseIteratorKeys(f *Field, fm map[string]any) {
 	// PS-546: the sibling repeats whose values identify this one's, position by position.
 	if fm["type"] == "repeat" {
 		f.Siblings = siblingNames(fm)
+		f.Flatten, _ = fm["flatten"].(string) // PS-633
 	}
 	// PS-528: a repeat of single values decodes its element as a one-field record.
 	if members, name := rawRepeatMembers(fm); name != "" {
@@ -638,6 +639,16 @@ func (r *repeatElements) element() error {
 	element, err := decodeFields(r.field.Fields, ctx)
 	ctx.trace.pop(pushed)
 	ctx.pendingRecords = savedRecords
+	var flattened any
+	if r.field.Flatten != "" && err == nil {
+		// PS-633 (CR-2026-195): the element reports its inner repeat's members in place
+		// of itself, read from the element or, where internal, from its scope.
+		if v, ok := element[r.field.Flatten]; ok {
+			flattened = v
+		} else {
+			flattened = ctx.Variables[r.field.Flatten]
+		}
+	}
 	keep := true
 	if err == nil {
 		for _, name := range r.carryOrder {
@@ -665,7 +676,11 @@ func (r *repeatElements) element() error {
 		return err
 	}
 	r.iterations++
-	if keep && len(records) > 0 {
+	if keep && r.field.Flatten != "" {
+		if list, ok := flattened.([]any); ok {
+			r.result = append(r.result, list...)
+		}
+	} else if keep && len(records) > 0 {
 		// PS-541: the records, as consecutive elements, in place of the element; the
 		// element's other reported fields go into each, before its own.
 		for _, record := range records {

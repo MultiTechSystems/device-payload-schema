@@ -1680,6 +1680,8 @@ public static class SchemaEncoder
                         + $"and '{sibling}', which identifies them, "
                         + $"{(given is System.Collections.IList l ? l.Count.ToString() : "none")} (PS-550)");
             }
+            if (field.Flatten != null)
+                throw Cr195.FlattenError(field.Name);                              // PS-634
             if (RecordsReachable(field.Fields))
                 // PS-542: the records do not say which element they came from.
                 throw new InvalidOperationException($"Repeat '{field.Name}' has elements that yield "
@@ -2641,6 +2643,17 @@ public static class SchemaEncoder
                 {
                     var n = f.Name;
                     if (!data.TryGetValue(n, out var v) || queues.ContainsKey(n) || ModeOf(n) == "merge") continue;
+                    if (ModeOf(n) == "concat")
+                    {
+                        // PS-634 (CR-2026-195): each element is one entry's value, unless a
+                        // case reports a list, which cannot be split back into entries.
+                        if (f.Type == FieldType.Repeat || (f.Type == FieldType.Bytes && f.Format == "array"))
+                            throw Cr195.ConcatListError(n);
+                        queues[n] = v is System.Collections.IList cl
+                            ? new Queue<object?>(cl.Cast<object?>())
+                            : new Queue<object?>(new[] { v });
+                        continue;
+                    }
                     bool collected = v is System.Collections.IList && !(f.Type == FieldType.Repeat
                         || (f.Type == FieldType.Bytes && f.Format == "array")) && ModeOf(n) == "collect";
                     queues[n] = collected
