@@ -57,6 +57,10 @@ public class Field {
     private boolean utf8;
     public boolean isUtf8() { return utf8; }
     public void setUtf8(boolean utf8) { this.utf8 = utf8; }
+    /** {@code source}: a value of the frame on a type: number field (PS-635, CR-2026-196). */
+    private String source;
+    public String getSource() { return source; }
+    public void setSource(String source) { this.source = source; }
     /** A {@code checksum} declaration and the type it sits on (PS-585, CR-2026-174). */
     private Map<String, Object> checksum;
     private String checksumType;

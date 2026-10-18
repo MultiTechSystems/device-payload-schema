@@ -341,6 +341,10 @@ func checkFieldRules(field map[string]any, at string) error {
 	if err := checkCharset(field); err != nil {
 		return err
 	}
+	// PS-635 (CR-2026-196): source names a value of the frame, on a type: number field.
+	if err := checkFrameSource(field); err != nil {
+		return err
+	}
 	// PS-585 (CR-2026-174): a checksum on an unsigned integer wide enough for its algo.
 	if err := checkChecksum(field); err != nil {
 		return err

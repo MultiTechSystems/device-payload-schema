@@ -1,0 +1,146 @@
+# CR-2026-196 (PS-635 to PS-637): a `type: number` field declaring `source` reports a value
+# of the frame - `$fPort`, `$payloadLength` or `$remaining` - reading no bytes, through its
+# modifiers. With no FPort a `$fPort` field is omitted with a warning (PS-636). An encoder
+# writes nothing for it and checks a given value against the finished frame (PS-637).
+#
+# Three lists, read by the reference and the generated codec
+# (tests/test_cr_2026_196_cases.py), Go (go/schema/cr196_test.go), Java (CR2026196Test.java)
+# and C# (CR2026_196Tests.cs). C cannot hold the key (PS-446). The spec prototype's
+# TestCR2026196FrameSource, case for case, and a few more.
+#
+#   decode: `schema` (YAML text), `payload` (hex), `fport` where the decoder is given one,
+#           and `expected` (the whole decoded data); `warnings`, where given, is the whole
+#           list of warnings the decode reports.
+#   cases:  `schema`, `input` (JSON text), `fport` where the encoder is given one, and
+#           either `payload` (hex) or `error` (text one of the errors contains).
+#   load:   `schema` and the `error` its load reports.
+
+decode:
+
+- name: remaining_after_a_header
+  schema: "name: t\nfields:\n  - {name: _header, type: bytes, length: 8}\n  - {name: data_size, type: number, source: $remaining}\n  - {name: rest, type: hex, length: remaining}\n"
+  payload: "0000000000000000AABBCC"
+  expected: {data_size: 3, rest: aabbcc}
+  warnings: []
+
+- name: payload_length_and_modifiers
+  schema: "name: t\nfields:\n  - {name: size, type: number, source: $payloadLength, add: -1}\n  - {name: x, type: u8}\n  - {name: y, type: u8}\n"
+  payload: "0102"
+  expected: {size: 1, x: 1, y: 2}
+
+- name: fport_given
+  schema: "name: t\nfields:\n  - {name: x, type: u8}\n  - {name: port, type: number, source: $fPort}\n"
+  payload: "05"
+  fport: 3
+  expected: {x: 5, port: 3}
+  warnings: []
+
+- name: fport_absent_is_omitted_with_a_warning
+  schema: "name: t\nfields:\n  - {name: x, type: u8}\n  - {name: port, type: number, source: $fPort}\n"
+  payload: "05"
+  expected: {x: 5}
+  warnings: ["Field 'port': no FPort was given, so it is omitted (PS-636)"]
+
+- name: a_default_port_reports_its_bytes_and_port
+  schema: "name: t\nports:\n  10:\n    fields:\n      - {name: a, type: u8}\n  default:\n    fields:\n      - {name: bytes, type: hex, length: remaining}\n      - {name: port, type: number, source: $fPort}\n"
+  payload: "0102"
+  fport: 7
+  expected: {bytes: "0102", port: 7}
+
+- name: a_reference_binds_the_value
+  schema: "name: t\nfields:\n  - {name: _len, type: number, source: $payloadLength}\n  - {name: records, type: number, compute: {op: idiv, a: $_len, b: 2}}\n  - {name: raw, type: hex, length: remaining}\n"
+  payload: "000000000000"
+  expected: {records: 3, raw: "000000000000"}
+
+- name: remaining_counts_to_a_tlv_entry_end
+  schema: "name: t\nfields:\n  - tlv:\n      tag_size: 1\n      length_size: 1\n      cases:\n        1:\n          - {name: count, type: number, source: $remaining}\n          - {name: data, type: hex, length: remaining}\n        2:\n          - {name: level, type: u8}\n"
+  payload: "0103AABBCC020109"
+  expected: {count: 3, data: aabbcc, level: 9}
+  warnings: []
+
+- name: remaining_is_zero_at_the_end
+  schema: "name: t\nfields:\n  - {name: x, type: u8}\n  - {name: left, type: number, source: $remaining, mult: 2}\n"
+  payload: "05"
+  expected: {x: 5, left: 0}
+
+cases:
+
+- name: remaining_round_trips
+  schema: "name: t\nfields:\n  - {name: _header, type: bytes, length: 8}\n  - {name: data_size, type: number, source: $remaining}\n  - {name: rest, type: hex, length: remaining}\n"
+  input: '{"_header": "0000000000000000", "data_size": 3, "rest": "aabbcc"}'
+  payload: "0000000000000000aabbcc"
+
+- name: remaining_that_differs_is_rejected
+  schema: "name: t\nfields:\n  - {name: _header, type: bytes, length: 8}\n  - {name: data_size, type: number, source: $remaining}\n  - {name: rest, type: hex, length: remaining}\n"
+  input: '{"_header": "0000000000000000", "data_size": 4, "rest": "aabbcc"}'
+  error: "Field 'data_size' is given 4, but the frame gives 3 (PS-637)"
+
+- name: an_omitted_value_is_not_required
+  schema: "name: t\nfields:\n  - {name: _header, type: bytes, length: 8}\n  - {name: data_size, type: number, source: $remaining}\n  - {name: rest, type: hex, length: remaining}\n"
+  input: '{"_header": "0000000000000000", "rest": "aabbcc"}'
+  payload: "0000000000000000aabbcc"
+
+- name: payload_length_through_its_modifier
+  schema: "name: t\nfields:\n  - {name: size, type: number, source: $payloadLength, add: -1}\n  - {name: x, type: u8}\n  - {name: y, type: u8}\n"
+  input: '{"size": 1, "x": 1, "y": 2}'
+  payload: "0102"
+
+- name: payload_length_that_differs_is_rejected
+  schema: "name: t\nfields:\n  - {name: size, type: number, source: $payloadLength, add: -1}\n  - {name: x, type: u8}\n  - {name: y, type: u8}\n"
+  input: '{"size": 2, "x": 1, "y": 2}'
+  error: "Field 'size' is given 2, but the frame gives 1 (PS-637)"
+
+- name: fport_that_agrees
+  schema: "name: t\nfields:\n  - {name: x, type: u8}\n  - {name: port, type: number, source: $fPort}\n"
+  input: '{"x": 5, "port": 3}'
+  fport: 3
+  payload: "05"
+
+- name: fport_that_differs_is_rejected
+  schema: "name: t\nfields:\n  - {name: x, type: u8}\n  - {name: port, type: number, source: $fPort}\n"
+  input: '{"x": 5, "port": 3}'
+  fport: 4
+  error: "Field 'port' is given 3, but the frame gives 4 (PS-637)"
+
+- name: fport_given_with_no_fport_is_rejected
+  schema: "name: t\nfields:\n  - {name: x, type: u8}\n  - {name: port, type: number, source: $fPort}\n"
+  input: '{"x": 5, "port": 3}'
+  error: "Field 'port' is given 3, but the frame gives no FPort (PS-637)"
+
+- name: a_default_port_checks_the_port_it_reports
+  schema: "name: t\nports:\n  10:\n    fields:\n      - {name: a, type: u8}\n  default:\n    fields:\n      - {name: bytes, type: hex, length: remaining}\n      - {name: port, type: number, source: $fPort}\n"
+  input: '{"bytes": "0102", "port": 7}'
+  fport: 7
+  payload: "0102"
+
+- name: remaining_in_a_tlv_entry_round_trips
+  schema: "name: t\nfields:\n  - tlv:\n      tag_size: 1\n      length_size: 1\n      cases:\n        1:\n          - {name: count, type: number, source: $remaining}\n          - {name: data, type: hex, length: remaining}\n        2:\n          - {name: level, type: u8}\n"
+  input: '{"count": 3, "data": "aabbcc", "level": 9}'
+  payload: "0103aabbcc020109"
+
+- name: remaining_in_a_tlv_entry_counts_to_its_end
+  schema: "name: t\nfields:\n  - tlv:\n      tag_size: 1\n      length_size: 1\n      cases:\n        1:\n          - {name: count, type: number, source: $remaining}\n          - {name: data, type: hex, length: remaining}\n        2:\n          - {name: level, type: u8}\n"
+  input: '{"count": 6, "data": "aabbcc", "level": 9}'
+  error: "Field 'count' is given 6, but the frame gives 3 (PS-637)"
+
+load:
+
+- name: source_on_a_type_that_reads_bytes
+  schema: "name: t\nfields:\n  - {name: s, type: u8, source: $fPort}\n"
+  error: "Field 's': source is one of $fPort, $payloadLength, $remaining, on a type: number field that computes nothing else (PS-635)"
+
+- name: an_unknown_source
+  schema: "name: t\nfields:\n  - {name: s, type: number, source: $length}\n"
+  error: "Field 's': source is one of $fPort, $payloadLength, $remaining, on a type: number field that computes nothing else (PS-635)"
+
+- name: source_beside_value
+  schema: "name: t\nfields:\n  - {name: s, type: number, source: $fPort, value: 1}\n"
+  error: "Field 's': source is one of $fPort, $payloadLength, $remaining, on a type: number field that computes nothing else (PS-635)"
+
+- name: source_beside_compute
+  schema: "name: t\nfields:\n  - {name: a, type: u8}\n  - {name: s, type: number, source: $remaining, compute: {op: add, a: $a, b: 1}}\n"
+  error: "Field 's': source is one of $fPort, $payloadLength, $remaining, on a type: number field that computes nothing else (PS-635)"
+
+- name: source_beside_ref
+  schema: "name: t\nfields:\n  - {name: a, type: u8}\n  - {name: s, type: number, source: $payloadLength, ref: $a}\n"
+  error: "Field 's': source is one of $fPort, $payloadLength, $remaining, on a type: number field that computes nothing else (PS-635)"

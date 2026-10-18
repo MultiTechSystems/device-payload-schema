@@ -971,6 +971,26 @@ function encRawBits(f) {                              // raw_bits_field
 // The field list being encoded: a reference is looked for there before the rest of the
 // schema (ENC_VARS, ENC_NAMED), since each port may declare its own `code`.
 var ENC_SCOPE = null;
+/* PS-637 (CR-2026-196): the FPort the encode reports, which a `$fPort` field is checked
+ * against; set by encodeDownlink, undefined where there is none. */
+var ENC_FPORT;
+
+function encSourceValue(f, raw) {                     // _frame_source_value
+  if (raw === undefined || raw === null) return null;
+  var v = encForward(raw, f);
+  if (typeof v !== "number" || !isFinite(v)) return null;
+  var lk = f.lookup;
+  if (lk === undefined || lk === null) return v + 0;
+  if (Array.isArray(lk)) return v >= 0 && v < lk.length && v === Math.floor(v) ? lk[v] : null;
+  if (has_(lk, String(v))) return lk[String(v)];
+  if (has_(f, "default") && typeof f["default"] === "string") return lookupTemplate(f["default"], v);
+  return null;
+}
+
+function encSourceMismatch(f, given, found) {         // frame_source_mismatch
+  return "Field '" + f.name + "' is given " + encEchoText(given) + ", but the frame gives " +
+    (found === null ? "no FPort" : encEchoText(found)) + " (PS-637)";
+}
 
 function encFind(node, test) {                        // the walk in _field_declaring_var
   if (Array.isArray(node)) {
@@ -2514,6 +2534,12 @@ function encEchoText(v) {                             // echo_text
 
 function encCheckEchoes(arr) {                        // check_echoes
   (arr.ec || []).forEach(function (ec) {
+    if (ec.f.source !== undefined) {
+      // PS-637 (CR-2026-196): a `$remaining` field's value is the bytes after it.
+      var fs = encSourceValue(ec.f, Math.max(0, arr.length - ec.p));
+      if (fs === null || JSON.stringify(fs) !== JSON.stringify(ec.given)) encFail(encSourceMismatch(ec.f, ec.given, fs));
+      return;
+    }
     var n = ec.n === null ? Math.max(0, arr.length - ec.p) : ec.n, written;
     if (ec.p + n > arr.length) written = "too few bytes";
     else {
@@ -2900,6 +2926,15 @@ function encListIn(out, fields, data, ctx, top, entry) {
       if (nested === null || typeof nested !== "object" || Array.isArray(nested)) encFail(encMissing(objKey));   // PS-551
       return encObject(out, f.fields || [], nested, ctx);
     }
+    if (f.source !== undefined && encComputed(f)) {
+      // PS-637 (CR-2026-196): a value of the frame writes nothing; a given one is checked
+      // against the finished frame - `$remaining` where its frame closes, as an echo is.
+      if (name && encHas(data, name) && data[name] !== null) {
+        if (f.source === "$remaining") fr.ec.push({ p: fr.out.length, f: f, given: data[name], n: null, endian: ctx.endian });
+        else ctx.src.push({ f: f, given: data[name] });
+      }
+      return;
+    }
     if (encComputed(f)) return;
     if (type === "skip") {
       var n = typeof f.length === "string" ? 0 : Math.max(0, parseInt(f.length === undefined ? 1 : f.length, 10));
@@ -2954,7 +2989,7 @@ function encListIn(out, fields, data, ctx, top, entry) {
 
 function encodeRoot(fields, data, endian) {
   // wa: PS-537's warnings, reported after the others as the reference reports them.
-  var ctx = { endian: endian, w: [], wa: [], t564: [], d564: 0, ckApart: 0, ckOpen: [] }, out = [];
+  var ctx = { endian: endian, w: [], wa: [], t564: [], d564: 0, ckApart: 0, ckOpen: [], src: [] }, out = [];
   ENC_SCOPE = fields;
   if (data && typeof data === "object" && ("_decode" in data || "_meta" in data)) {
     // PS-573: a decode record given in the input as `_decode`; `_meta` is not input.
@@ -2969,6 +3004,10 @@ function encodeRoot(fields, data, endian) {
   }
   encList(out, fields, data || {}, ctx, true);
   encCheckPeeks(out);                                    // PS-551 (CR-2026-141)
+  ctx.src.forEach(function (sc) {                        // PS-637 (CR-2026-196)
+    var found = encSourceValue(sc.f, sc.f.source === "$payloadLength" ? out.length : ENC_FPORT);
+    if (found === null || JSON.stringify(found) !== JSON.stringify(sc.given)) encFail(encSourceMismatch(sc.f, sc.given, found));
+  });
   ctx.t564.forEach(function (c) {                        // PS-564
     var selected = encRemainingSelection(c.m, c.tail);
     if (selected !== c.chosen) encFail(encRemainingMismatch(c.m, c.tail, selected, c.chosen));
@@ -4120,6 +4159,18 @@ var SAFE_INTEGER = 9007199254740991;
  * its label before it reads - `'name'`, or `an unnamed skip` - so the innermost field
  * reading is the one named, and the text is the reference's exactly. */
 var _fld = null;
+/* PS-635, PS-636 (CR-2026-196): the frame a `source` field reports from, set by
+ * decodeUplink and decodeDownlink. With no FPort, a `$fPort` field is omitted with a
+ * warning naming it. */
+var _frm = { fPort: undefined, n: 0 };
+function frameSource(src, left, name, wn) {
+  var v = src === "$remaining" ? left : (src === "$payloadLength" ? _frm.n : _frm.fPort);
+  if (v === undefined || v === null) {
+    wn.push("Field '" + name + "': no FPort was given, so it is omitted (PS-636)");
+    return undefined;
+  }
+  return v;
+}
 function underflow(detail) {
   return new Error(_fld === null ? detail : "Field " + _fld + ": " + detail + " (PS-535)");
 }
@@ -5319,6 +5370,17 @@ function writeS(buf, pos, size, value, endian) {
             # for a field read from the payload. `compute` used to drop the modifiers,
             # and both dropped the lookup. The guard wraps the whole chain, so a failed
             # one reports its `else` as declared (PS-444).
+            if 'source' in field:
+                # PS-635, PS-636 (CR-2026-196): the FPort, the payload's length or the
+                # bytes left (the data ends at a tlv entry's end), through its modifiers.
+                tmp = f'_fs_{name}'
+                lines.append(f'{i}  var {tmp} = frameSource({json.dumps(field["source"])}, '
+                             f'buf.length - pos, {json.dumps(str(field["name"]))}, wn);')
+                lines.append(f'{i}  if ({tmp} !== undefined) {{')
+                value_expr = integral(self._apply_modifiers_expr(tmp, field))
+                lines.extend(self._computed_tail(i + '  ', field, name, value_expr))
+                lines.append(f'{i}  }}')
+                return lines
             if isinstance(field.get('time'), dict) and 'parts' in field['time']:
                 # PS-614 (CR-2026-186): the instant its parts name, from their variables.
                 refs = {part: to_js_name(str(ref)[1:])
@@ -6648,6 +6710,7 @@ function writeS(buf, pos, size, value, endian) {
                 lines.append(f'      return {{ bytes: [], fPort: 1, warnings: [], errors: '
                              f'[{json.dumps(reject)}] }};')
             lines.append('    }')
+            lines.append('    ENC_FPORT = port;')                       # PS-637
             first = True
             for pk, pd in sorted(numbered.items()):
                 kw = 'if' if first else '} else if'
@@ -6764,6 +6827,9 @@ function writeS(buf, pos, size, value, endian) {
                 lines.append('function encodeDownlink(input) {')
                 guard('downlink', encode=True)
                 lines.append('  try {')
+                # PS-637: the FPort reported, which a `$fPort` field is checked against.
+                lines.append(f'    ENC_FPORT = input.fPort !== undefined && input.fPort !== null '
+                             f'? input.fPort : {doc if doc_fport else "undefined"};')
                 lines.append(f'    var r = encodePayload(input.data, "{self.endian}");')
                 lines.append(f'    return {{ bytes: r.bytes, fPort: input.fPort || {doc_fport}1, warnings: r.warnings, errors: [] }};')
                 lines.append('  } catch (e) {')
@@ -6779,7 +6845,26 @@ function writeS(buf, pos, size, value, endian) {
             lines.append('var NORMALIZE_PLAN = %s;' % json.dumps(normalize_plan(self.schema),
                                                                 ensure_ascii=False))
             lines.append(NORMALIZE_RUNTIME_JS.strip('\n'))
-        return self._restore_output_keys('\n'.join(lines))
+        code = '\n'.join(lines)
+        if self._uses_frame_source():
+            # PS-635 (CR-2026-196): the frame a `source` field reports from.
+            for entry in ('function decodeUplink(input) {', 'function decodeDownlink(input) {'):
+                code = code.replace(entry, entry + '\n  _frm = { fPort: input.fPort, n: '
+                                    'input.bytes ? input.bytes.length : 0 };')
+        return self._restore_output_keys(code)
+
+    def _uses_frame_source(self) -> bool:
+        """Whether any field declares PS-635's `source`."""
+        def walk(node, top=True):
+            if isinstance(node, dict):
+                if 'source' in node and 'type' in node:
+                    return True
+                return any(walk(v, False) for k, v in node.items()
+                           if not (top and k == 'test_vectors'))
+            if isinstance(node, list):
+                return any(walk(v, False) for v in node)
+            return False
+        return walk(self.schema)
 
     def _field_names(self) -> Set[str]:
         """Every literal field name the schema declares, in any field list."""

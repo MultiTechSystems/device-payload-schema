@@ -140,6 +140,9 @@ type Field struct {
 	// Charset is an ascii field's `charset`: "utf-8" decodes and encodes its bytes as
 	// UTF-8 text (PS-624, PS-625, CR-2026-190); empty for ISO 8859-1 (PS-538).
 	Charset string `json:"-" yaml:"-"`
+	// Source is a `type: number` field's `source`: $fPort, $payloadLength or $remaining,
+	// a value of the frame read from no bytes (PS-635, CR-2026-196).
+	Source string `json:"-" yaml:"-"`
 	// GroupEndian is a byte_group's own byte order (PS-364), empty for the context's.
 	GroupEndian string `json:"-" yaml:"-"`
 	// IntegerResult marks a computed field written `type: integer` (PS-283); its Type
@@ -447,6 +450,11 @@ type DecodeContext struct {
 	pendingRecords *[]map[string]any
 	// trace is the decode record kept for Interpret (PS-572); nil when not asked.
 	trace *decodeTrace
+	// frameLength is the payload's length and frameFPort the FPort it arrived on, where
+	// frameHasPort; a `source` field reports them (PS-635, CR-2026-196).
+	frameLength  int
+	frameFPort   int
+	frameHasPort bool
 }
 
 // EncodeContext maintains state during encoding.
@@ -497,6 +505,9 @@ type EncodeContext struct {
 	ps564Depth int
 	// trace is the decode record the encoder follows (PS-573); nil where none is given.
 	trace *decodeTrace
+	// frameSources holds each `$payloadLength` and `$fPort` field given a value, checked
+	// against the finished payload (PS-637, CR-2026-196); shared with every branch.
+	frameSources *[]frameSourceCheck
 	// enclosing is the stack of field lists enclosing the entry being encoded, within the
 	// current reported object, each with its current entry (CR-2026-165: the names declared
 	// outside a recorded match). Reset for an object and for each repeat element.
@@ -560,6 +571,7 @@ func (ctx *EncodeContext) branch() *EncodeContext {
 	child.order = ctx.order
 	child.scope = ctx.scope
 	child.trace = ctx.trace
+	child.frameSources = ctx.frameSources // PS-637
 	child.enclosing = ctx.enclosing[:len(ctx.enclosing):len(ctx.enclosing)]
 	return child
 }
@@ -616,6 +628,7 @@ func NewDecodeContext(data []byte, endian string) *DecodeContext {
 	}
 	return &DecodeContext{
 		Data:      data,
+		frameLength: len(data), // PS-635
 		Offset:    0,
 		Endian:    endian,
 		Variables: make(map[string]any),
@@ -1337,6 +1350,9 @@ func parseFieldMap(fm map[string]any, node *yaml.Node) Field {
 	}
 	if cs, ok := fm["charset"].(string); ok {
 		f.Charset = cs // PS-624
+	}
+	if src, ok := fm["source"].(string); ok {
+		f.Source = src // PS-635
 	}
 	if typ, ok := fm["type"].(string); ok {
 		f.Type = canonicalFieldType(typ)
@@ -2119,6 +2135,7 @@ func (s *Schema) decodeWithPort(data []byte, fPort int, direction string, produc
 	ctx.repeatOnly = s.repeatOnly
 	ctx.metaProducers = producers
 	ctx.trace = trace
+	ctx.frameFPort, ctx.frameHasPort = fPort, fPort != 0 // PS-635: 0 is no FPort
 	result := make(map[string]any)
 
 	if len(s.Header) > 0 {
@@ -2955,6 +2972,15 @@ func decodeField(field Field, ctx *DecodeContext) (any, error) {
 		// transform stages and the lookup, all in applyLookupAndModifiers below. The
 		// modifiers used to be applied here for a ref and not at all for a compute, so
 		// `mult: 10` beside a compute was ignored with success.
+		if field.Source != "" {
+			// PS-635, PS-636 (CR-2026-196): a value of the frame, through the same
+			// pipeline below; with no FPort, `$fPort` is omitted with a warning.
+			value = ctx.frameSource(field)
+			if value == omitted {
+				return omitted, nil
+			}
+			break
+		}
 		if timeHasParts(field) {
 			// PS-614 (CR-2026-186): the instant its parts name, in seconds since 1970.
 			parts, err := ctx.timeFromParts(field)
@@ -4532,6 +4558,7 @@ func (s *Schema) encodeToContextRecord(
 	ctx.order = s.keyOrder
 	ctx.ps564 = &[]remainingCheck{}
 	ctx.checksums = &[]checksumPlace{} // PS-587 (CR-2026-174)
+	ctx.frameSources = &[]frameSourceCheck{} // PS-637 (CR-2026-196)
 
 	// Encode header fields first
 	if len(s.Header) > 0 {
@@ -4572,6 +4599,9 @@ func (s *Schema) encodeToContextRecord(
 	if err := ctx.checkEchoes(0); err != nil { // PS-589 (CR-2026-175)
 		return nil, err
 	}
+	if err := ctx.checkFrameSources(); err != nil { // PS-637 (CR-2026-196)
+		return nil, err
+	}
 	if err := ctx.checkRemaining(); err != nil { // PS-564
 		return nil, err
 	}
@@ -4608,6 +4638,7 @@ func (s *Schema) DecodeOrderedWithPort(data []byte, fPort int) (map[string]any, 
 	}
 	ctx := NewDecodeContext(data, s.Endian)
 	ctx.repeatOnly = s.repeatOnly
+	ctx.frameFPort, ctx.frameHasPort = fPort, fPort != 0 // PS-635: 0 is no FPort
 	result := make(map[string]any)
 	if len(s.Header) > 0 {
 		headerResult, err := decodeFieldsWithSchema(s.Header, ctx, s)
@@ -5979,6 +6010,10 @@ func encodeFieldList(fields []Field, data map[string]any, ctx *EncodeContext) er
 		// six — so with the order reversed they would reach encodeField, whose
 		// switch has no case for `number`, and a schema that encoded fine would
 		// start reporting "cannot encode type".
+		if field.Source != "" && (field.Type == TypeNumber || field.Type == "number") {
+			ctx.recordFrameSource(field, data) // PS-637: writes nothing, a given value checked
+			continue
+		}
 		if field.Type == TypeNumber || field.Type == "number" || isStringTemplate(field) {
 			continue // PS-590: a template string writes nothing, its input ignored
 		}

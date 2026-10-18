@@ -68,6 +68,20 @@ final class Encoder {
         return run(data, null);
     }
 
+    /** PS-637 (CR-2026-196): the FPort the encode reports; 0 where there is none. */
+    private int framePort;
+    void setFramePort(int port) { this.framePort = port; }
+
+    /** A {@code $payloadLength} or {@code $fPort} field given a value, checked at the end. */
+    private record SourceCheck(Field field, Object given) { }
+    private final List<SourceCheck> sourceChecks = new ArrayList<>();
+
+    /** {@code frame_source_mismatch}: PS-637's rejection. */
+    private static String sourceMismatch(Field field, Object given, Double found) {
+        return "Field '" + field.getName() + "' is given " + echoText(given) + ", but the frame gives "
+                + (found == null ? "no FPort" : echoText(found)) + " (PS-637)";
+    }
+
     /**
      * Encodes {@code data}, following {@code decodeRecord} - or, where that is null, the
      * {@code _decode} the input carries - as PS-573 says: each recorded case, discriminator,
@@ -117,6 +131,20 @@ final class Encoder {
                 checkPeeks(frame);                              // PS-551 (CR-2026-141)
             } catch (RuntimeException e) {
                 errors.add(e.getMessage());
+            }
+        }
+        if (errors.isEmpty()) {
+            // PS-637 (CR-2026-196): a given payload length or FPort is the finished frame's;
+            // the encoder neither pads the frame nor chooses the FPort to agree.
+            for (SourceCheck c : sourceChecks) {
+                Integer raw = null;
+                if ("$payloadLength".equals(c.field().getSource())) raw = frame.length;
+                else if (framePort != 0) raw = framePort;
+                Double found = FrameSource.value(c.field(), raw);
+                if (found == null || !echoEquals(found, c.given())) {
+                    errors.add(sourceMismatch(c.field(), c.given(), found));
+                    break;
+                }
             }
         }
         if (errors.isEmpty()) {
@@ -636,6 +664,17 @@ final class Encoder {
                         continue;
                     }
                 }
+                if (field.getSource() != null && isComputed(field)) {
+                    // PS-637 (CR-2026-196): a value of the frame writes nothing; a given one
+                    // is checked against the finished frame - `$remaining` where its frame
+                    // closes, as a non-consuming byte string is.
+                    Object given = name == null ? null : data.get(name);
+                    if (given != null) {
+                        if ("$remaining".equals(field.getSource())) out.sourceEcho(field, given);
+                        else sourceChecks.add(new SourceCheck(field, given));
+                    }
+                    continue;
+                }
                 if (field.isEcho()) {
                     // PS-589 (CR-2026-175): a byte string that does not consume re-reads
                     // bytes the other fields write, so it writes none and is not required;
@@ -896,6 +935,14 @@ final class Encoder {
      */
     private void checkEchoes(byte[] frame, List<Echo> echoes) {
         for (Echo e : echoes) {
+            if (e.field().getSource() != null) {
+                // PS-637 (CR-2026-196): a `$remaining` field's value is the bytes after it.
+                Double found = FrameSource.value(e.field(), Math.max(0, frame.length - e.pos()));
+                if (found == null || !echoEquals(found, e.given())) {
+                    throw new SchemaException.EncodeException(sourceMismatch(e.field(), e.given(), found));
+                }
+                continue;
+            }
             int length = e.length() == null ? Math.max(0, frame.length - e.pos()) : e.length();
             String written;
             if (e.pos() + length > frame.length) {
@@ -3909,6 +3956,11 @@ final class Encoder {
             String name = field.getName();
             if (name == null || data.get(name) == null) return;
             echoes.add(new Echo(buf.size, field, data.get(name), echoLength(field, data)));
+        }
+
+        /** PS-637: a {@code $remaining} field given a value, checked where the frame closes. */
+        void sourceEcho(Field field, Object given) {
+            echoes.add(new Echo(buf.size, field, given, null));
         }
 
         private void cover(int at, int mask) {

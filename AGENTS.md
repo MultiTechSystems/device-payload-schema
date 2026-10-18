@@ -4544,6 +4544,47 @@ improved. The Go, Java and C# corpus runners write per-vector reports only when
   +10, all `tlv` (Python and Java 2329 -> 2339, C# 2330 -> 2340), Go ordered 2347 -> 2358 and
   `tlv` 1623 -> 1634, plain 2319 -> 2327 (two vectors' tags are not ascending). C: 586 of 586
   attempted (the fixture's four).
+- **CR-2026-196 (PS-635 to PS-637; la-payload-schema main cf02629, for 0.5.8): a field from
+  the frame.** A `type: number` (or `integer`) field may declare `source: $fPort`,
+  `$payloadLength` or `$remaining`. It reads no bytes; its modifiers apply once and a reference
+  binds the value. `$remaining` counts the bytes left in the data being read, so inside a tlv
+  entry it stops at the entry's end, as a `remaining` match does.
+  - **Texts, the prototype's:** load `Field 's': source is one of $fPort, $payloadLength,
+    $remaining, on a type: number field that computes nothing else (PS-635)` (another value,
+    another type, or beside `value`/`compute`/`ref`/`polynomial`/`time` `parts`); decode with
+    no FPort `Field 'port': no FPort was given, so it is omitted (PS-636)`, a warning, the field
+    absent; encode `Field 'data_size' is given 4, but the frame gives 3 (PS-637)` (`... gives
+    no FPort` where the encode reports none). Encode writes nothing, never pads or picks the
+    FPort; an omitted value is not required.
+  - **Where:** Python `frame_source_errors` (from `schema_iterator_errors`, so the validator
+    and the generator too), `_frame_source`, `_encode_frame_source`, `check_echoes`' PS-637
+    branch (`$remaining` is checked where its frame closes, as an echo) and the
+    `_frame_source_checks` pass after the frame is finished (`$payloadLength`, `$fPort`
+    against `result.fport`); the codec's `frameSource`/`_frm` (set by decodeUplink and
+    decodeDownlink) and the runtime's `encSourceValue`, `ENC_FPORT` (set by encodeDownlink),
+    `ctx.src`; Go `cr196.go` with a branch in `cr175.go`'s echo check; Java `FrameSource`; C#
+    `FrameSource.cs`. `source` is in `tools/schema_vocabulary.py`, `payload-schema.json` and
+    the language reference; `validate_schema.py` accepts it as a number field's source.
+  - **Before:** every implementation ignored the key: Python, Go and Java omitted the field
+    silently (the validator refused it, "type 'number' requires 'ref', 'compute' or
+    'value'"), and C# and the codec reported 0. No encoder checked a given value.
+  - **Found on the way (PS-581):** Python's encoder of a schema without `ports` reported the
+    document's FPort only, never the caller's (`encode({...}, fPort=3).fport` was None); it
+    reports the caller's now. Go, Java, C# and the codec already did. And
+    `tools/vector-verdicts.py` gave the codec FPort 1 for a vector with none, where the
+    reference is given none; it passes the vector's own now (no other verdict changed).
+  - **C:** no `type: number`; `tools/schema_binary.py` refuses `source` by name (PS-446) and the
+    harness files the fixture under it.
+  - **Cases:** `tests/cr-2026-196-cases.yaml` (the prototype's nine `TestCR2026196FrameSource`
+    tests and more: a tlv entry's remainder, `$fPort` mismatches; 8 decode, 11 encode, 5
+    load), read by `test_cr_2026_196_cases.py` (reference and codec), Go `cr196_test.go`, Java
+    `CR2026196Test`, C# `CR2026_196Tests`. Fixture `_language-conformance/frame-source.yaml`
+    (all three sources and one inside a tlv entry; one vector with no FPort, its warning by
+    `expected_warnings: ["Field 'port'"]`); mutation 100%.
+  - **Floors:** decode 2950 -> 2954 in Go, Java and C#; re-encode +4 everywhere, all `tlv`
+    (Python and Java 2329 -> 2333, C# 2330 -> 2334, Go 2347 -> 2351, plain 2319 -> 2323).
+  - **Measured:** no corpus, library, example or registry (2ef53db, 546 schemas) schema
+    declares a field `source`, so none is rejected and no decode or encode output changes.
 
 ## Converting a vendor codec
 

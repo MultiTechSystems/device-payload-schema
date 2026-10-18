@@ -341,13 +341,17 @@ def run_generated(schema: dict, vectors: list) -> list:
             calls.append({
                 "encode": True,
                 "data": vector.get("input") or {},
-                "fPort": vector_fport(vector) or 1,
+                # The vector's FPort, or none: the reference is given none, and a
+                # `$fPort` field is omitted without one (PS-636), where 1 reported it.
+                "fPort": vector_fport(vector),
             })
         else:
             calls.append({
                 "encode": False,
                 "bytes": list(vector_bytes(vector)),
-                "fPort": vector_fport(vector) or 1,
+                # The vector's FPort, or none: the reference is given none, and a
+                # `$fPort` field is omitted without one (PS-636), where 1 reported it.
+                "fPort": vector_fport(vector),
             })
     driver = (
         js
