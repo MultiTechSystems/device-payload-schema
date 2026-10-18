@@ -994,18 +994,35 @@ public static partial class SchemaParser
                     + "that declares `type`, not a construct (PS-545)");
             f.Fields = ParseFields(elementSeq);
             f.ElementName = elementName;
+        }
+        if (f.Type == FieldType.Repeat && Cr189.IsPacked(fm))
+        {
+            // PS-621, PS-639 (CR-2026-189, CR-2026-198): each part - the element, or each
+            // field of a packed record - reads its integer from bytes of its own width,
+            // big-endian, laid out from the bit stream (DecodeRepeat's Packed).
+            var parts = new List<(int, int, bool)>();
             if (fm.TryGetValue("packed_bits", out var packedNode) && YamlInt(packedNode) is { } pb
                 && Get(fm, "element") is YamlMappingNode packedElement
                 && Cr189.Width(packedElement) is var (pw, ps))
             {
-                // PS-621 (CR-2026-189): the element reads its integer from bytes of its own
-                // width, big-endian, laid out from the bit stream (DecodeRepeat's Packed).
-                f.PackedBits = (int)pb;
-                f.BitOffset = fm.TryGetValue("bit_offset", out var bo) && YamlInt(bo) is { } bov ? (int)bov : 0;
+                parts.Add(((int)pb, pw, ps));
                 f.PackedWidth = pw;
                 f.PackedSigned = ps;
-                f.Fields[0].Endian = "big";
             }
+            else if (Get(fm, "fields") is YamlSequenceNode memberSeq)
+                foreach (var member in memberSeq.Children.OfType<YamlMappingNode>())
+                    if (member.TryGetValue("packed_bits", out var mb) && YamlInt(mb) is { } mbits
+                        && Cr189.Width(member) is var (mw, ms))
+                        parts.Add(((int)mbits, mw, ms));
+            f.PackedParts = parts;
+            f.PackedBits = parts.Sum(p => p.Item1);
+            if (fm.TryGetValue("bit_offset", out var bo))
+            {
+                if (YamlInt(bo) is { } bov) f.BitOffset = (int)bov;
+                else f.BitOffsetRef = Scalar(bo);
+            }
+            f.PackedInPlace = fm.TryGetValue("consume", out var pc) && YamlInt(pc) == 0;
+            foreach (var member in f.Fields) member.Endian = "big";
         }
         if (fm.TryGetValue("identity", out var identityNode)) f.Identity = Scalar(identityNode);
         if (f.Type == FieldType.Repeat)

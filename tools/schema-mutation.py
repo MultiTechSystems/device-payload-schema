@@ -715,6 +715,22 @@ def generate_mutants(
                 else:
                     kept.append(m)
             produced = kept
+        if "packed_bits" in field and field.get("type") != "repeat":
+            # A part of a packed element (PS-639, CR-2026-198) is read from its own bits
+            # into bytes of its type's width, big-endian, so its byte order is never read,
+            # and a wider type reads the same bits. A narrower one is refused at load.
+            kept = []
+            for m in produced:
+                widened = (
+                    m.operator == "WIDTH"
+                    and int_type(m.detail.split(" -> ")[1])[0]
+                    > int_type(m.detail.split(" -> ")[0])[0]
+                )
+                if m.operator == "ENDIAN" or widened:
+                    equivalent[m.operator] = equivalent.get(m.operator, 0) + 1
+                else:
+                    kept.append(m)
+            produced = kept
         if site.list_path and site.list_path[-1] == "tag_fields":
             # A TLV tag is matched on the raw read: modifiers and lookups on a tag
             # field are never applied, so changing them cannot change a decode.

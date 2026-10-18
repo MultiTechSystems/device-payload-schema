@@ -77,11 +77,12 @@ load:
 
 - name: packed_bits_wider_than_the_element
   schema: "name: t\nversion: 1\nfields:\n  - {name: v, type: repeat, count: 2, packed_bits: 9, element: {type: u8}}\n"
-  error: "Repeat 'v': a packed element is one field of an integer type at least 9 bits wide (PS-621)"
+  error: "Repeat 'v': a packed part is an integer type at least 9 bits wide (PS-621, PS-639)"
 
-- name: bit_offset_eight
-  schema: "name: t\nversion: 1\nfields:\n  - {name: v, type: repeat, count: 2, packed_bits: 4, bit_offset: 8, element: {type: u8}}\n"
-  error: "Repeat 'v': bit_offset is an integer from 0 to 7 (PS-621)"
+- name: bit_offset_negative
+  # CR-2026-198 allows any offset 0 or more, so the prototype's case is now -1.
+  schema: "name: t\nversion: 1\nfields:\n  - {name: v, type: repeat, count: 2, packed_bits: 4, bit_offset: -1, element: {type: u8}}\n"
+  error: "Repeat 'v': bit_offset is a bit count, 0 or more, or a $ reference (PS-621)"
 
 - name: no_count_or_byte_length
   schema: "name: t\nversion: 1\nfields:\n  - {name: v, type: repeat, until: end, packed_bits: 4, element: {type: u8}}\n"
@@ -89,16 +90,16 @@ load:
 
 - name: fields_in_place_of_element
   schema: "name: t\nversion: 1\nfields:\n  - {name: v, type: repeat, count: 2, packed_bits: 4, fields: [{name: a, type: u8}]}\n"
-  error: "Repeat 'v': a packed element is one field of an integer type at least 4 bits wide (PS-621)"
+  error: "Repeat 'v': a packed record declares packed_bits on each field, not on the repeat (PS-639)"
 
 - name: a_float_element
   schema: "name: t\nversion: 1\nfields:\n  - {name: v, type: repeat, count: 2, packed_bits: 4, element: {type: f32}}\n"
-  error: "Repeat 'v': a packed element is one field of an integer type at least 4 bits wide (PS-621)"
+  error: "Repeat 'v': a packed part is an integer type at least 4 bits wide (PS-621, PS-639)"
 
 - name: bit_offset_on_another_field
   schema: "name: t\nversion: 1\nfields:\n  - {name: b, type: u8, bit_offset: 2}\n"
-  error: "Field 'b': packed_bits and bit_offset belong to a repeat with `element` (PS-621)"
+  error: "Field 'b': packed_bits and bit_offset belong to a packed repeat (PS-621, PS-639)"
 
 - name: bit_offset_on_a_bool
   schema: "name: t\nversion: 1\nfields:\n  - {name: b, type: bool, bit_offset: 2}\n"
-  error: "Field 'b': packed_bits and bit_offset belong to a repeat with `element` (PS-621); did you mean `bit`?"
+  error: "Field 'b': packed_bits and bit_offset belong to a packed repeat (PS-621, PS-639); did you mean `bit`?"

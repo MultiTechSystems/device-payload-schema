@@ -170,14 +170,12 @@ func (ctx *EncodeContext) extendRaw(data []byte, carried int) {
 	}
 	if carried > 0 {
 		ctx.Buffer = append(ctx.Buffer, data[:len(data)-carried]...)
+		// What is still pending lies after `data` (the shared part was ORed into it
+		// above), so it follows the tail. It was ORed into the tail's first bytes, which
+		// no list reached until a packed repeat that consumes nothing (PS-640,
+		// CR-2026-198) came after a wider peek.
 		tail := append([]byte(nil), data[len(data)-carried:]...)
-		for i, b := range ctx.pending {
-			if i < len(tail) {
-				tail[i] |= b
-			} else {
-				tail = append(tail, b)
-			}
-		}
+		tail = append(tail, ctx.pending...)
 		ctx.pending = tail
 		return
 	}

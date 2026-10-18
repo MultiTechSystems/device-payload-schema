@@ -27,6 +27,9 @@ public static partial class SchemaParser
     static readonly HashSet<string> ReferenceKeys = new()
     {
         "ref", "a", "b", "field", "count", "byte_length", "carry", "instance", "unit", "identity", "interval",
+        // CR-2026-198 (PS-621): a field decoded before the repeat. The spec prototype does
+        // not list it; PS-621's text says the field is decoded before, as PS-539 checks.
+        "bit_offset",
     };
 
     /// <summary>Keys holding data, not declarations or references. A match's <c>default</c> is a field list.</summary>

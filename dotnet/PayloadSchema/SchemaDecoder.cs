@@ -2158,25 +2158,42 @@ public static class SchemaDecoder
         // decoded from those, so its sentinel, modifiers and lookup apply as to any element.
         // The read position then moves to the next byte, or to the end of byte_length where
         // that is further.
-        void Packed(int count, int byteLength)
+        // CR-2026-198 (PS-639, PS-640): a packed record's element is each field's bits in
+        // order, each laid out as its own type's bytes; `bit_offset` is any bit count or a
+        // reference to a field decoded before; with `consume: 0` the position stays put.
+        int PackedOffset()
         {
-            int bits = field.PackedBits, offset = field.BitOffset;
+            if (field.BitOffsetRef is not { } r) return field.BitOffset;
+            var key = r.TrimStart('$');
+            if (!ctx.Variables.TryGetValue(key, out var v))
+                throw new InvalidOperationException($"Repeat '{field.Name}': bit_offset variable not found: {key}");
+            return Cr189.BitCount(v) ?? throw new InvalidOperationException(Cr189.OffsetError(field.Name, r, v));
+        }
+
+        void Packed(int count, int byteLength, int offset)
+        {
+            int bits = field.PackedBits;
             int span = Math.Max((offset + count * bits + 7) / 8, byteLength);
             int at = ctx.Offset;
             var data = ctx.Data;
             if (at + span > data.Length)
                 throw BufferUnderflowException.Need(span, at, data.Length).Name(field.Name, "repeat");
-            int width = field.PackedWidth / 8;
+            int width = field.PackedParts.Sum(p => p.width) / 8;
             try
             {
                 for (int i = 0; i < count; i++)
                 {
-                    long raw = 0;
-                    for (int b = offset + i * bits; b < offset + (i + 1) * bits; b++)
-                        raw = (raw << 1) | (long)((data[at + (b >> 3)] >> (7 - (b & 7))) & 1);
-                    if (field.PackedSigned && raw >= (1L << (bits - 1))) raw -= 1L << bits;
                     var element = new byte[width];
-                    for (int k = width - 1; k >= 0; k--) { element[k] = (byte)raw; raw >>= 8; }
+                    int b = offset + i * bits, end = 0;
+                    foreach (var (partBits, partWidth, signed) in field.PackedParts)
+                    {
+                        long raw = 0;
+                        for (int e = b + partBits; b < e; b++)
+                            raw = (raw << 1) | (long)((data[at + (b >> 3)] >> (7 - (b & 7))) & 1);
+                        if (signed && raw >= (1L << (partBits - 1))) raw -= 1L << partBits;   // PS-353
+                        end += partWidth / 8;
+                        for (int k = end - 1; k >= end - partWidth / 8; k--) { element[k] = (byte)raw; raw >>= 8; }
+                    }
                     ctx.Data = element;
                     ctx.Offset = 0;
                     Element();
@@ -2185,7 +2202,7 @@ public static class SchemaDecoder
             finally
             {
                 ctx.Data = data;
-                ctx.Offset = at + span;
+                ctx.Offset = field.PackedInPlace ? at : at + span;
             }
         }
 
@@ -2211,7 +2228,7 @@ public static class SchemaDecoder
             if (count > maxIterations)
                 throw RepeatLimitError(field, maxIterations, $"count {count}", ctx.Offset, ctx.Data.Length);
             if (field.PackedBits > 0)
-                Packed(count, 0);                    // PS-621, PS-622 (CR-2026-189)
+                Packed(count, 0, PackedOffset());    // PS-621, PS-622 (CR-2026-189, CR-2026-198)
             else
                 for (int i = 0; i < count; i++)
                     Element();
@@ -2236,10 +2253,11 @@ public static class SchemaDecoder
             if (field.PackedBits > 0)
             {
                 // PS-621: as many elements as fit whole after the bit offset (CR-2026-189).
-                int count = Math.Max(byteLength * 8 - field.BitOffset, 0) / field.PackedBits;
+                int offset = PackedOffset();
+                int count = Math.Max(byteLength * 8 - offset, 0) / field.PackedBits;
                 if (count > maxIterations)
                     throw RepeatLimitError(field, maxIterations, $"count {count}", ctx.Offset, ctx.Data.Length);
-                Packed(count, byteLength);
+                Packed(count, byteLength, offset);
                 endOffset = ctx.Offset;
             }
             while (ctx.Offset < endOffset && iterations < maxIterations)

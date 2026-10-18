@@ -1726,7 +1726,7 @@ function encRepeatElementsBody(out, f, data, records, count, ctx) {
     // PS-551: the count and the list must agree; nothing is padded or cut.
     encFail("Repeat '" + name + "' is given " + records.length + " values for a count of " + count + " (PS-551)");
   }
-  if (f.packed_bits !== undefined) { encPackedElements(out, f, rf, records, ctx); return; }
+  if (encIsPacked(f)) { encPackedElements(out, f, rf, records, ctx, data); return; }
   for (var i = 0; i < records.length; i++) {
     var rec = records[i];
     if (rec === null || typeof rec !== "object" || Array.isArray(rec)) encFail("repeat field " + JSON.stringify(name) + ": expected each record to be a mapping");
@@ -1744,37 +1744,67 @@ function encPackedWidth(el) {                        // packed_element_width
   return m ? { width: +m[2], signed: m[1] !== "u" && m[1] !== "uint" } : null;
 }
 
-/* PS-623 (CR-2026-189): each element, inverted through its modifiers as any element is, in
+/* A packed repeat: `packed_bits` on the repeat (PS-621), or on a field of its record
+ * (PS-639, CR-2026-198). */
+function encIsPacked(f) {                            // is_packed
+  if (!f || f.type !== "repeat") return false;
+  if (f["packed_bits"] !== undefined) return true;
+  return Array.isArray(f.fields) && f.fields.some(function (m) { return m && typeof m === "object" && m.packed_bits !== undefined; });
+}
+
+/* PS-623 (CR-2026-189, CR-2026-198): each element's parts - the element, or each field of a
+ * packed record (PS-639) - inverted through their modifiers as any field is, in their
  * `packed_bits` bits, MSB first, from `bit_offset`; the last byte padded with 0 bits. The
  * bits before `bit_offset` are marked unwritten, so the bits the fields before it left
- * pending are ORed into them (PS-551, PS-622). A null is the raw sentinel (PS-544). */
-function encPackedElements(out, f, rf, records, ctx) {   // _encode_packed_elements
-  var name = f.name || "", pw = encPackedWidth(f.element), bits = f.packed_bits;
-  var off = f.bit_offset || 0, lo = pw.signed ? -Math.pow(2, bits - 1) : 0;
-  var hi = pw.signed ? Math.pow(2, bits - 1) - 1 : Math.pow(2, bits) - 1;
-  var el = {};
-  for (var k in rf[0]) el[k] = rf[0][k];
-  el.endian = "big";
+ * pending are ORed into them (PS-551, PS-622). A null is the raw sentinel (PS-544). A
+ * referenced offset comes from the input; a computed one is not there, and such a repeat
+ * is not encoded. */
+function encPackedElements(out, f, rf, records, ctx, data) {   // _encode_packed_elements
+  var name = f.name || "", off = f.bit_offset === undefined ? 0 : f.bit_offset;
+  if (typeof off === "string") {
+    var ov = data ? data[off.slice(1)] : undefined;
+    if (ov === undefined || ov === null) encFail("Repeat '" + name + "': its bit_offset " + off + " is not in the input; a repeat whose offset is computed decodes but is not encoded (PS-623)");
+    if (typeof ov !== "number" || ov !== Math.floor(ov) || ov < 0) encFail("Repeat '" + name + "': bit_offset " + off + " is " + (typeof ov === "string" ? "'" + ov + "'" : String(ov)) + ", not a bit count (PS-621)");
+    off = ov;
+  }
+  var parts = [], members = [];
+  rf.forEach(function (m) {
+    var pw = encPackedWidth(m), el = {};
+    for (var k in m) el[k] = m[k];
+    el.endian = "big";
+    members.push(el);
+    parts.push({ bits: f.packed_bits !== undefined ? f.packed_bits : m.packed_bits, signed: pw.signed });
+  });
   var stream = [];
   for (var i = 0; i < records.length; i++) {
     var rec = records[i];
     if (f.index) { var copy = {}; for (var c in rec) copy[c] = rec[c]; copy[f.index] = i + (f.index_base || 0); rec = copy; }
-    var element = [];
     var pushed = encPush(ctx, f.__ptr, "repeat", i);
-    try { encObject(element, [el], rec, ctx); } finally { encPop(ctx, pushed); }
-    var n = 0, neg = pw.signed && element.length && element[0] >= 128;
-    for (var b = 0; b < element.length; b++) n = n * 256 + (neg ? 255 - element[b] : element[b]);
-    if (neg) n = -n - 1;
-    if (n < lo || n > hi) encFail("Repeat '" + name + "': element " + i + " is " + n + ", which does not fit in " + bits + " bits (PS-623)");
-    var u = n < 0 ? n + Math.pow(2, bits) : n;
-    for (var bb = bits - 1; bb >= 0; bb--) stream.push(Math.floor(u / Math.pow(2, bb)) % 2);
+    try {
+      for (var pi = 0; pi < members.length; pi++) {
+        var bits = parts[pi].bits, signed = parts[pi].signed, element = [];
+        var lo = signed ? -Math.pow(2, bits - 1) : 0;
+        var hi = signed ? Math.pow(2, bits - 1) - 1 : Math.pow(2, bits) - 1;
+        encObject(element, [members[pi]], rec, ctx);
+        var n = 0, neg = signed && element.length && element[0] >= 128;
+        for (var b = 0; b < element.length; b++) n = n * 256 + (neg ? 255 - element[b] : element[b]);
+        if (neg) n = -n - 1;
+        if (n < lo || n > hi) encFail("Repeat '" + name + "': element " + i + " is " + n + ", which does not fit in " + bits + " bits (PS-623)");
+        var u = n < 0 ? n + Math.pow(2, bits) : n;
+        for (var bb = bits - 1; bb >= 0; bb--) stream.push(Math.floor(u / Math.pow(2, bb)) % 2);
+      }
+    } finally { encPop(ctx, pushed); }
   }
   var span = Math.floor((off + stream.length + 7) / 8);
   if (typeof f.byte_length === "number" && f.byte_length > span) span = f.byte_length;
   var base = out.length;
   for (var s = 0; s < span; s++) out.push(0);
   for (var t = 0; t < stream.length; t++) if (stream[t]) out[base + ((off + t) >> 3)] |= 1 << (7 - ((off + t) & 7));
-  if (off && span) { out.unc = out.unc || {}; out.unc[base] = 255 >> off; }
+  if (off && span) {
+    out.unc = out.unc || {};
+    for (var z = 0; z < span && z < (off >> 3); z++) out.unc[base + z] = 0;
+    if ((off >> 3) < span) out.unc[base + (off >> 3)] = 255 >> (off & 7);
+  }
 }
 
 function encRepeat(out, f, data, ctx, siblings) {     // _encode_repeat
@@ -1793,14 +1823,16 @@ function encRepeatBody(out, f, data, ctx, siblings) {
   var body = [];
   encRepeatElements(body, f, data, records, count, ctx);
   var bl = encRepeatSize(f, "byte_length", data, siblings);
-  if (f.packed_bits !== undefined) {
+  if (encIsPacked(f)) {
     // PS-623: padded to a byte_length the input gives, as to a literal one.
     while (bl !== null && body.length < bl) body.push(0);
     if (bl !== null && body.length !== bl) encFail("Repeat '" + name + "' encodes to " + body.length + " bytes for a byte_length of " + bl + " (PS-551)");
     var pb = out.length;
     for (var pi = 0; pi < body.length; pi++) out.push(body[pi]);
     if (body.unc) { out.unc = out.unc || {}; for (var uk in body.unc) out.unc[pb + (+uk)] = body.unc[uk]; }
-    return;
+    // PS-640 (CR-2026-198): with `consume: 0` the bytes stay pending, so the fields after
+    // it write over them, as a peek's are.
+    return f.consume === 0 ? body.length : 0;
   }
   if (bl !== null && body.length !== bl) encFail("Repeat '" + name + "' encodes to " + body.length + " bytes for a byte_length of " + bl + " (PS-551)");
   for (var i = 0; i < body.length; i++) out.push(body[i]);
@@ -2319,11 +2351,9 @@ function encEmit(fr, bytes, carried) {
   // A nested list's unconsumed tail stays pending here (Frame in the reference).
   for (var o = 0; o < merged.length - carried; o++) fr.out.push(merged[o]);
   if (carried) {
-    var tail = merged.slice(merged.length - carried);
-    for (var t = 0; t < fr.pend.length; t++) {
-      if (t < tail.length) tail[t] |= fr.pend[t]; else tail.push(fr.pend[t]);
-    }
-    fr.pend = tail;
+    // What is still pending lies after `bytes` (the shared part was ORed in above), so it
+    // follows the tail; it was ORed into the tail's first bytes (FrameBuffer.extend).
+    fr.pend = merged.slice(merged.length - carried).concat(fr.pend);
   }
 }
 
@@ -2917,7 +2947,7 @@ function encListIn(out, fields, data, ctx, top, entry) {
     if ("tlv" in f && !f.type) { encTlv(out, f, data, ctx); return; }
     if ("byte_group" in f) { encByteGroup(out, f, data, ctx); return; }
     if ("flagged" in f && !f.type) { return encFlagged(out, f.flagged, data, ctx); }
-    if (type === "repeat") { encRepeat(out, f, data, ctx, fields); return; }
+    if (type === "repeat") { return encRepeat(out, f, data, ctx, fields); }
     if (type === "object") {
       // Read back from the key a `name_from` object was reported under (CR-2026-030).
       var objKey = encResolveName(f, name, data);
@@ -5045,14 +5075,20 @@ function writeS(buf, pos, size, value, endian) {
             # Every member, constructs included: a bare `match` or `tlv` inside an
             # element has no name, and filtering on one dropped it from the codec.
             members = [m for m in element_members if isinstance(m, dict)]
-            # PS-621, PS-622 (CR-2026-189): a packed element is read from bits of the
-            # stream into bytes of its own width, big-endian, and decoded from those.
-            packed = 'packed_bits' in field
+            # PS-621, PS-622 (CR-2026-189), PS-639, PS-640 (CR-2026-198): each part of a
+            # packed element - the element, or each field of a packed record - is read
+            # from bits of the stream into bytes of its own width, big-endian, and decoded
+            # from those. `bit_offset` is a bit count or a reference; with `consume: 0` the
+            # read position does not move.
+            from schema_interpreter import is_packed
+            packed = is_packed(field)
             if packed:
-                from schema_interpreter import packed_element_width, underflow_label
-                p_width, p_signed = packed_element_width(field['element'])
-                p_bits, p_off = int(field['packed_bits']), int(field.get('bit_offset', 0))
-                members = [dict(members[0], endian='big')]
+                from schema_interpreter import packed_parts, underflow_label
+                p_parts = packed_parts(field)
+                p_bits = sum(part[0] for part in p_parts)
+                p_off = f'{arr}_off'
+                p_in_place = field.get('consume') == 0
+                members = [dict(m, endian='big') for m in members]
             lines.append(f'{i}  var {arr} = [];')
             # Iterations, not reported elements: present_if drops an element and it still
             # advances the index and counts toward `count` and `max` (PS-386).
@@ -5087,6 +5123,20 @@ function writeS(buf, pos, size, value, endian) {
             byte_length = field.get('byte_length')
             until = field.get('until')
             if packed:
+                offset = field.get('bit_offset', 0)
+                rname_js = json.dumps(str(field.get('name')))
+                if isinstance(offset, str):
+                    lines.append(f'{i}  var {arr}_off = {ref_to_js(offset)};')
+                    lines.append(f'{i}  if ({arr}_off === undefined || {arr}_off === null) '
+                                 f'throw new Error("Repeat \'" + {rname_js} + "\': bit_offset '
+                                 f'variable not found: " + {json.dumps(offset[1:])});')
+                    lines.append(f'{i}  if (typeof {arr}_off !== "number" || {arr}_off !== '
+                                 f'Math.floor({arr}_off) || {arr}_off < 0) throw new Error('
+                                 f'"Repeat \'" + {rname_js} + "\': bit_offset {offset} is " + '
+                                 f'(typeof {arr}_off === "string" ? "\'" + {arr}_off + "\'" : '
+                                 f'String({arr}_off)) + ", not a bit count (PS-621)");')
+                else:
+                    lines.append(f'{i}  var {arr}_off = {int(offset)};')
                 if count is not None:
                     bound = ref_to_js(count) if isinstance(count, str) else str(int(count))
                     lines.append(f'{i}  var {arr}_n = {bound};')
@@ -5186,18 +5236,23 @@ function writeS(buf, pos, size, value, endian) {
                 if size:
                     lines.append(f'{i}    if (buf.length - pos < {size}) {{ {ragged} }}')
             if packed:
-                # The element's bits, MSB first, sign-extended where its type is signed
-                # (PS-353), then as `p_width` bits of two's complement, big-endian.
-                lines.append(f'{i}    var {arr}_raw = 0;')
-                lines.append(f'{i}    for (var {arr}_b = {p_off} + {arr}_i * {p_bits}, {arr}_e = {arr}_b + {p_bits}; '
-                             f'{arr}_b < {arr}_e; {arr}_b++) {arr}_raw = {arr}_raw * 2 + '
-                             f'(({arr}_pbuf[{arr}_ppos + ({arr}_b >> 3)] >> (7 - ({arr}_b & 7))) & 1);')
-                if p_signed:
-                    lines.append(f'{i}    if ({arr}_raw >= {2 ** (p_bits - 1)}) {arr}_raw -= {2 ** p_bits};')
+                # Each part's bits, MSB first, sign-extended where its type is signed
+                # (PS-353), then as its width's bits of two's complement, big-endian.
                 lines.append(f'{i}    buf = []; pos = 0;')
-                lines.append(f'{i}    for (var {arr}_k = {p_width // 8 - 1}; {arr}_k >= 0; {arr}_k--) {{ '
-                             f'var {arr}_m = (({arr}_raw % 256) + 256) % 256; buf[{arr}_k] = {arr}_m; '
-                             f'{arr}_raw = ({arr}_raw - {arr}_m) / 256; }}')
+                lines.append(f'{i}    var {arr}_b = {p_off} + {arr}_i * {p_bits}, {arr}_raw, {arr}_e;')
+                at = 0
+                for part_bits, p_width, p_signed in p_parts:
+                    lines.append(f'{i}    {arr}_raw = 0;')
+                    lines.append(f'{i}    for ({arr}_e = {arr}_b + {part_bits}; '
+                                 f'{arr}_b < {arr}_e; {arr}_b++) {arr}_raw = {arr}_raw * 2 + '
+                                 f'(({arr}_pbuf[{arr}_ppos + ({arr}_b >> 3)] >> (7 - ({arr}_b & 7))) & 1);')
+                    if p_signed:
+                        lines.append(f'{i}    if ({arr}_raw >= {2 ** (part_bits - 1)}) '
+                                     f'{arr}_raw -= {2 ** part_bits};')
+                    lines.append(f'{i}    for (var {arr}_k = {at + p_width // 8 - 1}; {arr}_k >= {at}; {arr}_k--) {{ '
+                                 f'var {arr}_m = (({arr}_raw % 256) + 256) % 256; buf[{arr}_k] = {arr}_m; '
+                                 f'{arr}_raw = ({arr}_raw - {arr}_m) / 256; }}')
+                    at += p_width // 8
             self.indent += 1
             for member in members:
                 lines.extend(self._gen_decode_field(member))
@@ -5263,7 +5318,7 @@ function writeS(buf, pos, size, value, endian) {
             if packed:
                 # PS-622: the read position moves to the next byte boundary, or to the end
                 # of byte_length where that is further.
-                lines.append(f'{i}  pos = {arr}_ppos + {arr}_span;')
+                lines.append(f'{i}  pos = {arr}_ppos' + ('' if p_in_place else f' + {arr}_span') + ';')
                 byte_length = None
             if until == 'end' and count is None and byte_length is None:
                 lines.append(f'{i}  if ({arr}_i >= {arr}_max && pos < buf.length) {{ '

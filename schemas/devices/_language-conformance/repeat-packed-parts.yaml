@@ -1,0 +1,120 @@
+# Packed elements of several parts, any bit offset, and reading in place (PS-621 to
+# PS-623, PS-639, PS-640, CR-2026-198).
+#
+# Port 1 is TE Connectivity's peak list: each element is an 11-bit frequency, an 8-bit
+# magnitude and a signed 5-bit phase, end to end from the byte after the count. Port 2 is
+# Terabee's block: a 4-bit kind and a 3-bit zone, then two runs of 10-bit points at bits 7
+# and 27 of the same six bytes, each read without moving, and padding that moves past the
+# block. Port 3 takes its offset from the byte before the elements. Port 4 computes its
+# offset from the bytes left, so it decodes and is not encoded. Port 5 starts its elements
+# twelve bits in, past the first byte.
+name: packed_parts
+endian: big
+ports:
+  1:
+    fields:
+    - {name: peak_count, type: u8}
+    - name: peaks
+      type: repeat
+      count: $peak_count
+      fields:
+      - {name: freq, type: u16, packed_bits: 11}
+      - {name: mag, type: u8, packed_bits: 8}
+      - {name: phase, type: s8, packed_bits: 5}
+  2:
+    fields:
+    - {name: kind, type: "u48[44:47]"}
+    - {name: zone_id, type: "u48[41:43]"}
+    - {name: point_1, type: repeat, count: 2, packed_bits: 10, bit_offset: 7, consume: 0, element: {type: u16}}
+    - {name: point_2, type: repeat, count: 2, packed_bits: 10, bit_offset: 27, consume: 0, element: {type: u16}}
+    - {type: skip, length: 6}
+  3:
+    fields:
+    - {name: lead, type: u8}
+    - name: pairs
+      type: repeat
+      count: 2
+      bit_offset: $lead
+      fields:
+      - {name: a, type: u8, packed_bits: 4}
+      - {name: b, type: u8, packed_bits: 4}
+  4:
+    fields:
+    - {name: _bits, type: number, source: $remaining, mult: 8}
+    - {name: _pad, type: number, compute: {op: mod, a: $_bits, b: 13}}
+    - {name: _n, type: number, compute: {op: idiv, a: $_bits, b: 13}}
+    - name: points
+      type: repeat
+      count: $_n
+      bit_offset: $_pad
+      fields:
+      - {name: x, type: u8, packed_bits: 7}
+      - {name: y, type: u8, packed_bits: 6}
+  5:
+    fields:
+    - {name: deltas, type: repeat, count: 2, packed_bits: 6, bit_offset: 12, element: {type: s8}}
+test_vectors:
+- name: two_peaks
+  source: generated
+  fPort: 1
+  payload: "02 7d191d00a0ef"
+  expected:
+    peak_count: 2
+    peaks:
+    - {freq: 1000, mag: 200, phase: -3}
+    - {freq: 5, mag: 7, phase: 15}
+- name: one_peak_at_the_limits
+  source: generated
+  fPort: 1
+  payload: "01 ffe030"
+  expected:
+    peak_count: 1
+    peaks:
+    - {freq: 2047, mag: 1, phase: -16}
+- name: two_runs_in_one_block
+  source: generated
+  fPort: 2
+  payload: "3a2807800804"
+  expected: {kind: 3, zone_id: 5, point_1: [80, 60], point_2: [1, 2]}
+- name: two_runs_at_their_widest
+  source: generated
+  fPort: 2
+  payload: "c5ff8010080e"
+  expected: {kind: 12, zone_id: 2, point_1: [1023, 0], point_2: [513, 7]}
+- name: offset_from_the_lead_byte
+  source: generated
+  fPort: 3
+  payload: "03 024680"
+  expected:
+    lead: 3
+    pairs:
+    - {a: 1, b: 2}
+    - {a: 3, b: 4}
+- name: offset_past_a_whole_byte
+  source: generated
+  fPort: 3
+  payload: "09 00783480"
+  expected:
+    lead: 9
+    pairs:
+    - {a: 15, b: 0}
+    - {a: 6, b: 9}
+- name: computed_offset
+  source: generated
+  fPort: 4
+  payload: "50f00840c4"
+  expected:
+    points:
+    - {x: 80, y: 60}
+    - {x: 1, y: 2}
+    - {x: 3, y: 4}
+- name: twelve_bits_in
+  source: generated
+  fPort: 5
+  payload: "000fc5"
+  expected: {deltas: [-1, 5]}
+- name: twelve_bits_in_at_the_limits
+  source: generated
+  fPort: 5
+  payload: "0007e0"
+  expected: {deltas: [31, -32]}

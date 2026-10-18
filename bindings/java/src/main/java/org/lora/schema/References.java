@@ -29,7 +29,10 @@ final class References {
 
     /** Keys whose string value may be a {@code $} reference. */
     static final Set<String> REFERENCE_KEYS = Set.of("ref", "a", "b", "field", "count",
-            "byte_length", "carry", "instance", "unit", "identity", "interval");
+            "byte_length", "carry", "instance", "unit", "identity", "interval",
+            // CR-2026-198 (PS-621): a field decoded before the repeat. The spec prototype
+            // does not list it; PS-621's text says it is decoded before, as PS-539 checks.
+            "bit_offset");
 
     /** Keys holding data, not declarations or references. A match's {@code default} is a field list. */
     static final Set<String> DATA_KEYS = Set.of("lookup", "values", "else", "value");

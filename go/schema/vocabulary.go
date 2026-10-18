@@ -86,6 +86,9 @@ var fieldConstructKeys = []string{"$ref", "flagged", "tlv", "byte_group", "match
 // it (PS-334).
 func checkTypeVocabulary(raw map[string]any) error {
 	var check func(fields any, path string) error
+	// inRecord is set while the fields of a packed record are checked: each declares
+	// `packed_bits` as a part, not as a repeat (PS-639, CR-2026-198).
+	inRecord := false
 	// The cases of a `match` or `tlv` construct, whose bodies are field lists
 	// (PS-347, PS-441). A bare string such as `5: skip` was parsed as an empty case, so
 	// a match decoded nothing for it and a tlv dropped the case and skipped the tag.
@@ -110,6 +113,8 @@ func checkTypeVocabulary(raw map[string]any) error {
 		if !ok {
 			return nil
 		}
+		record := inRecord
+		inRecord = false
 		// Names (and variables) this list has declared an object or repeat under: a key
 		// template cannot write one (PS-532).
 		aggregates := map[string]bool{}
@@ -143,7 +148,7 @@ func checkTypeVocabulary(raw map[string]any) error {
 			case !hasType && !hasAnyKey(field, fieldConstructKeys):
 				return fmt.Errorf("%s: field declares no type", at)
 			}
-			if err := checkFieldRules(field, at); err != nil {
+			if err := checkFieldRules(field, at, record); err != nil {
 				return err
 			}
 			if template, ok := field["name_from"].(string); ok {
@@ -165,9 +170,12 @@ func checkTypeVocabulary(raw map[string]any) error {
 					aggregates[v] = true
 				}
 			}
+			_, partsOnRepeat := field["packed_bits"]
+			inRecord = isPackedRepeat(field) && !partsOnRepeat
 			if err := check(field["fields"], at+".fields"); err != nil {
 				return err
 			}
+			inRecord = false
 			if err := check(field["trailer"], at+".trailer"); err != nil {
 				return err
 			}
@@ -291,7 +299,7 @@ var literalForbidden = []string{"ref", "polynomial", "compute", "lookup", "trans
 var unsignedTypes = map[string]bool{"u8": true, "u16": true, "u24": true, "u32": true, "u64": true,
 	"uint8": true, "uint16": true, "uint24": true, "uint32": true, "uint64": true}
 
-func checkFieldRules(field map[string]any, at string) error {
+func checkFieldRules(field map[string]any, at string, inRecord bool) error {
 	// CR-2026-159: formula, encode_formula, and min/max on a field that is no repeat.
 	if err := checkWithdrawnField(field); err != nil {
 		return err
@@ -325,8 +333,9 @@ func checkFieldRules(field map[string]any, at string) error {
 	if err := checkBitLabels(field); err != nil {
 		return err
 	}
-	// PS-621 (CR-2026-189): packed_bits and bit_offset on a repeat of integers only.
-	if err := packedRepeatError(field); err != nil {
+	// PS-621 (CR-2026-189), PS-639, PS-640 (CR-2026-198): packed_bits and bit_offset on a
+	// packed repeat only.
+	if err := packedRepeatError(field, inRecord); err != nil {
 		return err
 	}
 	// PS-633 (CR-2026-195): flatten names an inner repeat; the element's others internal.

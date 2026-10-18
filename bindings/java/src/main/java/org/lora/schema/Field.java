@@ -364,6 +364,32 @@ public class Field {
         this.packedSigned = signed;
     }
 
+    /**
+     * CR-2026-198 (PS-639, PS-640): each part of one packed element, {bits, width in bits,
+     * 1 if signed} - the element, or each field of a packed record - in order; a bit_offset
+     * given as a {@code $} reference (PS-621); and whether the repeat reads in place
+     * ({@code consume: 0}). getPackedBits() is then the element's whole width in bits.
+     */
+    private java.util.List<int[]> packedParts = java.util.List.of();
+    private String packedOffsetRef;
+    private boolean packedInPlace;
+
+    public java.util.List<int[]> getPackedParts() { return packedParts; }
+    public void setPackedParts(java.util.List<int[]> parts) {
+        this.packedParts = parts;
+        int total = 0;
+        for (int[] p : parts) total += p[0];
+        this.packedBits = total;
+        if (parts.size() == 1) {
+            this.packedWidth = parts.get(0)[1];
+            this.packedSigned = parts.get(0)[2] == 1;
+        }
+    }
+    public String getPackedOffsetRef() { return packedOffsetRef; }
+    public void setPackedOffsetRef(String ref) { this.packedOffsetRef = ref; }
+    public boolean isPackedInPlace() { return packedInPlace; }
+    public void setPackedInPlace(boolean inPlace) { this.packedInPlace = inPlace; }
+
     public long getIndexBase() { return indexBase; }
     public void setIndexBase(long indexBase) { this.indexBase = indexBase; }
 
