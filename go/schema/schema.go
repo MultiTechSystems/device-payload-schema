@@ -1091,6 +1091,11 @@ func ParseSchema(data string) (*Schema, error) {
 	if err := checkOnRepeat(raw, order); err != nil {
 		return nil, err
 	}
+	// CR-2026-194: a tlv has no `default` case, and a one-field tag's "[*]" and "[!n]" keys
+	// are neither written twice (PS-437) nor two of one rank (PS-440).
+	if err := checkOneFieldTLVKeys(raw, order); err != nil {
+		return nil, err
+	}
 	// CR-2026-138: every field but a skip has a name (PS-553). Checked after the rules
 	// above, as the spec prototype does, so a construct's own error keeps its text.
 	if err := checkFieldNames(raw); err != nil {
@@ -3857,6 +3862,25 @@ func findTLVCaseKey(cases map[string][]Field, tag []int) string {
 		key := strconv.Itoa(tag[0])
 		if _, ok := cases[key]; ok {
 			return key
+		}
+		// A key written as a quoted number - '0x0309' or '777' - is text to yaml.v3,
+		// where an unquoted one arrives as an integer, so the comparison above missed
+		// it and the entry read as an unknown tag. Read it as a number, hex with a 0x
+		// prefix and decimal otherwise, as the reference's _match_case_pattern does;
+		// the encoder already parsed such a key with parseIntAny. Sorted, so a schema
+		// declaring one number twice picks the same case on every run.
+		keys := make([]string, 0, len(cases))
+		for candidate := range cases {
+			keys = append(keys, candidate)
+		}
+		sort.Strings(keys)
+		for _, candidate := range keys {
+			if strings.HasPrefix(strings.TrimSpace(candidate), "[") {
+				continue
+			}
+			if v, err := parseIntAny(candidate); err == nil && v == int64(tag[0]) {
+				return candidate
+			}
 		}
 	}
 

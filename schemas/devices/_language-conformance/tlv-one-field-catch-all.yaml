@@ -1,0 +1,42 @@
+# A one-field tag dispatched by an exact key, a negated key "[!n]" and the catch-all
+# "[*]" (PS-438, CR-2026-194). They are ranked exact, then negated, then any value
+# (PS-270), whatever order they are written in. They are written here in the reverse
+# order, so a decoder taking the first key that matches would read every entry as `raw`.
+#
+# Only the exact entry round-trips: a negated or catch-all key names no tag an encoder
+# could write.
+name: probe_one_field_catch_all
+endian: big
+fields:
+- tlv:
+    tag_size: 1
+    length_size: 1
+    cases:
+      "[*]":
+      - name: raw
+        type: hex
+        length: 1
+      "[!0x02]":
+      - name: other
+        type: hex
+        length: 1
+      1:
+      - name: temperature
+        type: s16
+        div: 10
+test_vectors:
+- name: exact_key_ranks_first
+  source: generated
+  payload: "01 02 00FA"
+  expected:
+    temperature: 25
+- name: negated_key_ranks_second
+  source: generated
+  payload: "05 01 CD"
+  expected:
+    other: "cd"
+- name: excluded_value_falls_to_any_value
+  source: generated
+  payload: "02 01 AB"
+  expected:
+    raw: "ab"

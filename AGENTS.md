@@ -3426,6 +3426,48 @@ improved. The Go, Java and C# corpus runners write per-vector reports only when
     -> 2166, C# 2154 -> 2167, Go 2171 -> 2184, plain 2143 -> 2156), `match` 160 -> 173, every vector
     round-tripping.
 
+- **CR-2026-194 (PS-436, PS-437, PS-438, PS-440, PS-270; la-payload-schema branch
+  `cr/0.5.8-apply-194`, for 0.5.8): one-field tlv wildcard keys, and no tlv `default`.**
+  - **What it does.** A one-field tag may use `"[*]"` (any value) and `"[!n]"` (any value but
+    n), ranked below every exact key whatever their declaration order (PS-270). A tlv has no
+    `default` case: its catch-all is `"[*]"`.
+  - **Ranking: measured before, all five already right.** Python's `_decode_tlv` sweeps the
+    specificities 0, 1, 2 through `_match_composite_key`; Go `findTLVCaseKey`, Java
+    `findTLVCaseKey` and C# `FindTLVCaseKey` try the exact key first and then sweep
+    `matchCompositeCaseKey`'s specificity; the TS013 codec ranks the same. The fixture, written
+    `"[*]"`, `"[!0x02]"`, `1` so declaration order would read every entry as the catch-all,
+    passed in all five unchanged. No code changed for it.
+  - **Load rejections, the prototype's text (`check_one_field_keys`), no prefix:**
+    ``A tlv has no `default` case; its catch-all is the key "[*]" (PS-436, PS-438)``;
+    `TLV keys '[*]' and '[ * ]' are the same key (PS-437)`; `TLV keys '[!1]' and '[!2]' have
+    the same rank and can match the same tag (PS-440)`. The first problem only, keys in
+    declaration order (Go reads it through `keyOrder`). Python `tlv_one_field_key_errors` from
+    `case_body_errors` (the interpreter, the validator and the TS013 generator), Go
+    `checkOneFieldTLVKeys` (`go/schema/cr194.go`, after `checkOnRepeat`), Java `OneFieldKeys`
+    from `checkCaseBodies`, C# `OneFieldKeys.cs` from `CheckCaseBodies`. Before, every
+    implementation accepted a tlv `default` key and ignored it with no warning (an unmatched tag
+    went to `unknown:`), and accepted both duplicate forms.
+  - **Departure from the prototype:** it rejects `default` only on a one-field tag; PS-438's
+    text rejects it in any tlv's cases, and so does this repository. PS-437 and PS-440 are
+    checked here only among a one-field tag's one-element keys, as the prototype does; a
+    composite tag's keys are still not checked for either (open).
+  - **C:** no wildcard keys, and `tools/schema_binary.py` refuses every tlv already; the C
+    harness files the fixture as "not a tag this interpreter can key on".
+  - **Found, not fixed:** Python never matches a quoted list (`"[1, 2]"`) on a one-field tag -
+    it reads any `[`-key as a composite one, whose element count differs - though PS-438 allows
+    it. No corpus or registry schema writes one.
+  - **Measured:** no corpus, library, example or registry (058e63f) schema declares a tlv
+    `default` or two one-element keys, so nothing is rejected. atomsenses aem-codec (85/85) and
+    as-es-codec (147/147) already passed in the reference; the spec's 83 -> 85 was its prototype.
+  - **Cases:** `tests/cr-2026-194-cases.yaml` (the prototype's five tests, the ranking also in
+    reverse declaration order, and the PS-437 negated spelling), read by
+    `test_cr_2026_194_cases.py` (reference, validator, generator and codec), Go
+    `cr194_test.go`, Java `CR2026194Test`, C# `CR2026_194Tests`. Fixture
+    `_language-conformance/tlv-one-field-catch-all.yaml`: decode floors 2942 -> 2945 in
+    Go, Java and C#; re-encode +1 everywhere, `tlv` (Python and Java 2327 -> 2328, C# 2328 ->
+    2329, Go 2345 -> 2346, plain 2317 -> 2318): only the exact-key vector round-trips, since a
+    negated or catch-all key names no tag to write.
+
 - **CR-2026-177 (PS-534 amended, PS-072 amended, PS-593 to PS-595; la-payload-schema main
   9e8957a, for 0.5.7): `nul` and `terminator` on `ascii`.**
   - **What it does.** An `ascii` field declares `nul: trailing|stop|drop` (default `trailing`,
@@ -4417,19 +4459,46 @@ improved. The Go, Java and C# corpus runners write per-vector reports only when
     `TagFieldsDefaultKeyTests`.
   - **Fixture** `_language-conformance/tag-fields-default-key.yaml`: port 1 a `u8`
     component, port 2 a `u16`, each read in its case through `ref: $_t`, a `var` and a
-    `template`; six vectors, all round-tripping. Floors: decode 2947 -> 2953 in Go, Java and
-    C#; re-encode +6 everywhere, `tlv` +6 (Python and Java 2328 -> 2334, C# 2329 -> 2335, Go
-    2346 -> 2352, plain 2318 -> 2324). Mutation score 100%.
+    `template`; six vectors, all round-tripping. Floors: decode +6 in Go, Java and C#
+    (2962 -> 2968 on top of #194); re-encode +6 everywhere, `tlv` +6 (Python and Java 2339 ->
+    2345, C# 2340 -> 2346, Go 2358 -> 2364, plain 2327 -> 2333). Mutation score 100%.
   - **Measured:** no other tlv in `schemas/`, `examples/` or the private registry (5463e01,
     97 tlvs with `tag_fields`) omits `tag_key` or keys a case without brackets, so nothing
     else changes; the Python round-trip failing set is identical before and after.
-  - **Found on the way, not fixed:** Go and Java match no tlv case key written as a quoted
-    hex string (`'0x0309':`) - Go's `findTLVCaseKey` compares the tag's decimal text and
-    parses only bracketed keys, so the entry is an unknown tag - while Python and C# match
-    it. A plain `0x0309:` is an integer to PyYAML, yaml.v3 and SnakeYAML and works in all
-    five; the fixture and the cases use that form. No corpus or registry key is quoted hex.
+  - **Found on the way, fixed by #194:** Go and Java matched no tlv case key written as a
+    quoted hex string (`'0x0309':`) - Go's `findTLVCaseKey` compared the tag's decimal text and
+    parsed only bracketed keys, so the entry was an unknown tag - while Python and C# matched
+    it. #194 (the quoted numeric tlv key entry below) made all five read it as the number it
+    spells. The fixture and the cases here use the plain `0x0309:` form, an integer to PyYAML,
+    yaml.v3 and SnakeYAML.
   - **Also:** `mk/gate-verdicts.mk` and `tools/verdicts-gate.py` used `.cache/` whatever
     `CACHE_DIR` said; both follow `CACHE_DIR` now, as the Makefile's other targets do.
+- **A quoted numeric tlv case key is the number it spells, in all five.** `'0x0309':` and
+  `'258':` reach an implementation as text where `0x0309:` reaches it as an integer (PyYAML,
+  yaml.v3 and SnakeYAML resolve the unquoted form; YamlDotNet keeps the text either way). Python
+  (`_match_case_pattern`: hex with a `0x` prefix, else decimal) and C# (hex keys normalised to
+  decimal in `SchemaParser`) read the quoted form as a number; **Go and Java did not**: their
+  `findTLVCaseKey` compared the tag's decimal text with the key and parsed only bracketed keys,
+  so the entry read as an unknown tag and its fields were never reported. Both now read a
+  single-component key that is not bracketed the same way, after the exact lookup (Go over the
+  keys sorted, Java in declaration order); Go and Java's encoders already parsed such a key
+  (`parseIntAny`). The generated codec and C (the harness packs the key through `int(..., 0)`)
+  were right already. The rule is the reference's, so `'010'` is decimal 10, not octal.
+  - **Fixture** `_language-conformance/tlv-quoted-number-key.yaml`: a two-byte tag, two quoted
+    hex keys, a quoted decimal key and an unquoted hex key, four vectors, each round-tripping.
+  - **Measured:** no tlv in `schemas/`, `examples/` or the private registry (c56cf0f) has a
+    quoted numeric key (the registry's quoted numbers are `match` cases, lookup keys and
+    expected values), so nothing else changes.
+- **milesight/em310-tilt's `angle_alarm_condition` (channel 0xFF or 0xFE, type 0x63)** is an
+  `ascii` of `length: 8`, `nul: stop`, `charset: utf-8` (PS-534, PS-624): the vendor's
+  `readUtf8` stops at the first 0x00, where Milesight's `readString` keeps it (registry LC-08).
+  Eight vectors from em310-tilt.js run under node, `source: vendor-codec`, with two-, three- and
+  four-byte characters. Two cannot round-trip: the 0xFE copy (an encoder writes the first case,
+  0xFF; Go's ordered API recovers it) and the bytes after a 0x00. Score unchanged, GOLD 90%.
+- **Floors:** decode 2950 -> 2962 in Go, Java and C# (em310-tilt 8, the fixture 4); re-encode
+  +10, all `tlv` (Python and Java 2329 -> 2339, C# 2330 -> 2340), Go ordered 2347 -> 2358 and
+  `tlv` 1623 -> 1634, plain 2319 -> 2327 (two vectors' tags are not ascending). C: 586 of 586
+  attempted (the fixture's four).
 
 ## Converting a vendor codec
 

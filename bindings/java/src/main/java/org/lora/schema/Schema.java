@@ -314,6 +314,10 @@ public class Schema {
                             + problem);
                 }
             }
+            if (construct.equals("tlv")) {
+                String problem = OneFieldKeys.error(body, cases);       // CR-2026-194
+                if (problem != null) throw new SchemaException(problem);
+            }
         }
     }
 
@@ -2939,6 +2943,20 @@ public class Schema {
         return result;
     }
 
+    /** A single-component tlv case key as a number: hex with a 0x prefix, else decimal. */
+    private static Long quotedNumberKey(String key) {
+        String text = key.trim();
+        if (text.isEmpty() || text.startsWith("[")) return null;
+        try {
+            if (text.length() > 2 && (text.startsWith("0x") || text.startsWith("0X"))) {
+                return Long.parseLong(text.substring(2), 16);
+            }
+            return Long.parseLong(text);
+        } catch (NumberFormatException e) {
+            return null;
+        }
+    }
+
     private String findTLVCaseKey(Map<String, List<Field>> cases, List<Integer> tag) {
         if (cases == null) return null;
         
@@ -2946,6 +2964,18 @@ public class Schema {
             String key = String.valueOf(tag.get(0));
             if (cases.containsKey(key)) {
                 return key;
+            }
+            // A key written as a quoted number - '0x0309' or '777' - is text to
+            // SnakeYAML, where an unquoted one arrives as an integer, so the lookup above
+            // missed it and the entry read as an unknown tag. Read it as a number, hex
+            // with a 0x prefix and decimal otherwise, as the reference's
+            // _match_case_pattern does; the encoder already parsed such a key. The cases
+            // keep declaration order, so the first such key wins, as in the reference.
+            for (String candidate : cases.keySet()) {
+                Long number = quotedNumberKey(candidate);
+                if (number != null && number == tag.get(0).longValue()) {
+                    return candidate;
+                }
             }
         }
         
