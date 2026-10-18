@@ -224,7 +224,8 @@ def corrections(schema):
     PS-514: such a vector says which fields the vendor codec gets wrong for its payload, so a
     comparison against that codec on the same payload skips exactly those fields. A field
     may be a `/`-joined path to a nested member (CR-2026-120); `skip_corrected` drops
-    exactly that member.
+    exactly that member. A vector expecting an error carries one entry without `field`
+    (PS-638), recorded as None: the codec's whole output for that payload is corrected.
     """
     out = {}
     for vec in (schema or {}).get("test_vectors") or []:
@@ -285,6 +286,10 @@ def compare(schema, payload, fport, expected):
     except Exception as exc:  # noqa: BLE001 - report, do not abort the sweep
         return ["our decoder raised %s: %s" % (type(exc).__name__, exc)]
     if not result.success:
+        if None in skip:
+            # PS-514/PS-638 (CR-2026-197): a vector expecting this error records the
+            # codec's whole output as corrected, so the failed decode is the schema's ruling.
+            return []
         return ["our decode failed: %s" % result.errors[:2]]
     got = {k: v for k, v in result.data.items() if not k.startswith("_")}
     expected, got = skip_corrected(expected or {}, got, skip)
