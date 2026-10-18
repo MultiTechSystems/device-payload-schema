@@ -3863,6 +3863,25 @@ func findTLVCaseKey(cases map[string][]Field, tag []int) string {
 		if _, ok := cases[key]; ok {
 			return key
 		}
+		// A key written as a quoted number - '0x0309' or '777' - is text to yaml.v3,
+		// where an unquoted one arrives as an integer, so the comparison above missed
+		// it and the entry read as an unknown tag. Read it as a number, hex with a 0x
+		// prefix and decimal otherwise, as the reference's _match_case_pattern does;
+		// the encoder already parsed such a key with parseIntAny. Sorted, so a schema
+		// declaring one number twice picks the same case on every run.
+		keys := make([]string, 0, len(cases))
+		for candidate := range cases {
+			keys = append(keys, candidate)
+		}
+		sort.Strings(keys)
+		for _, candidate := range keys {
+			if strings.HasPrefix(strings.TrimSpace(candidate), "[") {
+				continue
+			}
+			if v, err := parseIntAny(candidate); err == nil && v == int64(tag[0]) {
+				return candidate
+			}
+		}
 	}
 
 	// Try JSON array format
