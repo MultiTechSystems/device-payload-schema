@@ -1643,7 +1643,9 @@ public static class SchemaDecoder
                 {
                     // The reference reads a composite tag's components as fields, which
                     // records them (PS-490); a case member of the same name overwrites it.
-                    if (field.TagKey != null) ctx.Produced(tf);
+                    // tag_key defaults to the first tag field (Clause 4), so a tlv
+                    // declaring none reads and records its components all the same.
+                    ctx.Produced(tf);
                     int val;
                     if (tf.Type == FieldType.Bits)
                     {

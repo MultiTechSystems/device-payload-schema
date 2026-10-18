@@ -3869,6 +3869,25 @@ func findTLVCaseKey(cases map[string][]Field, tag []int) string {
 		if _, ok := cases[key]; ok {
 			return key
 		}
+		// A key written as a quoted number - '0x0309' or '777' - is text to yaml.v3,
+		// where an unquoted one arrives as an integer, so the comparison above missed
+		// it and the entry read as an unknown tag. Read it as a number, hex with a 0x
+		// prefix and decimal otherwise, as the reference's _match_case_pattern does;
+		// the encoder already parsed such a key with parseIntAny. Sorted, so a schema
+		// declaring one number twice picks the same case on every run.
+		keys := make([]string, 0, len(cases))
+		for candidate := range cases {
+			keys = append(keys, candidate)
+		}
+		sort.Strings(keys)
+		for _, candidate := range keys {
+			if strings.HasPrefix(strings.TrimSpace(candidate), "[") {
+				continue
+			}
+			if v, err := parseIntAny(candidate); err == nil && v == int64(tag[0]) {
+				return candidate
+			}
+		}
 	}
 
 	// Try JSON array format
@@ -4804,13 +4823,19 @@ func claimableFields(fields []Field, out []Field) []Field {
 // than one (PS-270), so it cannot be encoded.
 func encodeTLVTag(caseKey string, field Field, ctx *EncodeContext) ([]byte, error) {
 	text := strings.TrimSpace(caseKey)
-	if strings.HasPrefix(text, "[") {
+	// A tlv with tag_fields writes its tag through them whether or not the key is
+	// bracketed ("0x0307" against one u16 component); it wrote `tag_size` bytes.
+	if strings.HasPrefix(text, "[") || len(field.TagFields) > 0 {
 		text = strings.TrimSuffix(strings.TrimPrefix(text, "["), "]")
 		parts := strings.Split(text, ",")
 		if len(field.TagFields) == 0 {
 			return nil, fmt.Errorf("composite tlv case %q with no tag_fields", caseKey)
 		}
 		names := tagKeyNames(field.TagKey)
+		if len(names) == 0 {
+			// tag_key defaults to the first tag field (Clause 4).
+			names = []string{field.TagFields[0].Name}
+		}
 		if len(names) != len(parts) {
 			return nil, fmt.Errorf("tlv case %q does not match tag_key %v", caseKey, names)
 		}

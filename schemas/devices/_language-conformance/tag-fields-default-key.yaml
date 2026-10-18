@@ -1,0 +1,116 @@
+# A tlv that declares `tag_fields` and no `tag_key`: the key defaults to the first tag
+# field (Clause 4), and each component binds by name and by `var` as the entry's tag is
+# read (PS-536, PS-523). The Python reference read `tag_fields` only beside a `tag_key`,
+# so here it read `tag_size` bytes (one) and bound nothing: `$_t` and `${_t}` were unbound
+# in every case, and the u16 tag of port 2 was read as its first byte. Its encoder, the
+# generated codec's and C#'s wrote `tag_size` bytes; Go's did for an unbracketed key.
+name: probe_tag_fields_default_key
+endian: big
+ports:
+  1:
+    fields:
+    - tlv:
+        tag_fields:
+        - name: _t
+          type: u8
+          var: tt
+        length_size: 0
+        cases:
+          3:
+          - name: a
+            type: u8
+          9:
+          - name: b
+            type: u8
+          - name: tag_ref
+            type: number
+            ref: $_t
+          - name: tag_var
+            type: number
+            ref: $tt
+            mult: 10
+          - name: tag_text
+            type: string
+            template: "command ${_t}"
+  2:
+    fields:
+    - tlv:
+        tag_fields:
+        - name: _t
+          type: u16
+          var: tt
+        length_size: 0
+        cases:
+          0x0307:
+          - name: a
+            type: u8
+          0x0309:
+          - name: b
+            type: u8
+          - name: tag_ref
+            type: number
+            ref: $_t
+          - name: tag_var
+            type: number
+            ref: $tt
+            mult: 10
+          - name: tag_text
+            type: string
+            template: "command ${tt}"
+test_vectors:
+- name: u8_tag_plain_case
+  source: spec-example
+  fPort: 1
+  payload: "03 07"
+  expected:
+    a: 7
+    b: null
+    tag_ref: null
+- name: u8_tag_bound_in_case
+  source: spec-example
+  fPort: 1
+  payload: "09 AA"
+  expected:
+    a: null
+    b: 170
+    tag_ref: 9
+    tag_var: 90
+    tag_text: "command 9"
+- name: u8_tag_both_entries
+  source: spec-example
+  fPort: 1
+  payload: "03 07 09 AA"
+  expected:
+    a: 7
+    b: 170
+    tag_ref: 9
+    tag_var: 90
+    tag_text: "command 9"
+- name: u16_tag_plain_case
+  source: spec-example
+  fPort: 2
+  payload: "0307 07"
+  expected:
+    a: 7
+    b: null
+    tag_ref: null
+- name: u16_tag_bound_in_case
+  source: spec-example
+  fPort: 2
+  payload: "0309 AA"
+  expected:
+    a: null
+    b: 170
+    tag_ref: 777
+    tag_var: 7770
+    tag_text: "command 777"
+- name: u16_tag_both_entries
+  source: spec-example
+  fPort: 2
+  payload: "0307 07 0309 AA"
+  expected:
+    a: 7
+    b: 170
+    tag_ref: 777
+    tag_var: 7770
+    tag_text: "command 777"

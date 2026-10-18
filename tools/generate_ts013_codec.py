@@ -1955,14 +1955,15 @@ function encCaseTakes(f, value) {
 function has_(o, k) { return Object.prototype.hasOwnProperty.call(o, k); }
 
 function encTlvTag(out, key, tlv, ctx) {              // _encode_tlv_tag
-  if (tlv.tag_fields && tlv.tag_key) {
+  if (tlv.tag_fields && tlv.tag_fields.length) {
     var text = String(key).trim();
     if (text.charAt(0) === "[") text = text.charAt(text.length - 1) === "]" ? text.slice(1, -1) : text.slice(1);
     var parts = text.split(",").map(function (p) { return p.trim().replace(/^["']|["']$/g, ""); });
     if (parts.some(function (p) { return p === "*" || p.charAt(0) === "!"; })) {
       encFail("TLV case " + JSON.stringify(key) + " matches a range of tags, so encoding cannot choose one");
     }
-    var names = Array.isArray(tlv.tag_key) ? tlv.tag_key : [tlv.tag_key];
+    // tag_key defaults to the first tag field (Clause 4), as tlv_tag_key does.
+    var names = !tlv.tag_key ? [tlv.tag_fields[0].name] : Array.isArray(tlv.tag_key) ? tlv.tag_key : [tlv.tag_key];
     if (parts.length !== names.length) encFail("TLV case " + JSON.stringify(key) + " does not match tag_key");
     var values = {};
     for (var i = 0; i < names.length; i++) values[names[i]] = encParseInt0(parts[i]);
