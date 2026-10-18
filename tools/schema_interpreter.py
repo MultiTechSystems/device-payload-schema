@@ -430,7 +430,7 @@ def echo_value(field_def, span: bytes) -> Any:
     if ftype == 'hex':
         return span.hex()
     value = decode_ascii(field_def.get('name'), span, [], 'trailing',
-                         field_def.get('charset'))
+                         field_def.get('charset'), field_def.get('trim') is True)
     if field_def.get('numeral'):
         value = decode_numeral(field_def.get('name'), value, field_def['numeral'])
     return value
@@ -469,6 +469,9 @@ def check_echoes(frame) -> None:
                 found = None
             if found is not None and normalize_output(found) == normalize_output(given):
                 continue
+            if isinstance(field_def, dict) and 'source' in field_def:      # PS-637
+                raise ValueError(frame_source_mismatch(field_def.get('name'), given,
+                                                       normalize_output(found)))
             written = echo_text(found) if found is not None else 'too few bytes'
         rule = 'PS-604' if is_peeked_number(field_def) else 'PS-589'
         raise ValueError(f"Field '{field_def.get('name')}' is given {echo_text(given)}, but "
@@ -1965,7 +1968,7 @@ def arithmetic_schema_errors(node, _top=True):
 
 
 #: CR-2026-110 (PS-525): how a name reported by more than one tlv entry combines.
-ON_REPEAT = ('collect', 'merge', 'last')
+ON_REPEAT = ('collect', 'merge', 'last', 'concat')                    # concat: PS-632
 
 #: The constructs whose fields report into the enclosing object, so a tlv case reports
 #: their names as its own (the spec prototype's STRUCTURAL_KEYS).
@@ -2662,7 +2665,7 @@ def apply_nul_mode(text: str, mode: str) -> str:
 
 
 def decode_ascii(name: Any, raw: bytes, warnings: List[str], nul: str = 'trailing',
-                 charset: Optional[str] = None) -> str:
+                 charset: Optional[str] = None, trim: bool = False) -> str:
     """PS-534, PS-538: each byte is the ISO 8859-1 character of the same number, so the
     value is lossless and re-encodes to the same bytes (PS-537); the field's `nul` mode
     (trailing 0x00 padding by default) is applied. A byte above 0x7F is reported with
@@ -2670,17 +2673,45 @@ def decode_ascii(name: Any, raw: bytes, warnings: List[str], nul: str = 'trailin
 
     PS-624 (CR-2026-190): with `charset: utf-8` the bytes the `nul` mode leaves are decoded
     as UTF-8, with no warning; a sequence that is not well formed is an error naming the
-    field and the position of its first bad byte within the text."""
+    field and the position of its first bad byte within the text.
+
+    PS-641 (CR-2026-199): with `trim` the text then loses leading and trailing U+0020,
+    U+0009, U+000A and U+000D, after the byte rules and the character set."""
     if charset == 'utf-8':
         kept = apply_nul_mode(raw.decode('latin-1'), nul).encode('latin-1')
         try:
-            return kept.decode('utf-8')
+            text = kept.decode('utf-8')
         except UnicodeDecodeError as exc:
             raise FieldError(f"Field '{name}': the bytes are not well-formed UTF-8 from "
                              f"byte {exc.start} of the text (PS-624)") from None
-    if any(byte > 0x7F for byte in raw):
-        warnings.append(ASCII_HIGH_BYTE_WARNING.format(name))
-    return apply_nul_mode(raw.decode('latin-1'), nul)
+    else:
+        if any(byte > 0x7F for byte in raw):
+            warnings.append(ASCII_HIGH_BYTE_WARNING.format(name))
+        text = apply_nul_mode(raw.decode('latin-1'), nul)
+    return text.strip(TRIM_CHARACTERS) if trim else text
+
+
+#: PS-641 (CR-2026-199): the whitespace `trim: true` removes from both ends of a text.
+TRIM_CHARACTERS = ' \t\n\r'
+
+
+def trim_errors(node, _top=True):
+    """PS-641: `trim` is true or false, on an ascii field; anything else is refused, in the
+    spec prototype's text. Walked over the whole schema."""
+    errors = []
+    if isinstance(node, list):
+        for item in node:
+            errors.extend(trim_errors(item, False))
+    elif isinstance(node, dict):
+        if 'type' in node and 'trim' in node:
+            if node.get('type') != 'ascii' or not isinstance(node['trim'], bool):
+                errors.append(f"Field '{node.get('name')}': trim is true or false, on an "
+                              f"ascii field (PS-641)")
+        for key, value in node.items():
+            if _top and key == 'test_vectors':
+                continue
+            errors.extend(trim_errors(value, False))
+    return errors
 
 
 #: PS-624 (CR-2026-190): the one value `charset` takes, on an ascii field only.
@@ -2704,6 +2735,47 @@ def charset_errors(node, _top=True):
                 continue
             errors.extend(charset_errors(value, False))
     return errors
+
+
+#: PS-635 (CR-2026-196): the values of the frame a `type: number` field may report.
+FRAME_SOURCES = ('$fPort', '$payloadLength', '$remaining')
+
+
+def frame_source_message(name) -> str:
+    """PS-635's load-time rejection, in the spec prototype's text."""
+    return (f"Field '{name}': source is one of {', '.join(FRAME_SOURCES)}, on a type: "
+            f"number field that computes nothing else (PS-635)")
+
+
+def frame_source_errors(node, _top=True) -> List[str]:
+    """PS-635 (CR-2026-196), at load: `source` names the FPort, the payload length or the
+    bytes remaining, on a `type: number` (or `integer`) field that declares no `value`,
+    `compute`, `ref`, `polynomial` or `time` `parts`. Walked over the whole schema; a test
+    vector's provenance `source:` and a `metadata.include` entry's carry no `type`."""
+    errors = []
+    if isinstance(node, list):
+        for item in node:
+            errors.extend(frame_source_errors(item, False))
+    elif isinstance(node, dict):
+        if 'type' in node and 'source' in node:
+            clash = [k for k in ('value', 'compute', 'ref', 'polynomial') if k in node]
+            if isinstance(node.get('time'), dict) and 'parts' in node['time']:
+                clash.append('time parts')
+            if str(node.get('type')).lower() not in COMPUTED_TYPES \
+                    or node['source'] not in FRAME_SOURCES or clash:
+                errors.append(frame_source_message(node.get('name')))
+        for key, value in node.items():
+            if _top and key == 'test_vectors':
+                continue
+            errors.extend(frame_source_errors(value, False))
+    return errors
+
+
+def frame_source_mismatch(name, given, found) -> str:
+    """PS-637's rejection of a given value the finished frame does not bear out."""
+    gives = format_lookup_value(found) if isinstance(found, (int, float)) and \
+        not isinstance(found, bool) else ('no FPort' if found is None else echo_text(found))
+    return f"Field '{name}' is given {echo_text(given)}, but the frame gives {gives} (PS-637)"
 
 
 def terminated_span(field_def: Dict[str, Any], buf: bytes, pos: int) -> Tuple[int, int]:
@@ -3040,17 +3112,29 @@ def bitfield_part_errors(node, _top=True):
     return errors
 
 
+def ascii_padding(field_def: Dict[str, Any]) -> bytes:
+    """PS-642 (CR-2026-199): a `trim: true` ascii field that declares no `nul` pads with
+    U+0020 spaces; every other text pads with 0x00 (PS-537)."""
+    if field_def.get('type') == 'ascii' and field_def.get('trim') is True \
+            and 'nul' not in field_def:
+        return b' '
+    return b'\x00'
+
+
 def encode_ascii(name: Any, value: Any, length: Optional[int],
                  warnings: List[str], nul: str = 'trailing',
                  terminator: Optional[int] = None,
                  consume_terminator: bool = True,
-                 charset: Optional[str] = None) -> bytes:
+                 charset: Optional[str] = None,
+                 pad: bytes = b'\x00') -> bytes:
     """PS-537: a character above U+00FF, or a value longer than a fixed `length`, is
     rejected naming the field; U+0080..U+00FF is written as the byte of the same number
     with a warning; a short value is padded with 0x00. `length` is None where the field's
     length is not fixed (`remaining`, a reference), and the value then supplies it.
     PS-625 (CR-2026-190): with `charset: utf-8` the value is written as UTF-8, with no
-    warning, and `length` counts its bytes."""
+    warning, and `length` counts its bytes.
+    PS-642 (CR-2026-199): `pad` is the padding byte, a space for a `trim: true` field
+    that declares no `nul`."""
     text = str(value)
     utf8 = charset == 'utf-8'
     if not utf8 and any(ord(ch) > 0xFF for ch in text):
@@ -3081,7 +3165,7 @@ def encode_ascii(name: Any, value: Any, length: Optional[int],
         return encoded + bytes([terminator])                           # PS-595, PS-620
     if length is None:
         return encoded
-    return encoded + b'\x00' * (length - len(encoded))
+    return encoded + pad * (length - len(encoded))
 
 
 #: The token a mapping's `default` substitutes with the unmapped value (PS-406).
@@ -4195,6 +4279,42 @@ def packed_repeat_errors(node, _top=True):
     return errors
 
 
+def flatten_error(node):
+    """PS-633 (CR-2026-195) for one field: `flatten` names an inner repeat among the
+    element's fields of a repeat with `fields`, whose other element fields are internal.
+    The spec prototype's `check_flatten`, in its text."""
+    where = f"Repeat '{node.get('name')}'"
+    target = node['flatten']
+    fields = node.get('fields') if node.get('type') == 'repeat' else None
+    inner = [f for f in fields or [] if isinstance(f, dict) and f.get('name') == target]
+    if not isinstance(fields, list) or not inner or inner[0].get('type') != 'repeat':
+        return f"{where}: flatten names a repeat among its element's fields (PS-633)"
+    others = [f.get('name') for f in fields if isinstance(f, dict) and 'type' in f
+              and f.get('name') != target and not str(f.get('name', '_')).startswith('_')]
+    if others:
+        return (f"{where}: with flatten, its element's other fields are internal; "
+                f"{', '.join(map(repr, others))} would be reported (PS-633)")
+    return None
+
+
+def flatten_errors(node, _top=True):
+    """flatten_error over the whole schema (PS-633)."""
+    errors = []
+    if isinstance(node, list):
+        for item in node:
+            errors.extend(flatten_errors(item, False))
+    elif isinstance(node, dict):
+        if 'type' in node and 'flatten' in node:
+            error = flatten_error(node)
+            if error:
+                errors.append(error)
+        for key, value in node.items():
+            if _top and key == 'test_vectors':
+                continue
+            errors.extend(flatten_errors(value, False))
+    return errors
+
+
 def packed_layout(field_def, count, byte_length=None):
     """(bits, offset, span in bytes) of a packed repeat of `count` elements (PS-622): the
     elements end at the next byte boundary, or at the end of `byte_length` where that is
@@ -4849,8 +4969,11 @@ def schema_iterator_errors(schema):
     errors.extend(numeral_errors(schema))                            # PS-560
     errors.extend(bit_labels_errors(schema))                         # PS-616, PS-617
     errors.extend(packed_repeat_errors(schema))                      # PS-621
+    errors.extend(flatten_errors(schema))                            # PS-633
     errors.extend(ascii_text_errors(schema))                         # PS-534, PS-593
     errors.extend(charset_errors(schema))                            # PS-624
+    errors.extend(frame_source_errors(schema))                       # PS-635
+    errors.extend(trim_errors(schema))                               # PS-641
     errors.extend(checksum_errors(schema))                           # PS-585
     errors.extend(checksum_placement_errors(schema))                 # PS-608
     errors.extend(bitfield_part_errors(schema))                      # PS-430
@@ -6343,6 +6466,19 @@ def normalize(decoded: Dict[str, Any], schema: Dict[str, Any],
 
 
 
+def tlv_tag_key(tlv_def: Dict[str, Any]) -> Any:
+    """A tlv's `tag_key`: as declared, else the first `tag_fields` entry's name (Clause 4,
+    PS-536). None where the tlv has no `tag_fields`."""
+    tag_fields = tlv_def.get('tag_fields')
+    if not tag_fields:
+        return None
+    tag_key = tlv_def.get('tag_key')
+    if tag_key:
+        return tag_key
+    first = tag_fields[0]
+    return [first.get('name', 'unknown')] if isinstance(first, dict) else None
+
+
 class SchemaInterpreter:
     """
     Runtime interpreter for Payload Schema definitions.
@@ -7152,7 +7288,8 @@ class SchemaInterpreter:
                 raise BufferUnderflow.need(length, pos, len(buf))
             value = decode_ascii(field_def.get('name'), buf[pos:pos + length],
                                  self._nested_warnings, field_def.get('nul', 'trailing'),
-                                 field_def.get('charset'))              # PS-624
+                                 field_def.get('charset'),              # PS-624
+                                 field_def.get('trim') is True)         # PS-641
             if field_def.get('numeral'):                                 # PS-594
                 value = decode_numeral(field_def.get('name'), value, field_def['numeral'])
             if is_echo(field_def):                                       # PS-588
@@ -7326,6 +7463,14 @@ class SchemaInterpreter:
                 if scratch.errors:
                     raise reraise_text(scratch.errors[0])
                 records = self._pending_records
+                if field_def.get('flatten'):
+                    # PS-633 (CR-2026-195): the element reports its inner repeat's members
+                    # in place of itself, read from the element or, where the inner
+                    # repeat is internal, from its scope.
+                    target = field_def['flatten']
+                    members = (scratch.data[target] if target in scratch.data
+                               else self._variables.get(target))
+                    records = None
                 for carried in carry_state:
                     if carried in self._variables:
                         carry_state[carried] = self._variables[carried]
@@ -7344,7 +7489,9 @@ class SchemaInterpreter:
                 if self._trace is not None:
                     self._trace.pop(pushed)
             iterations += 1
-            if keep and records:
+            if keep and field_def.get('flatten'):
+                result.extend(members if isinstance(members, list) else [])
+            elif keep and records:
                 # PS-541: the records, as consecutive elements, in place of the element;
                 # the element's other reported fields go into each, before its own.
                 result.extend({**scratch.data, **record} for record in records)
@@ -7942,6 +8089,60 @@ class SchemaInterpreter:
 
         return result, pos
     
+    def _frame_source(self, field_def: Dict[str, Any], buf: bytes, pos: int,
+                      warnings: List[str]) -> Any:
+        """PS-635 (CR-2026-196): the integer `source` names - the FPort, the payload's
+        length, or the bytes from `pos` to the end of `buf`, which already ends at any
+        reserve or tlv entry's end, as a `remaining` match counts (PS-414) - through the
+        field's modifiers, once. PS-636: with no FPort, OMITTED with a warning."""
+        self._produced(field_def)
+        source = field_def['source']
+        frame = getattr(self, '_frame', None) or {}
+        raw = max(0, len(buf) - pos) if source == '$remaining' else frame.get(source[1:])
+        if raw is None:
+            warnings.append(f"Field '{field_def.get('name')}': no FPort was given, so it "
+                            f"is omitted (PS-636)")
+            return OMITTED
+        return self._apply_modifiers(raw, field_def)
+
+    def _frame_source_value(self, field_def: Dict[str, Any], raw: Optional[int]) -> Any:
+        """PS-637: what a `source` field reports for `raw` on the encode side, through its
+        modifiers, with the decode's tables kept aside; None for no value."""
+        if raw is None:
+            return None
+        tables = {k: getattr(self, k, None)
+                  for k in ('_lookup_numbers', '_pre_lookup', '_labels')}
+        self._lookup_numbers, self._pre_lookup = IdentityTable(), IdentityTable()
+        try:
+            value = self._apply_modifiers(raw, field_def)
+            return None if value is OMITTED else normalize_output(value)
+        finally:
+            for key, table in tables.items():
+                if table is None:
+                    if hasattr(self, key):
+                        delattr(self, key)
+                else:
+                    setattr(self, key, table)
+
+    def _encode_frame_source(self, field_def: Dict[str, Any], data: Dict[str, Any],
+                             out: 'FrameBuffer') -> None:
+        """PS-637 (CR-2026-196): a `source` field writes nothing. A value the input gives
+        is checked against the finished frame: `$remaining` against the bytes after its
+        position where its frame closes (as a non-consuming byte string is, PS-589), and
+        `$payloadLength` and `$fPort` against the whole payload and the FPort the encode
+        reports, once it is finished."""
+        name = field_def.get('name')
+        if not name or data.get(name) is None:
+            return
+        given = data[name]
+        if field_def['source'] == '$remaining':
+            out.echoes.append((len(out.buf), field_def, given, None,
+                               lambda span: self._frame_source_value(field_def, len(span))))
+        else:
+            if not hasattr(self, '_frame_source_checks'):
+                self._frame_source_checks = []
+            self._frame_source_checks.append((field_def, given))
+
     def _decode_computed_field(self, field_def: Dict[str, Any]) -> Optional[float]:
         """Decode a computed field (type: number) - ref, polynomial, compute, guard.
 
@@ -8428,7 +8629,10 @@ class SchemaInterpreter:
         unknown_mode = tlv_def.get('unknown', 'skip')
         cases = tlv_def.get('cases', {})
         tag_fields = tlv_def.get('tag_fields')
-        tag_key = tlv_def.get('tag_key')
+        # `tag_key` defaults to the first tag field (Clause 4). Without the default a tlv
+        # declaring `tag_fields` and no `tag_key` read `tag_size` bytes and bound no
+        # component, so `$t` was unbound in every case and a u16 component misread.
+        tag_key = tlv_tag_key(tlv_def)
         
         result = {}
         channels = []
@@ -8446,14 +8650,13 @@ class SchemaInterpreter:
             # PS-477: a tag is never partly read. Fewer bytes than the tag at the start of
             # an entry is an error identifying the tlv; this used to stop the loop and
             # report a complete decode. A composite tag's width is its tag_fields'.
-            width = (fixed_element_size(tag_fields) if tag_fields and tag_key else None) \
-                or tag_size
+            width = (fixed_element_size(tag_fields) if tag_fields else None) or tag_size
             if pos + width > len(buf):
                 raise ValueError(
                     f"tlv entry at offset {pos}: {len(buf) - pos} byte(s) remain, fewer "
                     f"than its {width}-byte tag (PS-477)")
             
-            if tag_fields and tag_key:
+            if tag_fields:
                 # Composite tag: read sub-fields
                 tag_parts = {}
                 tag_start = pos
@@ -8627,6 +8830,10 @@ class SchemaInterpreter:
             if merge:
                 for k, v in tag_result.items():
                     mode = modes.get(k, 'collect')
+                    if mode == 'concat':
+                        # PS-632 (CR-2026-195): always one array, a list value spliced.
+                        result.setdefault(k, []).extend(v if isinstance(v, list) else [v])
+                        continue
                     if k not in result:
                         result[k] = v
                     elif mode != 'collect':                         # PS-525
@@ -8809,6 +9016,9 @@ class SchemaInterpreter:
         self._producers = {}
         self._meta_depth = 0
         
+        # PS-635 (CR-2026-196): the frame a `source` field reports from.
+        self._frame = {'fPort': fPort, 'payloadLength': len(payload)}
+
         pos = 0
         fields = self._resolve_fields(fPort)
         
@@ -9093,7 +9303,11 @@ class SchemaInterpreter:
             # operation - the defect CR-2026-006 removed from bitfields.
             if field_type in COMPUTED_TYPES:
                 try:
-                    if is_time_field(field_def) and 'parts' in field_def['time']:
+                    if 'source' in field_def:
+                        # PS-635, PS-636 (CR-2026-196): a value of the frame, not of
+                        # its bytes; with no FPort, `$fPort` is omitted with a warning.
+                        value = self._frame_source(field_def, payload, pos, result.warnings)
+                    elif is_time_field(field_def) and 'parts' in field_def['time']:
                         # PS-614 (CR-2026-186): the instant its parts name. Parts naming
                         # no date omit the field with a warning (amended 2026-10-15).
                         try:
@@ -9423,17 +9637,23 @@ class SchemaInterpreter:
         self._ps564 = []            # PS-564: each `remaining` match's chosen case
         self._ps564_depth = 0       # inside a tlv or repeat, where it is not checked
         self._checksum_apart = 0    # inside a tlv entry or repeat element (CR-2026-185)
+        self._frame_source_checks = []      # PS-637: (field, given) of $payloadLength, $fPort
         if self._load_errors:
             result.errors.extend(self._load_errors)
             return result
 
         # PS-581: which port entry this encode uses, and the FPort it reports.
+        caller_fport = fPort
         try:
             fPort = self._choose_encode_port(fPort, direction)
         except ValueError as e:
             result.errors.append(str(e))
             return result
-        if fPort is None:
+        if fPort is None and caller_fport is not None and not self.schema.get('ports'):
+            # PS-581: a schema without `ports` reports the caller's FPort. It reported
+            # the document's alone, which PS-637's check of a `$fPort` field reads.
+            result.fport = caller_fport
+        elif fPort is None:
             doc = self.schema.get('fPort', self.schema.get('fport'))
             result.fport = doc if isinstance(doc, int) and not isinstance(doc, bool) else None
         else:
@@ -9579,6 +9799,9 @@ class SchemaInterpreter:
             # own. This required the deprecated `formula` spelling, so a field using
             # `ref`, `compute`, `polynomial` or `guard` fell through to "Cannot encode
             # type: number" - every schema with a computed field failed to encode.
+            if 'source' in field_def and field_type in COMPUTED_TYPES:
+                self._encode_frame_source(field_def, data, output)     # PS-637
+                continue
             if field_type in COMPUTED_TYPES:
                 continue
             
@@ -9703,6 +9926,17 @@ class SchemaInterpreter:
                 check_peeks(frame)                          # PS-551 (CR-2026-141)
             except ValueError as e:
                 result.errors.append(str(e))
+        if not result.errors:
+            # PS-637 (CR-2026-196): a given payload length or FPort is the finished
+            # frame's; the encoder neither pads the frame nor chooses the FPort to agree.
+            for source_field, given in self._frame_source_checks:
+                raw = len(frame) if source_field['source'] == '$payloadLength' \
+                    else result.fport
+                found = self._frame_source_value(source_field, raw)
+                if found is None or found != normalize_output(given):
+                    result.errors.append(frame_source_mismatch(
+                        source_field.get('name'), given, found))
+                    break
         if not result.errors:
             # PS-564: the bytes from each `remaining` match to the end select its case.
             for check in self._ps564:
@@ -10741,9 +10975,9 @@ class SchemaInterpreter:
         """
         byteorder = 'little' if self.endian == Endian.LITTLE else 'big'
         tag_fields = tlv_def.get('tag_fields')
-        tag_key = tlv_def.get('tag_key')
+        tag_key = tlv_tag_key(tlv_def)      # defaults to the first tag field (Clause 4)
 
-        if tag_fields and tag_key:
+        if tag_fields:
             text = str(case_key).strip()
             if text.startswith('['):
                 text = text[1:-1] if text.endswith(']') else text[1:]
@@ -10850,6 +11084,9 @@ class SchemaInterpreter:
                     raise ValueError(missing_field_message(key))
                 out.extend(self._encode_object_members(f.get('fields') or [], nested))
                 continue
+            if 'source' in f and ftype in COMPUTED_TYPES:
+                self._encode_frame_source(f, data, out)                # PS-637
+                continue
             if ftype in COMPUTED_TYPES:
                 # Derived: computed from other fields, no bytes of its own.
                 continue
@@ -10940,6 +11177,12 @@ class SchemaInterpreter:
                 raise ValueError(f"Repeat '{name}' is given {len(records)} values and "
                                  f"'{sibling}', which identifies them, {have} (PS-550)")
         record_fields, element_name = repeat_members(field_def)
+        if 'flatten' in field_def:
+            # PS-634 (CR-2026-195): the flat list does not say which group each member
+            # came from.
+            raise ValueError(f"Repeat '{name}' flattens its groups into one list, which "
+                             f"cannot be split back into groups; the schema decodes but is "
+                             f"not encoded (PS-634)")
         if records_reachable(record_fields):
             # PS-542: the records do not say which element they came from.
             raise ValueError(f"Repeat '{name}' has elements that yield several "
@@ -11412,6 +11655,15 @@ class SchemaInterpreter:
                 n = f['name']
                 if n in data and n not in queues and modes.get(n) != 'merge':
                     value = data[n]
+                    if modes.get(n) == 'concat':
+                        # PS-634 (CR-2026-195): each element is one entry's value, unless
+                        # a case reports a list, which cannot be split back into entries.
+                        if _reports_list(f):
+                            raise ValueError(f"tlv: '{n}' is concatenated from lists, which "
+                                             f"cannot be split back into entries; the "
+                                             f"schema decodes but is not encoded (PS-634)")
+                        queues[n] = list(value) if isinstance(value, list) else [value]
+                        continue
                     collected = isinstance(value, list) and not _reports_list(f) \
                         and modes.get(n, 'collect') == 'collect'
                     queues[n] = list(value) if collected else [value]
@@ -11752,7 +12004,8 @@ class SchemaInterpreter:
                                 self._encode_warnings, field_def.get('nul', 'trailing'),
                                 field_def.get('terminator') if field_type == 'ascii' else None,
                                 field_def.get('consume_terminator') is not False,
-                                field_def.get('charset') if field_type == 'ascii' else None)
+                                field_def.get('charset') if field_type == 'ascii' else None,
+                                ascii_padding(field_def))                # PS-642
         
         if field_type in ('hex', 'base64'):
             # PS-601 and PS-602 apply to the hex and base64 types as to `bytes` with that

@@ -203,6 +203,16 @@ as UTF-8, and `length` counts bytes, not characters: a value whose UTF-8 is long
 - {name: condition, type: ascii, length: 8, nul: stop, charset: utf-8}   # C3 85 6E 67 00 ... -> "Ång"
 ```
 
+An `ascii` field declaring `trim: true` loses leading and trailing whitespace (U+0020, U+0009,
+U+000A, U+000D) after `nul`, `terminator` and `charset` have been applied (PS-641). An encoder
+pads such a field with spaces instead of 0x00, unless the field declares `nul` (PS-642).
+Leading whitespace is not restored. `trim` with a value other than true or false, or on
+another type, is rejected at load.
+
+```yaml
+- {name: name, type: ascii, length: 10, trim: true}   # 20 54 41 47 20 20 ... -> "TAG"; encodes 54 41 47 20 ...
+```
+
 A `bytes` field reports a **lowercase** hex string by default (PS-281). Its `format:` is
 one of `hex`, `hex:upper`, `base64` or `array` (PS-079), and a `separator:` goes between
 the bytes of either hex format (PS-391). `hex:upper` is a format, not a type: `type:
@@ -671,6 +681,24 @@ operator (PS-126), so a range of values is two conditions, not one, and a condit
 none or two is rejected. The same conditions serve
 `present_if`.
 
+### Values of the frame (`source`)
+
+A `type: number` field may report a value no payload byte holds: `source: $fPort` (the
+uplink's FPort), `$payloadLength` (the payload's length in bytes) or `$remaining` (the bytes
+from the field's position to the end of the data, less any `reserve`; inside a tlv entry, to
+the entry's end, as `match: {remaining: true}` counts them). It reads no bytes; its
+modifiers apply once, and a reference to it binds the value (PS-635). With no FPort given, a
+`$fPort` field is omitted with a warning naming it (PS-636). An encoder writes nothing for it
+and checks a given value against the finished frame and the FPort it reports, rejecting one
+that differs (PS-637). Any other `source`, or one beside `value`, `compute`, `ref`,
+`polynomial` or `time` `parts`, is rejected at load.
+
+```yaml
+- {name: _header, type: bytes, length: 8}
+- {name: data_size, type: number, source: $remaining}   # 8 header bytes + AA BB CC -> 3
+- {name: port, type: number, source: $fPort}
+```
+
 ### Formula (Withdrawn)
 
 `formula` and `encode_formula` are withdrawn (CR-2026-159, PS-448): a schema declaring one is
@@ -1022,6 +1050,34 @@ position moves to the next byte, or to the end of `byte_length` where that is fu
 ranges that consume nothing. Either key anywhere else is rejected at load. An encoder writes
 each element through its modifiers inverted, rejects one that does not fit in `packed_bits`,
 ORs the first byte into the bits the fields before it left, and pads with 0 bits (PS-623).
+
+### Groups reported as one list (`flatten`)
+
+```yaml
+- name: counters
+  type: repeat
+  until: end
+  flatten: _members                 # report every group's members as one list (PS-633)
+  fields:
+    - {name: _count, type: u8}
+    - {name: _time, type: u16}
+    - name: _members
+      type: repeat
+      count: $_count
+      fields:
+        - {name: id, type: u8}
+        - {name: time, type: number, compute: {op: add, a: $_time, b: 0}}
+# 02 0064 01 02  01 00C8 05  ->  {"counters": [{"id": 1, "time": 100},
+#                                              {"id": 2, "time": 100}, {"id": 5, "time": 200}]}
+```
+
+A repeat with `fields` may name, in `flatten`, one of its element's fields that is a
+`repeat`. It then reports, in place of its elements, the concatenation of that field's
+arrays in payload order. The element's other fields must be internal; a value they hold,
+such as a group's shared time, reaches the members through a reference. A `flatten` naming
+no `repeat` among the element's fields, or an element reporting another field, is rejected
+at load (PS-633). The flat list does not say which group each member came from, so an
+encoder refuses the schema, which still decodes (PS-634).
 
 ### Several records from one element (`records`)
 
@@ -1376,8 +1432,9 @@ bytes than `reserve` at the start is an error.
 
 With `merge: true`, a name two entries report - whether they share a tag or not - is
 combined as its `on_repeat` says (PS-157, PS-525): `collect` (the default) gathers the
-values into an array in payload order, `last` keeps the value reported last, and `merge`
-combines `type: object` values member by member.
+values into an array in payload order, `last` keeps the value reported last, `merge`
+combines `type: object` values member by member, and `concat` always reports one flat
+array (PS-632).
 
 ```yaml
 - tlv:
@@ -1396,6 +1453,20 @@ unless that member declares `on_repeat: last`. `on_repeat` anywhere else - outsi
 or on a member of an object that is not merged - is rejected (PS-525).
 
 Merged cases may share a member only where it declares `on_repeat: last` (PS-526).
+
+`concat` reports the name as one array however many entries report it, one included; a
+value that is itself an array has its elements appended, and a name no entry reports is
+absent (PS-632). An encoder writes one entry per element of the array where the case
+reports a scalar or an object; where the case reports an array, the flat list cannot be
+split back into entries and the schema is refused for encoding (PS-634).
+
+```yaml
+- tlv:
+    tag_size: 1
+    cases:
+      0xFE: [{name: request_result, type: object, on_repeat: concat, fields: [{name: cmd, type: u8}]}]
+# FE 01  ->  {"request_result": [{"cmd": 1}]}
+```
 
 The encoder writes each value - a scalar, each element of an array PS-157 collected, a
 `last` value, a merged object's members - under the first case whose declared fields it

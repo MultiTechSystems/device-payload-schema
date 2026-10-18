@@ -1,0 +1,131 @@
+# CR-2026-199 (PS-641, PS-642): an `ascii` field declaring `trim: true` drops leading and
+# trailing U+0020, U+0009, U+000A and U+000D from its text, after `nul`, `terminator` and
+# `charset`; an encoder pads it with spaces where the field declares no `nul`.
+#
+# Three lists, read by the reference and the generated codec
+# (tests/test_cr_2026_199_cases.py), Go (go/schema/cr199_test.go), Java (CR2026199Test.java)
+# and C# (CR2026_199Tests.cs). The C struct API has it (field_ascii_trimmed, held by
+# src/selftest_schema.c); the binary form refuses the key (PS-446). The spec prototype's
+# TestCR2026199TrimmedText, case for case, and a few more.
+#
+#   decode: `schema` (YAML text), `payload` (hex) and either `expected` (the whole decoded
+#           data) or `error` (text one of the errors contains; no data is reported).
+#   cases:  `schema`, `input` (JSON text) and either `payload` (hex) or `error`.
+#   load:   `schema` and the `error` its load reports.
+
+decode:
+
+- name: the_truvami_name
+  schema: "name: t\nfields:\n  - {name: name, type: ascii, length: 10, trim: true}\n"
+  payload: "20544147202020202020"
+  expected: {name: TAG}
+
+- name: trim_after_nul_and_charset
+  schema: "name: t\nfields:\n  - {name: n, type: ascii, length: 8, trim: true, nul: stop, charset: utf-8}\n"
+  payload: "20C38520006A756E"
+  expected: {n: "Å"}
+
+- name: without_trim_whitespace_stays
+  schema: "name: t\nfields:\n  - {name: n, type: ascii, length: 4}\n"
+  payload: "20616220"
+  expected: {n: " ab "}
+
+- name: tabs_and_line_ends_are_whitespace
+  schema: "name: t\nfields:\n  - {name: n, type: ascii, length: 6, trim: true}\n"
+  payload: "090D0A61620A"
+  expected: {n: ab}
+
+- name: interior_whitespace_stays
+  schema: "name: t\nfields:\n  - {name: n, type: ascii, length: 6, trim: true}\n"
+  payload: "612062202020"
+  expected: {n: "a b"}
+
+- name: trailing_padding_goes_first
+  schema: "name: t\nfields:\n  - {name: n, type: ascii, length: 6, trim: true}\n"
+  payload: "616220200000"
+  expected: {n: ab}
+
+- name: a_nul_before_whitespace_is_kept
+  schema: "name: t\nfields:\n  - {name: n, type: ascii, length: 4, trim: true}\n"
+  payload: "61002020"
+  expected: {n: "a\0"}
+
+- name: all_whitespace_is_empty
+  schema: "name: t\nfields:\n  - {name: n, type: ascii, length: 3, trim: true}\n"
+  payload: "200920"
+  expected: {n: ""}
+
+- name: trim_to_a_terminator
+  schema: "name: t\nfields:\n  - {name: s, type: ascii, terminator: 0x3B, trim: true}\n  - {name: b, type: u8}\n"
+  payload: "2078203B07"
+  expected: {s: x, b: 7}
+
+- name: trim_before_a_numeral
+  schema: "name: t\nfields:\n  - {name: n, type: ascii, length: 4, trim: true, numeral: decimal}\n"
+  payload: "20343220"
+  expected: {n: 42}
+
+- name: other_whitespace_is_kept
+  schema: "name: t\nfields:\n  - {name: n, type: ascii, length: 3, trim: true}\n"
+  payload: "0B610C"
+  expected: {n: "\va\f"}
+
+cases:
+
+- name: the_truvami_name
+  schema: "name: t\nfields:\n  - {name: name, type: ascii, length: 10, trim: true}\n"
+  input: '{"name": "TAG"}'
+  payload: "54414720202020202020"
+
+- name: a_declared_nul_pads_with_nul
+  schema: "name: t\nfields:\n  - {name: n, type: ascii, length: 8, trim: true, nul: stop, charset: utf-8}\n"
+  input: '{"n": "Å"}'
+  payload: "c385000000000000"
+
+- name: a_declared_trailing_nul_pads_with_nul
+  schema: "name: t\nfields:\n  - {name: n, type: ascii, length: 4, trim: true, nul: trailing}\n"
+  input: '{"n": "ab"}'
+  payload: "61620000"
+
+- name: without_trim_padding_is_nul
+  schema: "name: t\nfields:\n  - {name: n, type: ascii, length: 4}\n"
+  input: '{"n": "ab"}'
+  payload: "61620000"
+
+- name: trim_false_pads_with_nul
+  schema: "name: t\nfields:\n  - {name: n, type: ascii, length: 4, trim: false}\n"
+  input: '{"n": "ab"}'
+  payload: "61620000"
+
+- name: a_terminated_value_is_not_padded
+  schema: "name: t\nfields:\n  - {name: s, type: ascii, terminator: 0x3B, trim: true}\n  - {name: b, type: u8}\n"
+  input: '{"s": "x", "b": 7}'
+  payload: "783b07"
+
+- name: the_value_is_written_as_given
+  schema: "name: t\nfields:\n  - {name: n, type: ascii, length: 4, trim: true}\n"
+  input: '{"n": " a"}'
+  payload: "20612020"
+
+- name: a_value_too_long_is_still_rejected
+  schema: "name: t\nfields:\n  - {name: n, type: ascii, length: 2, trim: true}\n"
+  input: '{"n": "abc"}'
+  error: "Field 'n': an ascii value of 3 bytes is longer than its length of 2 (PS-537)"
+
+load:
+
+- name: trim_is_a_boolean
+  schema: "name: t\nfields:\n  - {name: n, type: ascii, length: 2, trim: \"yes\"}\n"
+  error: "Field 'n': trim is true or false, on an ascii field (PS-641)"
+
+- name: trim_is_not_a_number
+  schema: "name: t\nfields:\n  - {name: n, type: ascii, length: 2, trim: 1}\n"
+  error: "Field 'n': trim is true or false, on an ascii field (PS-641)"
+
+- name: trim_only_on_ascii
+  schema: "name: t\nfields:\n  - {name: n, type: hex, length: 2, trim: true}\n"
+  error: "Field 'n': trim is true or false, on an ascii field (PS-641)"
+
+- name: trim_not_on_an_integer
+  schema: "name: t\nfields:\n  - {name: n, type: u8, trim: false}\n"
+  error: "Field 'n': trim is true or false, on an ascii field (PS-641)"

@@ -61,6 +61,10 @@ The `inherent` reasons, each of which is a decision recorded elsewhere:
   several-records   A repeat element yields several records through `records` (PS-541),
                     reported as consecutive elements; nothing in them says which element
                     each came from, so an encoder refuses the schema (PS-542).
+  flat-list         A repeat declaring `flatten` (PS-633), or a tlv name concatenated from
+                    entries whose case reports a list (PS-632), reports one flat array that
+                    does not say where each group or entry ended, so an encoder refuses the
+                    schema (PS-634).
   absent-value      A declared field was left out of the output because it had no value to
                     report - a zero divisor (PS-100), the log of a non-positive number
                     (PS-117), a failed guard with no `else` (PS-400), an unmapped lookup
@@ -93,6 +97,11 @@ The `inherent` reasons, each of which is a decision recorded elsewhere:
                     payload: such a field of a vector that does not re-encode and
                     reports 0.
 
+  trimmed           An `ascii` field declared `trim: true` (PS-641, PS-642, CR-2026-199). The
+                    whitespace the decoder removed from both ends is not in the output; an
+                    encoder pads with spaces, so trailing space padding comes back and
+                    leading whitespace, or trailing tabs and line ends, do not. Judged from
+                    the schema, as nul-mode is.
   nul-mode          An `ascii` field declared `nul: stop` or `nul: drop` (PS-534, CR-2026-177).
                     `stop` leaves the bytes after the first 0x00 out of the value, and `drop`
                     removes the 0x00 bytes wherever they were, so neither is in the output
@@ -142,6 +151,7 @@ CORPUS = REPO_ROOT / "schemas" / "devices"
 
 INHERENT = (
     "several-records",
+    "flat-list",
     "dropped-element",
     "pattern-tag",
     "absent-value",
@@ -155,6 +165,7 @@ INHERENT = (
     "null-element",
     "shared-label",
     "negative-zero",
+    "trimmed",
     "nul-mode",
     "end-terminated",
     "checksum-mismatch",
@@ -202,6 +213,9 @@ def schema_traits(schema):
             traits.add("dropped-element")
         if "records" in node and not node.get("type"):
             traits.add("several-records")                              # PS-542
+        if node.get("type") == "repeat" and (
+                node.get("flatten") or node.get("on_repeat") == "concat"):
+            traits.add("flat-list")                                    # PS-634
         if node.get("type") in ("version_string", "bitfield_string"):
             covered = 0
             for part in node.get("parts") or []:
@@ -318,6 +332,18 @@ def nul_mode_fields(schema, port=None):
             and f.get("nul") in ("stop", "drop")]
 
 
+def trimmed_fields(schema, port=None):
+    """Top-level ascii fields declared `trim: true` (PS-641, PS-642)."""
+    fields = schema.get("fields") or []
+    ports = schema.get("ports") or {}
+    if ports:
+        entry = ports.get(port, ports.get(str(port), ports.get("default")))
+        fields = (entry or {}).get("fields") or [] if isinstance(entry, dict) else []
+    return [f["name"] for f in fields
+            if isinstance(f, dict) and f.get("type") == "ascii" and f.get("name")
+            and f.get("trim") is True]
+
+
 def has_null_element(node):
     """A null inside an array: an `element` repeat's omitted value (PS-528)."""
     if isinstance(node, dict):
@@ -350,6 +376,8 @@ def classify(decoded, traits, schema=None, port=None):
         return "absent-value"
     if schema is not None and zero_floats(schema, decoded.data, port):
         return "negative-zero"                                           # PS-566
+    if schema is not None and trimmed_fields(schema, port):
+        return "trimmed"                                                 # PS-641, PS-642
     if schema is not None and nul_mode_fields(schema, port):
         return "nul-mode"                                                # PS-534, PS-595
     if schema is not None and end_terminated_fields(schema, port):

@@ -100,6 +100,29 @@ final class AsciiText {
         return new String(raw, java.nio.charset.StandardCharsets.UTF_8);
     }
 
+    /** PS-641 (CR-2026-199): the whitespace {@code trim: true} removes from both ends. */
+    static String trim(Field field, String text) {
+        if (!field.isTrim()) return text;
+        int start = 0, end = text.length();
+        while (end > 0 && isTrimSpace(text.charAt(end - 1))) end--;
+        while (start < end && isTrimSpace(text.charAt(start))) start++;
+        return text.substring(start, end);
+    }
+
+    private static boolean isTrimSpace(char c) {
+        return c == ' ' || c == '\t' || c == '\n' || c == '\r';
+    }
+
+    /** PS-641: {@code trim} is true or false, on an ascii field; the prototype's text. */
+    static void checkTrim(Map<?, ?> fm) {
+        if (!fm.containsKey("type") || !fm.containsKey("trim")) return;
+        if (!"ascii".equals(fm.get("type")) || !(fm.get("trim") instanceof Boolean)) {
+            Object name = fm.get("name");
+            throw new SchemaException("Field '" + (name instanceof String s ? s : "None")
+                    + "': trim is true or false, on an ascii field (PS-641)");
+        }
+    }
+
     /** PS-624: {@code charset} is {@code utf-8}, on an ascii field; the prototype's text. */
     static void checkCharset(Map<?, ?> fm) {
         if (!fm.containsKey("type") || !fm.containsKey("charset")) return;

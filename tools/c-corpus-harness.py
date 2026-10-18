@@ -119,6 +119,7 @@ UNREACHABLE_KEYS = {
     "consume_terminator": "the interpreter has no terminator-delimited ascii (PS-619)",
     "end_terminates": "the interpreter has no terminator-delimited ascii (PS-619)",
     "charset": "the interpreter has no UTF-8 ascii (PS-624)",
+    "source": "the interpreter has no type: number field, so no value of the frame (PS-635)",
     "numeral": "the interpreter holds ascii text, not the integer it spells (PS-560)",
     "bit_labels": "the interpreter has no bit_labels (PS-616)",
     "template": "the interpreter has no template string (PS-590)",
@@ -209,6 +210,8 @@ def field_source(field, schema_endian):
         if not isinstance(length, int):
             return None, f"{ftype} length is not a literal"
         lines.append(f"    f = {SIZED_CTORS[ftype]}({c_string(name)}, {length});")
+        if ftype == "ascii" and field.get("trim") is True:
+            lines.append("    f.ascii_trim = true;")              # PS-641, PS-642
     elif ftype == "enum":
         values = field.get("values")
         if not isinstance(values, dict):

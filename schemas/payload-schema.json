@@ -83,12 +83,25 @@
           "type": "boolean",
           "description": "With terminator: true lets the end of the data (less any reserve, or a tlv entry's end) end the text too, which is then not an error (PS-619)."
         },
+        "trim": {
+          "type": "boolean",
+          "description": "On an ascii field: true removes leading and trailing U+0020, U+0009, U+000A and U+000D after nul, terminator and charset; an encoder pads with spaces where no nul is declared (PS-641, PS-642)."
+        },
         "charset": {
           "type": "string",
           "enum": [
             "utf-8"
           ],
           "description": "On an ascii field: its bytes, after length, nul and terminator, are UTF-8 text; an encoder writes UTF-8 and length counts bytes (PS-624, PS-625)."
+        },
+        "source": {
+          "type": "string",
+          "enum": [
+            "$fPort",
+            "$payloadLength",
+            "$remaining"
+          ],
+          "description": "On a type: number field: the uplink's FPort, the payload's length in bytes, or the bytes from the field's position to the end of the data; it reads no bytes, and its modifiers apply (PS-635 to PS-637)."
         },
         "checksum": {
           "type": "object",
@@ -440,6 +453,10 @@
             "default": 0,
             "description": "With `packed_bits`: how many bits into the byte at the read position the first element starts; fields before the repeat read those bits as bit ranges that consume nothing (PS-621, PS-622). On any other field it is rejected."
           },
+          "flatten": {
+            "type": "string",
+            "description": "`type: repeat` with `fields`: the name of one of its element's fields that is a `repeat`. The repeat reports, in place of its elements, the concatenation of that field's arrays in payload order. The element's other fields are internal; their values reach the members through references. Rejected where it names no such repeat, or where the element reports another field (PS-633). An encoder refuses it: the flat list cannot be split back into groups (PS-634)."
+          },
           "count_as": {
             "type": "string",
             "description": "`type: repeat`: a name bound after the repeat to the number of elements it reports, after present_if (PS-367). Each record a `records` entry yields counts as one (PS-541)."
@@ -498,9 +515,10 @@
             "enum": [
               "collect",
               "merge",
-              "last"
+              "last",
+              "concat"
             ],
-            "description": "In a `tlv` case: how this field combines when more than one entry reports its name (PS-525), overriding the tlv's `on_repeat`. Only a `type: object` field may declare `merge` (PS-526). A member of a merged object may declare `last`, so a later entry may report it again and its value is kept; any other member reported twice is an error."
+            "description": "In a `tlv` case: how this field combines when more than one entry reports its name (PS-525), overriding the tlv's `on_repeat`. `concat` reports the name as one array however many entries report it, one included, splicing a list value's elements (PS-632); an encoder writes one entry per element, and refuses where the case reports a list (PS-634). Only a `type: object` field may declare `merge` (PS-526). A member of a merged object may declare `last`, so a later entry may report it again and its value is kept; any other member reported twice is an error."
           },
           "optional": {
             "const": true,
@@ -580,10 +598,11 @@
           "enum": [
             "collect",
             "merge",
-            "last"
+            "last",
+            "concat"
           ],
           "default": "collect",
-          "description": "The default for the cases' fields when more than one entry reports a name, whether the entries share a tag or not (PS-157, PS-525). `collect` gathers the values into an array; `last` keeps the last; `merge` combines objects member by member and reaches only the `type: object` fields, the others keeping `collect`. A field's own `on_repeat` takes precedence. Every field reporting one name must resolve to the same mode (PS-526)."
+          "description": "The default for the cases' fields when more than one entry reports a name, whether the entries share a tag or not (PS-157, PS-525). `collect` gathers the values into an array; `last` keeps the last; `concat` always reports one array, splicing list values (PS-632); `merge` combines objects member by member and reaches only the `type: object` fields, the others keeping `collect`. A field's own `on_repeat` takes precedence. Every field reporting one name must resolve to the same mode (PS-526)."
         },
         "cases": {
           "type": "object",
@@ -823,16 +842,16 @@
           },
           "correction": {
             "type": "array",
-            "description": "For source vendor-codec-corrected: each field whose expected value differs from the vendor codec's output (PS-514)",
+            "description": "For source vendor-codec-corrected: each field whose expected value differs from the vendor codec's output (PS-514). On a vector with expected_error, exactly one entry without field, whose codec is the vendor codec's whole output (PS-514, PS-638)",
             "minItems": 1,
             "items": {
               "type": "object",
               "properties": {
-                "field": {"type": "string", "description": "The reported name"},
-                "codec": {"description": "The value the codec produces, or null where it produces none"},
-                "reason": {"type": "string", "description": "Why the expected value differs"}
+                "field": {"type": "string", "description": "The reported name; omitted only on a vector with expected_error (PS-638)"},
+                "codec": {"description": "The value the codec produces, or null where it produces none; without field, the codec's whole output"},
+                "reason": {"type": "string", "description": "Why the expected value differs, or why the schema rejects what the codec decodes"}
               },
-              "required": ["field", "codec", "reason"],
+              "required": ["codec", "reason"],
               "additionalProperties": false
             }
           },

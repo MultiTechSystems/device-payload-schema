@@ -3349,6 +3349,38 @@ improved. The Go, Java and C# corpus runners write per-vector reports only when
     carries its own schema, so 91 distinct run-time schemas would join `_language-conformance/`
     (or share one per CR with a port each, as the fixture does).
 
+- **CR-2026-197 (PS-514 amended, PS-638; la-payload-schema main 2e0b3c6, for 0.5.8): a
+  corrected vendor outcome on a vector that expects an error.** A test-vector rule; no decode
+  or encode changes.
+  - **The rule.** On a vector with `expected_error`, a `correction` entry MAY omit `field`: its
+    `codec` is the vendor codec's whole output (`data`) and its `reason` why the schema rejects
+    it, and the vector carries exactly that one entry. An error vector marked
+    `source: vendor-codec` asserts the vendor fails too; where the vendor succeeds it must be
+    `vendor-codec-corrected` with that entry. Only the decode form exists: encode vectors wait
+    for evidence (the CR's open question).
+  - **Where:** `validate_schema.correction_errors`, so the validator and the provenance gate
+    (which calls it) reject, in the prototype's words (`key_vocabulary.check_correction`):
+    `Vector 'v': a vector that expects an error carries one correction entry, without field,
+    whose codec is the vendor's whole output (PS-514, PS-638)` (an entry naming a field, more
+    than one entry, or `codec`/`reason` missing), `Vector 'v': a correction entry without
+    field belongs to a vector that expects an error (PS-514, PS-638)`, and, replacing the old
+    "'correction' is only for source vendor-codec-corrected", `Vector 'v': correction belongs
+    to a vector with source: vendor-codec-corrected (PS-514)`. `payload-schema.json`'s
+    correction entry no longer requires `field`.
+  - **Readings:** `is_independent_vector` counts such a vector as not independent (PS-515: the
+    entry corrects everything the codec produced). `crossvalidate_ttn.corrections` records the
+    entry as `None`, and `compare` takes a failed decode of that payload as the correction,
+    not a disagreement. Go, Java and C# read no `correction`; nothing changed there. The
+    PS-638 provenance half (does the vendor succeed?) needs the codec and is the oracle's.
+  - **Measured:** no corpus vector is rejected (12 error vectors, none vendor-sourced). The
+    registry (2ef53db) loads unchanged, but its 20 `vendor_codec_error_*` vectors in
+    seeed/loradevelopkit-e5 and sensecap/sensecap-common-decoder (16 PS-586 bad CRC, 4 PS-565
+    two-byte frames) say `source: vendor-codec` while the vendor reports `{valid: false, err:
+    -1, ...}`: each needs PS-638's marking, which a registry batch will do.
+  - **Cases:** `tests/cr-2026-197-cases.yaml` (the prototype's 5), read by
+    `test_cr_2026_197_cases.py`. No fixture: the corpus has no vendor output to record, and a
+    fixture is `source: generated`. No floor moves.
+
 - **CR-2026-168 (PS-345, PS-346 amended, PS-578 to PS-580; la-payload-schema main, for
   0.5.7): field templates and shared lookup tables.** A definition carries exactly one of
   `fields` (a group), `field` (one field) or `lookup` (a table). A `$ref` to a `field`
@@ -3599,6 +3631,49 @@ improved. The Go, Java and C# corpus runners write per-vector reports only when
     changes. The milesight em310-tilt and gs601/wt303/wt304/wt401 registry schemas read UTF-8
     text as plain `ascii` today; with ASCII content the two agree, so adopting the key is a
     registry follow-up.
+
+- **CR-2026-199 (PS-641, PS-642; la-payload-schema `cr/0.5.8-apply-199` d6b2a8b, for 0.5.8):
+  trimmed text.** An `ascii` field may declare `trim: true`: decode removes leading and trailing
+  U+0020, U+0009, U+000A and U+000D after `nul`, `terminator` and `charset` (and before
+  `numeral`), so interior whitespace and other control characters stay; encode pads a fixed
+  `length` with spaces in place of 0x00 where the field declares no `nul` (a declared `nul`,
+  `trailing` included, keeps 0x00), writes a terminated value unpadded, and writes the value as
+  given - leading whitespace the decoder removed is not restored. The truvami name shape
+  (`20 54 41 47 20 ...` -> `TAG`, re-encoded `54 41 47 20 ...`).
+  - **Load (the prototype's text):** `Field 'n': trim is true or false, on an ascii field
+    (PS-641)` for a non-boolean value and for the key on any other type. Python `trim_errors`
+    (from `schema_iterator_errors`, so the validator and the TS013 generator too), Go
+    `checkTrim` (`go/schema/cr199.go`, from `checkFieldRules`), Java `AsciiText.checkTrim`
+    (from `checkWave4`), C# `AsciiText.CheckTrim` (from `CheckWave4`; a plain YAML 1.2 boolean
+    through `BooleanOf`).
+  - **Where:** Python `decode_ascii(..., trim)`, `ascii_padding` and `encode_ascii(..., pad)`;
+    the generator's ascii branch and the runtime's `encPad(..., pad)`; Go `trimText`/
+    `spacePadded` (`Field.Trim`); Java `AsciiText.trim` and `Encoder.encodeAscii`
+    (`Field.isTrim`); C# `AsciiText.Trim`/`SpacePadded` (`SchemaField.Trim`). A non-consuming
+    field's echo value (PS-588) is trimmed the same way.
+  - **C has it:** `field_def_t.ascii_trim` (in padding, so `sizeof(field_def_t)` stays 1640 and
+    `schema_t` 52536), built with `field_ascii_trimmed()`; decode trims after the trailing 0x00
+    padding, encode pads with spaces (C's ascii has no `nul`). `src/selftest_schema.c`'s
+    `test_ascii_trim`; the harness sets the flag, and builds `ascii-trim-padded.yaml` (C 586 ->
+    588 attempted, all passing). **The binary form has no slot for it**, so
+    `tools/schema_binary.py` refuses `trim` by name (PS-446).
+  - **Before:** every implementation ignored the key - whitespace stayed and padding was 0x00 -
+    and the validator refused it as unknown.
+  - **Round trip:** `encode-round-trip.py` files a vector of a `trim` field that does not
+    re-encode as the inherent reason `trimmed`.
+  - **Cases and fixtures:** `tests/cr-2026-199-cases.yaml` (11 decode, 8 encode, 4 load; the
+    prototype's `TestCR2026199TrimmedText` and more) read by `test_cr_2026_199_cases.py`
+    (reference, generated codec, validator and the binary converter), Go `cr199_test.go`, Java
+    `CR2026199Test`, C# `CR2026_199Tests`. Fixtures `ascii-trim` (trim alone, with `nul: stop`
+    and with a terminator; 3 vectors) and `ascii-trim-padded` (2 vectors), `source: generated`:
+    decode 2962 -> 2967 in Go, Java and C#; re-encode +3 everywhere, all `plain fixed` (Python
+    2339 -> 2342, `plain fixed` 265 -> 268; Java 2339 -> 2342; C# 2340 -> 2343; Java and C#
+    `plain fixed` 259 -> 262; Go 2358 -> 2361, plain 2327 -> 2330, `plain fixed` 259 -> 262);
+    the two vectors with leading whitespace, or a tab or line end before the padding, do not.
+  - **Measured:** no corpus, library, example or registry schema declares `trim` (a field named
+    `trim` in `bitfield-string-padded-signed.yaml` is a name, not the key), and every new path is
+    reached only through it, so none is rejected and no decode or encode output changes.
+    Adopting it in the registry's truvami tag-s-l name is a registry follow-up.
 
 - **CR-2026-175 (PS-453 and PS-015 amended, PS-588, PS-589; la-payload-schema main 9e8957a, for
   0.5.7): a byte string that does not consume reports its span again.** A `bytes`, `hex` or
@@ -4432,7 +4507,92 @@ improved. The Go, Java and C# corpus runners write per-vector reports only when
   - **Measured** (Python, every vector of a schema declaring `length_size`: 616 corpus and
     7289 registry vectors at 058e63f): no vector gains a PS-631 warning, none changes decode
     output or errors, so no `expected_warnings` needed changing.
+- **CR-2026-195 (PS-525 amended, PS-632 to PS-634; la-payload-schema main 478db1a, for
+  0.5.8): flat lists.** Two vendor shapes put values from several parts of a frame into one
+  array (milesight gs601/wt401 `request_result`, comtac lpn-km `counters`).
+  - **PS-632, `on_repeat: concat`** (a tlv's or a case field's): the name is always an
+    array, one entry included; a value that is itself a list has its elements spliced in; no
+    entry leaves it absent. Python's tlv merge loop, the generator's `tlvFold`, Go
+    `concatValue` (`cr195.go`), Java `FlatLists.concat`, C# `Cr195.Concat`. `ON_REPEAT` /
+    `onRepeatModes` / `OnRepeat.MODES` / `OnRepeatModes` gain `concat`, so the PS-525 text
+    is now "one of collect, merge, last, concat" (the CR-2026-110 tests updated).
+  - **PS-633, `flatten: <inner repeat>`** on a repeat with `fields`: it reports the
+    concatenation of each element's inner-repeat array, read from the element or, where the
+    inner repeat is internal, from the element's scope before PS-368 restores it. Load, in
+    the prototype's `check_flatten` text: `Repeat 'v': flatten names a repeat among its
+    element's fields (PS-633)` and `Repeat 'v': with flatten, its element's other fields
+    are internal; 'shown' would be reported (PS-633)`. Python `flatten_errors` (from
+    `schema_iterator_errors`: interpreter, validator, generator), Go `flattenError` (from
+    `checkFieldRules`), Java `FlatLists.check` (from `checkWave4`), C# `Cr195.Check`. The
+    repeat element functions take a `Flatten` field (Go, C#) or read the raw `flatten`
+    (Java).
+  - **PS-634:** a concat of single values or objects encodes one entry per element; a
+    concat whose case reports a list, and any flatten repeat, are refused, in the
+    prototype's texts: `tlv: 'codes' is concatenated from lists, which cannot be split back
+    into entries; the schema decodes but is not encoded (PS-634)` and `Repeat 'counters'
+    flattens its groups into one list, which cannot be split back into groups; the schema
+    decodes but is not encoded (PS-634)`. Departure: the list check uses `_reports_list`
+    (a repeat, or bytes with `format: array`) on the case being queued, where the prototype
+    looks only at the name's first declaration as a repeat. `encode-round-trip.py` files
+    both as the inherent reason `flat-list`.
+  - **Before:** `concat` was refused at load in all five (`... one of collect, merge, last,
+    not 'concat' (PS-525)`); `flatten` was read by none, so the comtac frame decoded as
+    `{counters: [{}, {}]}` (every group's fields internal) with success.
+  - **Not done:** `_meta` is the prototype's, unchanged: a concat field's `reports` is its
+    case's type (as for `collect`), and a flatten repeat's `elements` lists the outer
+    element's reported fields (none). C has no repeat and no on_repeat:
+    `tools/schema_binary.py` refuses `flatten` by name (and `on_repeat`, already).
+  - **Cases:** `tests/cr-2026-195-cases.yaml` (the prototype's eight
+    `TestCR2026195FlatLists` tests, plus a concat of scalars both ways, a one-element encode
+    and the amended PS-525 text), read by `test_cr_2026_195_cases.py` (reference, codec,
+    validator, binary form), Go `cr195_test.go`, Java `CR2026195Test`, C# `CR2026_195Tests`.
+  - **Fixtures** `tlv-concat.yaml` (7 vectors: six round-trip, the spliced lists are
+    decode-only) and `repeat-flatten.yaml` (4, decode-only); mutation 100% both. Floors:
+    decode 2950 -> 2961 in Go, Java and C#; re-encode +6, all `tlv` (Python and Java
+    2329 -> 2335, C# 2330 -> 2336, Go 2347 -> 2353, plain 2319 -> 2325).
+  - **Measured:** no schema in the corpus, library, examples or registry (2ef53db) declares
+    `flatten` or `concat`, so nothing changes decode, encode or load.
 
+- **A tlv's `tag_key` defaults to its first tag field (Clause 4; PS-536, PS-523).** A tlv
+  that declares `tag_fields` reads its tag through them and binds each component, by name and
+  by `var`, as the entry's tag is read, whether or not it declares `tag_key`; the case is
+  keyed by `tag_key`, else by the first component, as the spec prototype's
+  `decode_construct_tlv` does.
+  - **Before:** the Python reference read `tag_fields` only beside a `tag_key`. Without one
+    it read `tag_size` bytes (default 1) whatever the components' widths and bound nothing,
+    so `$_t`, `${_t}` and a component's `var` were unbound in every case and a `u16`
+    component read its first byte as the tag. Its encoder (`_encode_tlv_tag`), the generated
+    codec's runtime (`encTlvTag`) and C#'s (`EncodeTLVTag`) wrote `tag_size` bytes; Java's
+    encoder did the same; Go's wrote `tag_size` bytes for any case key without brackets
+    (`"0x0309"` against one `u16` component), whether or not `tag_key` was declared. Go, Java
+    and C# decoded it already, and the generated codec's decoder too; C# recorded a
+    component for `_meta` (`ctx.Produced`) only where `tag_key` was declared.
+  - **Where:** Python `tlv_tag_key` (used by `_decode_tlv` and `_encode_tlv_tag`); runtime
+    `encTlvTag`; Go `encodeTLVTag` (a tlv with `tag_fields` always takes the component path,
+    names defaulting to the first); Java `Encoder.encodeTLVTag`; C# `SchemaEncoder.EncodeTLVTag`
+    and `SchemaDecoder`'s unconditional `ctx.Produced(tf)`. C has no `tag_fields` of this
+    kind in the harness (the fixture has ports, a C gap).
+  - **Cases:** `tests/tag-fields-default-key-cases.yaml` (two decodes; three encodes from
+    input alone, one a declared `tag_key` with an unbracketed key, which no round trip
+    shows), read by `test_tag_fields_default_key.py` (reference and codec), Go
+    `tag_fields_default_key_test.go`, Java `TagFieldsDefaultKeyTest`, C#
+    `TagFieldsDefaultKeyTests`.
+  - **Fixture** `_language-conformance/tag-fields-default-key.yaml`: port 1 a `u8`
+    component, port 2 a `u16`, each read in its case through `ref: $_t`, a `var` and a
+    `template`; six vectors, all round-tripping. Floors: decode +6 in Go, Java and C#
+    (2962 -> 2968 on top of #194); re-encode +6 everywhere, `tlv` +6 (Python and Java 2339 ->
+    2345, C# 2340 -> 2346, Go 2358 -> 2364, plain 2327 -> 2333). Mutation score 100%.
+  - **Measured:** no other tlv in `schemas/`, `examples/` or the private registry (5463e01,
+    97 tlvs with `tag_fields`) omits `tag_key` or keys a case without brackets, so nothing
+    else changes; the Python round-trip failing set is identical before and after.
+  - **Found on the way, fixed by #194:** Go and Java matched no tlv case key written as a
+    quoted hex string (`'0x0309':`) - Go's `findTLVCaseKey` compared the tag's decimal text and
+    parsed only bracketed keys, so the entry was an unknown tag - while Python and C# matched
+    it. #194 (the quoted numeric tlv key entry below) made all five read it as the number it
+    spells. The fixture and the cases here use the plain `0x0309:` form, an integer to PyYAML,
+    yaml.v3 and SnakeYAML.
+  - **Also:** `mk/gate-verdicts.mk` and `tools/verdicts-gate.py` used `.cache/` whatever
+    `CACHE_DIR` said; both follow `CACHE_DIR` now, as the Makefile's other targets do.
 - **CR-2026-200 (PS-422 amended, PS-643, PS-644; la-payload-schema branch
   `cr/0.5.8-apply-200`, 59b59c1, for 0.5.8): `encoding: bcd_signed`, M-Bus Type A BCD.** A
   most-significant 4-bit group of 0xF is a minus sign over the BCD magnitude of the groups
@@ -4496,6 +4656,47 @@ improved. The Go, Java and C# corpus runners write per-vector reports only when
   +10, all `tlv` (Python and Java 2329 -> 2339, C# 2330 -> 2340), Go ordered 2347 -> 2358 and
   `tlv` 1623 -> 1634, plain 2319 -> 2327 (two vectors' tags are not ascending). C: 586 of 586
   attempted (the fixture's four).
+- **CR-2026-196 (PS-635 to PS-637; la-payload-schema main cf02629, for 0.5.8): a field from
+  the frame.** A `type: number` (or `integer`) field may declare `source: $fPort`,
+  `$payloadLength` or `$remaining`. It reads no bytes; its modifiers apply once and a reference
+  binds the value. `$remaining` counts the bytes left in the data being read, so inside a tlv
+  entry it stops at the entry's end, as a `remaining` match does.
+  - **Texts, the prototype's:** load `Field 's': source is one of $fPort, $payloadLength,
+    $remaining, on a type: number field that computes nothing else (PS-635)` (another value,
+    another type, or beside `value`/`compute`/`ref`/`polynomial`/`time` `parts`); decode with
+    no FPort `Field 'port': no FPort was given, so it is omitted (PS-636)`, a warning, the field
+    absent; encode `Field 'data_size' is given 4, but the frame gives 3 (PS-637)` (`... gives
+    no FPort` where the encode reports none). Encode writes nothing, never pads or picks the
+    FPort; an omitted value is not required.
+  - **Where:** Python `frame_source_errors` (from `schema_iterator_errors`, so the validator
+    and the generator too), `_frame_source`, `_encode_frame_source`, `check_echoes`' PS-637
+    branch (`$remaining` is checked where its frame closes, as an echo) and the
+    `_frame_source_checks` pass after the frame is finished (`$payloadLength`, `$fPort`
+    against `result.fport`); the codec's `frameSource`/`_frm` (set by decodeUplink and
+    decodeDownlink) and the runtime's `encSourceValue`, `ENC_FPORT` (set by encodeDownlink),
+    `ctx.src`; Go `cr196.go` with a branch in `cr175.go`'s echo check; Java `FrameSource`; C#
+    `FrameSource.cs`. `source` is in `tools/schema_vocabulary.py`, `payload-schema.json` and
+    the language reference; `validate_schema.py` accepts it as a number field's source.
+  - **Before:** every implementation ignored the key: Python, Go and Java omitted the field
+    silently (the validator refused it, "type 'number' requires 'ref', 'compute' or
+    'value'"), and C# and the codec reported 0. No encoder checked a given value.
+  - **Found on the way (PS-581):** Python's encoder of a schema without `ports` reported the
+    document's FPort only, never the caller's (`encode({...}, fPort=3).fport` was None); it
+    reports the caller's now. Go, Java, C# and the codec already did. And
+    `tools/vector-verdicts.py` gave the codec FPort 1 for a vector with none, where the
+    reference is given none; it passes the vector's own now (no other verdict changed).
+  - **C:** no `type: number`; `tools/schema_binary.py` refuses `source` by name (PS-446) and the
+    harness files the fixture under it.
+  - **Cases:** `tests/cr-2026-196-cases.yaml` (the prototype's nine `TestCR2026196FrameSource`
+    tests and more: a tlv entry's remainder, `$fPort` mismatches; 8 decode, 11 encode, 5
+    load), read by `test_cr_2026_196_cases.py` (reference and codec), Go `cr196_test.go`, Java
+    `CR2026196Test`, C# `CR2026_196Tests`. Fixture `_language-conformance/frame-source.yaml`
+    (all three sources and one inside a tlv entry; one vector with no FPort, its warning by
+    `expected_warnings: ["Field 'port'"]`); mutation 100%.
+  - **Floors:** decode 2950 -> 2954 in Go, Java and C#; re-encode +4 everywhere, all `tlv`
+    (Python and Java 2329 -> 2333, C# 2330 -> 2334, Go 2347 -> 2351, plain 2319 -> 2323).
+  - **Measured:** no corpus, library, example or registry (2ef53db, 546 schemas) schema
+    declares a field `source`, so none is rejected and no decode or encode output changes.
 
 ## Converting a vendor codec
 
