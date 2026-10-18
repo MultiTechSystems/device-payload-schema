@@ -309,8 +309,8 @@ func checkFieldRules(field map[string]any, at string, inRecord bool) error {
 		return fmt.Errorf("%s: match_value is withdrawn; write a signed type (sN), a signed bit range (sN[start:end]), encoding, match or guard instead (PS-426)", at)
 	}
 	if encoding, ok := field["encoding"]; ok {
-		if encoding != "sign_magnitude" && encoding != "bcd" && encoding != "gray" {
-			return fmt.Errorf("%s: encoding %v is not one of sign_magnitude, bcd, gray (PS-422)", at, encoding)
+		if encoding != "sign_magnitude" && encoding != "bcd" && encoding != "bcd_signed" && encoding != "gray" {
+			return fmt.Errorf("%s: encoding %v is not one of sign_magnitude, bcd, bcd_signed, gray (PS-422)", at, encoding)
 		}
 		if typ, _ := field["type"].(string); !unsignedTypes[typ] {
 			return fmt.Errorf("%s: encoding applies only to an unsigned integer type uN, not %v (PS-422)", at, field["type"])
@@ -352,6 +352,10 @@ func checkFieldRules(field map[string]any, at string, inRecord bool) error {
 	}
 	// PS-635 (CR-2026-196): source names a value of the frame, on a type: number field.
 	if err := checkFrameSource(field); err != nil {
+		return err
+	}
+	// PS-641 (CR-2026-199): trim is true or false, on an ascii field.
+	if err := checkTrim(field); err != nil {
 		return err
 	}
 	// PS-585 (CR-2026-174): a checksum on an unsigned integer wide enough for its algo.

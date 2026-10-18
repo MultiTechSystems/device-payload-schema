@@ -157,6 +157,34 @@ internal static class AsciiText
         return output;
     }
 
+    /// <summary>PS-641 (CR-2026-199): the whitespace <c>trim: true</c> removes from both ends.</summary>
+    internal static string Trim(SchemaField field, string text) =>
+        field.Trim ? text.Trim(' ', '\t', '\n', '\r') : text;
+
+    /// <summary>
+    /// PS-642 (CR-2026-199): a trimmed ascii field with a fixed length and no <c>nul</c> pads
+    /// with spaces where Helpers.EncodeAscii wrote 0x00; <paramref name="text"/> is the value written.
+    /// </summary>
+    internal static byte[] SpacePadded(SchemaField field, byte[] output, string text)
+    {
+        if (!field.Trim || field.Type != FieldType.Ascii || field.Nul != null
+            || field.Terminator != null || !(field.Length > 0 && field.LengthRef == null))
+            return output;
+        int n = field.Utf8 ? System.Text.Encoding.UTF8.GetByteCount(text) : text.Length;
+        for (int i = n; i < output.Length; i++) output[i] = (byte)' ';
+        return output;
+    }
+
+    /// <summary>PS-641: <c>trim</c> is true or false, on an ascii field; the prototype's text.</summary>
+    internal static void CheckTrim(YamlMappingNode fm)
+    {
+        if (!fm.Children.TryGetValue(new YamlScalarNode("type"), out var typeNode)) return;
+        if (!fm.Children.TryGetValue(new YamlScalarNode("trim"), out var trim)) return;
+        if ((typeNode as YamlScalarNode)?.Value == "ascii" && BooleanOf(trim) is not null) return;
+        var name = fm.Children.TryGetValue(new YamlScalarNode("name"), out var n) ? (n as YamlScalarNode)?.Value : "None";
+        throw new InvalidOperationException($"Field '{name}': trim is true or false, on an ascii field (PS-641)");
+    }
+
     /// <summary>PS-624: <c>charset</c> is <c>utf-8</c>, on an ascii field; the prototype's text.</summary>
     internal static void CheckCharset(YamlMappingNode fm)
     {

@@ -121,7 +121,7 @@ final class Wave4 {
         return f >= 65536 ? sign | (1L << 16) : sign | f;
     }
 
-    /** PS-422 to PS-425: a named code applied to the unsigned integer read. */
+    /** PS-422 to PS-425, PS-643: a named code applied to the unsigned integer read. */
     static long decodeEncoding(long raw, String encoding, int size, String name) {
         int bits = size * 8;
         switch (encoding) {
@@ -140,6 +140,15 @@ final class Wave4 {
                     out = out * 10 + digit;
                 }
                 return out;
+            }
+            case "bcd_signed": {
+                // PS-643 (CR-2026-200): M-Bus Type A. A most-significant group of 0xF is the
+                // sign and the groups below it the magnitude; otherwise plain bcd. -0 is 0.
+                int top = bits - 4;
+                if (((raw >>> top) & 0x0F) == 0x0F) {
+                    return -decodeEncoding(raw & ((1L << top) - 1), "bcd", size, name);
+                }
+                return decodeEncoding(raw, "bcd", size, name);
             }
             case "gray": {
                 long out = raw;
@@ -174,6 +183,16 @@ final class Wave4 {
                     value /= 10;
                 }
                 return out;
+            }
+            case "bcd_signed": {
+                // PS-644 (CR-2026-200): a negative value takes 0xF in the top group and its
+                // magnitude in the groups below; zero or above is plain bcd.
+                if (value >= 0) return encodeEncoding(value, "bcd", size, name);
+                if (-value > Math.pow(10, size * 2 - 1) - 1) {
+                    throw new SchemaException.EncodeException("field '" + name + "': " + value
+                            + " has no " + bits + "-bit signed BCD representation (PS-644)");
+                }
+                return (0x0FL << (bits - 4)) | encodeEncoding(-value, "bcd", size, name);
             }
             case "gray":
                 return value ^ (value >>> 1);

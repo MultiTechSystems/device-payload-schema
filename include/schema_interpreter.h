@@ -155,6 +155,11 @@ struct field_def {
     /* CR-2026-174 (PS-586): `on_mismatch: warn` on a checksum, else a mismatch is an
      * error. In what was padding after bit_signed, so field_def_t keeps its size. */
     bool checksum_warn;
+    /* CR-2026-199 (PS-641, PS-642): `trim: true` on an ascii field. Decode drops leading
+     * and trailing U+0020, U+0009, U+000A and U+000D after the trailing 0x00 padding;
+     * encode pads with spaces in place of 0x00. In what was padding after checksum_warn,
+     * so field_def_t keeps its size. */
+    bool ascii_trim;
     endian_t endian;
     
     /* Modifiers */
@@ -1074,6 +1079,11 @@ static inline void schema_note_checksum(decode_result_t* result, const decoded_f
     if (result->checksum_warnings < 255) result->checksum_warnings++;
 }
 
+/* PS-641 (CR-2026-199): the whitespace `trim: true` removes from both ends of a text. */
+static inline bool schema_is_trim_space(uint8_t b) {
+    return b == ' ' || b == '\t' || b == '\n' || b == '\r';
+}
+
 static inline int decode_field(
     const field_def_t* field,
     const uint8_t* buf,
@@ -1310,14 +1320,21 @@ static inline int decode_field(
             if (*pos + width > len) return SCHEMA_ERR_BUFFER;
             size_t n = width;
             while (n > 0 && buf[*pos + n - 1] == 0x00) n--;
-            if (n > SCHEMA_MAX_NAME_LEN - 1) return SCHEMA_ERR_UNSUPPORTED;
-            memcpy(out->value.str, buf + *pos, n);
-            out->value.str[n] = '\0';
-            out->text_len = (uint8_t)n;
             out->non_ascii = false;
             for (size_t c = 0; c < n; c++) {
                 if (buf[*pos + c] > 0x7F) out->non_ascii = true;
             }
+            /* PS-641 (CR-2026-199): after the padding, the whitespace at both ends. */
+            size_t first = 0;
+            if (field->ascii_trim) {
+                while (n > 0 && schema_is_trim_space(buf[*pos + n - 1])) n--;
+                while (first < n && schema_is_trim_space(buf[*pos + first])) first++;
+            }
+            n -= first;
+            if (n > SCHEMA_MAX_NAME_LEN - 1) return SCHEMA_ERR_UNSUPPORTED;
+            memcpy(out->value.str, buf + *pos + first, n);
+            out->value.str[n] = '\0';
+            out->text_len = (uint8_t)n;
             *pos += width;
             out->valid = true;
             return SCHEMA_OK;
@@ -2537,7 +2554,9 @@ static inline int encode_field(
         }
         if (*pos + field->size > SCHEMA_MAX_PAYLOAD) return SCHEMA_ERR_BUFFER;
         memcpy(buf + *pos, input->value.str, input->text_len);
-        memset(buf + *pos + input->text_len, 0, field->size - input->text_len);
+        /* PS-642 (CR-2026-199): a trimmed field pads with spaces (it has no `nul` here). */
+        memset(buf + *pos + input->text_len, field->ascii_trim ? ' ' : 0,
+               field->size - input->text_len);
         *pos += field->size;
         return SCHEMA_OK;
     }
@@ -3587,6 +3606,13 @@ static inline field_def_t field_ascii(const char* name, uint8_t length) {
     strncpy(f.name, name, SCHEMA_MAX_NAME_LEN - 1);
     f.type = FIELD_TYPE_ASCII;
     f.size = length;
+    return f;
+}
+
+/* CR-2026-199 (PS-641, PS-642): an ascii field declaring `trim: true`. */
+static inline field_def_t field_ascii_trimmed(const char* name, uint8_t length) {
+    field_def_t f = field_ascii(name, length);
+    f.ascii_trim = true;
     return f;
 }
 

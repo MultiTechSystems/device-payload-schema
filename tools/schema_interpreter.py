@@ -430,7 +430,7 @@ def echo_value(field_def, span: bytes) -> Any:
     if ftype == 'hex':
         return span.hex()
     value = decode_ascii(field_def.get('name'), span, [], 'trailing',
-                         field_def.get('charset'))
+                         field_def.get('charset'), field_def.get('trim') is True)
     if field_def.get('numeral'):
         value = decode_numeral(field_def.get('name'), value, field_def['numeral'])
     return value
@@ -2443,7 +2443,7 @@ def literal_errors(field_def):
     return errors
 
 
-ENCODINGS = ('sign_magnitude', 'bcd', 'gray')
+ENCODINGS = ('sign_magnitude', 'bcd', 'bcd_signed', 'gray')
 _UNSIGNED_INTEGER_TYPES = ('u8', 'u16', 'u24', 'u32', 'u64',
                            'uint8', 'uint16', 'uint24', 'uint32', 'uint64')
 
@@ -2669,7 +2669,7 @@ def apply_nul_mode(text: str, mode: str) -> str:
 
 
 def decode_ascii(name: Any, raw: bytes, warnings: List[str], nul: str = 'trailing',
-                 charset: Optional[str] = None) -> str:
+                 charset: Optional[str] = None, trim: bool = False) -> str:
     """PS-534, PS-538: each byte is the ISO 8859-1 character of the same number, so the
     value is lossless and re-encodes to the same bytes (PS-537); the field's `nul` mode
     (trailing 0x00 padding by default) is applied. A byte above 0x7F is reported with
@@ -2677,17 +2677,45 @@ def decode_ascii(name: Any, raw: bytes, warnings: List[str], nul: str = 'trailin
 
     PS-624 (CR-2026-190): with `charset: utf-8` the bytes the `nul` mode leaves are decoded
     as UTF-8, with no warning; a sequence that is not well formed is an error naming the
-    field and the position of its first bad byte within the text."""
+    field and the position of its first bad byte within the text.
+
+    PS-641 (CR-2026-199): with `trim` the text then loses leading and trailing U+0020,
+    U+0009, U+000A and U+000D, after the byte rules and the character set."""
     if charset == 'utf-8':
         kept = apply_nul_mode(raw.decode('latin-1'), nul).encode('latin-1')
         try:
-            return kept.decode('utf-8')
+            text = kept.decode('utf-8')
         except UnicodeDecodeError as exc:
             raise FieldError(f"Field '{name}': the bytes are not well-formed UTF-8 from "
                              f"byte {exc.start} of the text (PS-624)") from None
-    if any(byte > 0x7F for byte in raw):
-        warnings.append(ASCII_HIGH_BYTE_WARNING.format(name))
-    return apply_nul_mode(raw.decode('latin-1'), nul)
+    else:
+        if any(byte > 0x7F for byte in raw):
+            warnings.append(ASCII_HIGH_BYTE_WARNING.format(name))
+        text = apply_nul_mode(raw.decode('latin-1'), nul)
+    return text.strip(TRIM_CHARACTERS) if trim else text
+
+
+#: PS-641 (CR-2026-199): the whitespace `trim: true` removes from both ends of a text.
+TRIM_CHARACTERS = ' \t\n\r'
+
+
+def trim_errors(node, _top=True):
+    """PS-641: `trim` is true or false, on an ascii field; anything else is refused, in the
+    spec prototype's text. Walked over the whole schema."""
+    errors = []
+    if isinstance(node, list):
+        for item in node:
+            errors.extend(trim_errors(item, False))
+    elif isinstance(node, dict):
+        if 'type' in node and 'trim' in node:
+            if node.get('type') != 'ascii' or not isinstance(node['trim'], bool):
+                errors.append(f"Field '{node.get('name')}': trim is true or false, on an "
+                              f"ascii field (PS-641)")
+        for key, value in node.items():
+            if _top and key == 'test_vectors':
+                continue
+            errors.extend(trim_errors(value, False))
+    return errors
 
 
 #: PS-624 (CR-2026-190): the one value `charset` takes, on an ascii field only.
@@ -3088,17 +3116,29 @@ def bitfield_part_errors(node, _top=True):
     return errors
 
 
+def ascii_padding(field_def: Dict[str, Any]) -> bytes:
+    """PS-642 (CR-2026-199): a `trim: true` ascii field that declares no `nul` pads with
+    U+0020 spaces; every other text pads with 0x00 (PS-537)."""
+    if field_def.get('type') == 'ascii' and field_def.get('trim') is True \
+            and 'nul' not in field_def:
+        return b' '
+    return b'\x00'
+
+
 def encode_ascii(name: Any, value: Any, length: Optional[int],
                  warnings: List[str], nul: str = 'trailing',
                  terminator: Optional[int] = None,
                  consume_terminator: bool = True,
-                 charset: Optional[str] = None) -> bytes:
+                 charset: Optional[str] = None,
+                 pad: bytes = b'\x00') -> bytes:
     """PS-537: a character above U+00FF, or a value longer than a fixed `length`, is
     rejected naming the field; U+0080..U+00FF is written as the byte of the same number
     with a warning; a short value is padded with 0x00. `length` is None where the field's
     length is not fixed (`remaining`, a reference), and the value then supplies it.
     PS-625 (CR-2026-190): with `charset: utf-8` the value is written as UTF-8, with no
-    warning, and `length` counts its bytes."""
+    warning, and `length` counts its bytes.
+    PS-642 (CR-2026-199): `pad` is the padding byte, a space for a `trim: true` field
+    that declares no `nul`."""
     text = str(value)
     utf8 = charset == 'utf-8'
     if not utf8 and any(ord(ch) > 0xFF for ch in text):
@@ -3129,7 +3169,7 @@ def encode_ascii(name: Any, value: Any, length: Optional[int],
         return encoded + bytes([terminator])                           # PS-595, PS-620
     if length is None:
         return encoded
-    return encoded + b'\x00' * (length - len(encoded))
+    return encoded + pad * (length - len(encoded))
 
 
 #: The token a mapping's `default` substitutes with the unmapped value (PS-406).
@@ -4993,6 +5033,7 @@ def schema_iterator_errors(schema):
     errors.extend(ascii_text_errors(schema))                         # PS-534, PS-593
     errors.extend(charset_errors(schema))                            # PS-624
     errors.extend(frame_source_errors(schema))                       # PS-635
+    errors.extend(trim_errors(schema))                               # PS-641
     errors.extend(checksum_errors(schema))                           # PS-585
     errors.extend(checksum_placement_errors(schema))                 # PS-608
     errors.extend(bitfield_part_errors(schema))                      # PS-430
@@ -6896,12 +6937,21 @@ class SchemaInterpreter:
             for _ in range(size * 2):  # 2 nibbles per byte
                 digit = temp & 0x0F
                 if digit > 9:
-                    raise ValueError(f"Invalid BCD digit: {digit}")
+                    raise ValueError(f"Invalid BCD digit: {digit} (PS-424)")
                 result += digit * multiplier
                 multiplier *= 10
                 temp >>= 4
             return result
         
+        elif encoding == 'bcd_signed':
+            # PS-643 (CR-2026-200): M-Bus Type A. A most-significant group of 0xF is the
+            # sign and the groups below it the magnitude; otherwise plain bcd. -0 is 0.
+            top = size * 8 - 4
+            if (value >> top) & 0xF == 0xF:
+                magnitude = self._decode_encoding(value & ((1 << top) - 1), 'bcd', size)
+                return -magnitude if magnitude else 0
+            return self._decode_encoding(value, 'bcd', size)
+
         elif encoding == 'gray':
             # Gray code to binary: XOR with right-shifted versions
             result = value
@@ -6942,6 +6992,16 @@ class SchemaInterpreter:
                 temp //= 10
             return result
         
+        elif encoding == 'bcd_signed':
+            # PS-644 (CR-2026-200): a negative value takes 0xF in the top group and its
+            # magnitude in the groups below; zero or above is plain bcd.
+            if value >= 0:
+                return self._encode_encoding(value, 'bcd', size)
+            if -value > 10 ** (size * 2 - 1) - 1:
+                raise ValueError(f"{value} has no {size * 8}-bit signed BCD "
+                                 f"representation (PS-644)")
+            return (0xF << (size * 8 - 4)) | self._encode_encoding(-value, 'bcd', size)
+
         elif encoding == 'gray':
             # Binary to Gray code: XOR with right-shifted self
             return value ^ (value >> 1)
@@ -7179,7 +7239,7 @@ class SchemaInterpreter:
                         self._nested_warnings.append(mismatch)
                     else:
                         raise FieldError(mismatch)
-            # Apply encoding if specified (sign_magnitude, bcd, gray)
+            # Apply encoding if specified (sign_magnitude, bcd, bcd_signed, gray)
             encoding = field_def.get('encoding')
             if encoding:
                 # For encoded values, read as unsigned first
@@ -7288,7 +7348,8 @@ class SchemaInterpreter:
                 raise BufferUnderflow.need(length, pos, len(buf))
             value = decode_ascii(field_def.get('name'), buf[pos:pos + length],
                                  self._nested_warnings, field_def.get('nul', 'trailing'),
-                                 field_def.get('charset'))              # PS-624
+                                 field_def.get('charset'),              # PS-624
+                                 field_def.get('trim') is True)         # PS-641
             if field_def.get('numeral'):                                 # PS-594
                 value = decode_numeral(field_def.get('name'), value, field_def['numeral'])
             if is_echo(field_def):                                       # PS-588
@@ -11971,7 +12032,7 @@ class SchemaInterpreter:
             size, signed = type_info[field_type]
             # PS-552: nearest, a tie to even, before any encoding; int() truncated.
             int_val = round_to_integer(value)
-            # Apply encoding if specified (sign_magnitude, bcd, gray)
+            # Apply encoding if specified (sign_magnitude, bcd, bcd_signed, gray)
             encoding = field_def.get('encoding')
             if encoding:
                 int_val = self._encode_encoding(int_val, encoding, size)
@@ -12039,7 +12100,8 @@ class SchemaInterpreter:
                                 self._encode_warnings, field_def.get('nul', 'trailing'),
                                 field_def.get('terminator') if field_type == 'ascii' else None,
                                 field_def.get('consume_terminator') is not False,
-                                field_def.get('charset') if field_type == 'ascii' else None)
+                                field_def.get('charset') if field_type == 'ascii' else None,
+                                ascii_padding(field_def))                # PS-642
         
         if field_type in ('hex', 'base64'):
             # PS-601 and PS-602 apply to the hex and base64 types as to `bytes` with that

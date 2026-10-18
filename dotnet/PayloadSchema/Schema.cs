@@ -148,6 +148,8 @@ public class SchemaField
     /// <summary><c>source</c>: <c>$fPort</c>, <c>$payloadLength</c> or <c>$remaining</c>, a value of
     /// the frame (PS-635, CR-2026-196); null where none is declared.</summary>
     public string? Source { get; set; }
+    /// <summary><c>trim: true</c>: whitespace is removed from both ends on decode, and encode pads with spaces where no <c>nul</c> is declared (PS-641, PS-642, CR-2026-199).</summary>
+    public bool Trim { get; set; }
     /// <summary>A check value over the bytes before the field (PS-585 to PS-587, CR-2026-174).</summary>
     public ChecksumSpec? Checksum { get; set; }
     /// <summary>A computed field written `type: integer` (PS-283); its Type is Number.</summary>

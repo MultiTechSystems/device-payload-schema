@@ -1,0 +1,96 @@
+# CR-2026-200 (PS-422 amended, PS-643, PS-644): `encoding: bcd_signed`, M-Bus Type A BCD
+# (EN 13757-3). A most-significant 4-bit group of 0xF marks a negative value whose magnitude
+# the other groups give as `bcd`; otherwise the value is plain `bcd`. Any other group above 9
+# is PS-424's error, and a negative zero is reported as 0. An encoder writes 0xF above the
+# magnitude of a negative value and rejects a magnitude wider than the groups below it.
+#
+# Three lists, read by the reference and the generated codec
+# (tests/test_cr_2026_200_cases.py), Go (go/schema/cr200_test.go), Java (CR2026200Test.java)
+# and C# (CR2026_200Tests.cs). C has no encodings, and tools/schema_binary.py refuses
+# `encoding` (PS-446). The spec prototype's TestCR2026200SignedBcd, case for case, and a few
+# more.
+#
+#   decode: `schema` (YAML text), `payload` (hex) and either `expected` (the whole decoded
+#           data) or `error` (text one of the errors contains; no data is reported).
+#   cases:  `schema`, `input` (JSON text) and either `payload` (hex) or `error`.
+#   load:   `schema` and the `error` its load reports.
+
+decode:
+
+- name: a_top_group_of_f_is_negative
+  schema: "name: t\nfields:\n  - {name: flow, type: u24, endian: little, encoding: bcd_signed, div: 1000}\n"
+  payload: "3412F0"
+  expected: {flow: -1.234}
+
+- name: otherwise_the_value_is_bcd
+  schema: "name: t\nfields:\n  - {name: flow, type: u24, endian: little, encoding: bcd_signed, div: 1000}\n"
+  payload: "341200"
+  expected: {flow: 1.234}
+
+- name: a_negative_zero_is_zero
+  schema: "name: t\nfields:\n  - {name: flow, type: u24, endian: little, encoding: bcd_signed, div: 1000}\n"
+  payload: "0000F0"
+  expected: {flow: 0}
+
+- name: another_group_above_9_is_still_an_error
+  schema: "name: t\nfields:\n  - {name: flow, type: u24, endian: little, encoding: bcd_signed, div: 1000}\n"
+  payload: "341AF0"
+  error: "PS-424"
+
+- name: a_group_of_f_below_the_sign_is_an_error
+  schema: "name: t\nfields:\n  - {name: flow, type: u24, endian: little, encoding: bcd_signed, div: 1000}\n"
+  payload: "FFFFFF"
+  error: "PS-424"
+
+- name: big_endian_u16
+  schema: "name: t\nfields:\n  - {name: v, type: u16, encoding: bcd_signed}\n"
+  payload: "F123"
+  expected: {v: -123}
+
+cases:
+
+- name: a_negative_value_takes_f_above_its_magnitude
+  schema: "name: t\nfields:\n  - {name: flow, type: u24, endian: little, encoding: bcd_signed, div: 1000}\n"
+  input: '{"flow": -1.234}'
+  payload: "3412f0"
+
+- name: a_positive_value_is_bcd
+  schema: "name: t\nfields:\n  - {name: flow, type: u24, endian: little, encoding: bcd_signed, div: 1000}\n"
+  input: '{"flow": 1.234}'
+  payload: "341200"
+
+- name: a_magnitude_too_wide_for_the_sign_is_rejected
+  schema: "name: t\nfields:\n  - {name: flow, type: u24, endian: little, encoding: bcd_signed, div: 1000}\n"
+  input: '{"flow": -123.456}'
+  error: "-123456 has no 24-bit signed BCD representation (PS-644)"
+
+- name: six_digits_fit_without_the_sign
+  schema: "name: t\nfields:\n  - {name: flow, type: u24, endian: little, encoding: bcd_signed, div: 1000}\n"
+  input: '{"flow": 123.456}'
+  payload: "563412"
+
+- name: the_widest_negative_magnitude
+  schema: "name: t\nfields:\n  - {name: flow, type: u24, endian: little, encoding: bcd_signed, div: 1000}\n"
+  input: '{"flow": -99.999}'
+  payload: "9999f9"
+
+- name: a_positive_value_wider_than_every_group_is_rejected
+  schema: "name: t\nfields:\n  - {name: flow, type: u24, endian: little, encoding: bcd_signed, div: 1000}\n"
+  input: '{"flow": 1000}'
+  error: "PS-463"
+
+- name: zero_is_written_as_zero
+  schema: "name: t\nfields:\n  - {name: flow, type: u24, endian: little, encoding: bcd_signed, div: 1000}\n"
+  input: '{"flow": 0}'
+  payload: "000000"
+
+- name: big_endian_u16
+  schema: "name: t\nfields:\n  - {name: v, type: u16, encoding: bcd_signed}\n"
+  input: '{"v": -123}'
+  payload: "f123"
+
+load:
+
+- name: only_on_an_unsigned_integer
+  schema: "name: t\nfields:\n  - {name: v, type: s16, encoding: bcd_signed}\n"
+  error: "PS-422"

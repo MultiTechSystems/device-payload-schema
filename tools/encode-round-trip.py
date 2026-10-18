@@ -91,10 +91,17 @@ The `inherent` reasons, each of which is a decision recorded elsewhere:
   negative-zero     A floating-point field decoded a sign-bit zero word as 0 (PS-566,
                     CR-2026-154), and an encoder writes the positive-zero word for a zero of
                     either sign, so the sign bit is not in the output. It covers f16, bf16,
-                    f32, f64, f32le16, f32be16le and the minifloats. Judged from the decoded
-                    value, not the payload: a float field of a vector that does not
-                    re-encode and reports 0.
+                    f32, f64, f32le16, f32be16le and the minifloats, and the integer
+                    encodings with a sign: sign_magnitude (PS-423) and bcd_signed
+                    (PS-643, CR-2026-200). Judged from the decoded value, not the
+                    payload: such a field of a vector that does not re-encode and
+                    reports 0.
 
+  trimmed           An `ascii` field declared `trim: true` (PS-641, PS-642, CR-2026-199). The
+                    whitespace the decoder removed from both ends is not in the output; an
+                    encoder pads with spaces, so trailing space padding comes back and
+                    leading whitespace, or trailing tabs and line ends, do not. Judged from
+                    the schema, as nul-mode is.
   nul-mode          An `ascii` field declared `nul: stop` or `nul: drop` (PS-534, CR-2026-177).
                     `stop` leaves the bytes after the first 0x00 out of the value, and `drop`
                     removes the 0x00 bytes wherever they were, so neither is in the output
@@ -158,6 +165,7 @@ INHERENT = (
     "null-element",
     "shared-label",
     "negative-zero",
+    "trimmed",
     "nul-mode",
     "end-terminated",
     "checksum-mismatch",
@@ -167,6 +175,10 @@ INHERENT = (
 #: The floating-point types PS-566 covers.
 FLOAT_TYPES = ("f16", "bf16", "f32", "f64", "f32le16", "f32be16le",
                "uflt16", "sflt16", "sflt24")
+
+#: The integer encodings with a negative zero, reported as 0 and written as the positive
+#: zero (PS-423, PS-643): 0x8000 sign-magnitude, a 0xF top group over zero digits in BCD.
+SIGNED_ZERO_ENCODINGS = ("sign_magnitude", "bcd_signed")
 
 #: Recoverable in principle, so counted apart from the inherent set.
 FIXABLE = ("templated-name", "separate-tlv")
@@ -281,14 +293,16 @@ def absent_fields(schema, data, port=None):
 
 
 def zero_floats(schema, data, port=None):
-    """Top-level floating-point fields of the decoded entry that report 0 (PS-566)."""
+    """Top-level fields of the decoded entry that report 0 and have a negative zero: a
+    floating-point type (PS-566), or an integer encoding with a sign (PS-423, PS-643)."""
     fields = schema.get("fields") or []
     ports = schema.get("ports") or {}
     if ports:
         entry = ports.get(port, ports.get(str(port), ports.get("default")))
         fields = (entry or {}).get("fields") or [] if isinstance(entry, dict) else []
     return [f["name"] for f in fields
-            if isinstance(f, dict) and f.get("type") in FLOAT_TYPES and f.get("name")
+            if isinstance(f, dict) and f.get("name")
+            and (f.get("type") in FLOAT_TYPES or f.get("encoding") in SIGNED_ZERO_ENCODINGS)
             and isinstance(data.get(f["name"]), (int, float))
             and not isinstance(data.get(f["name"]), bool) and data[f["name"]] == 0]
 
@@ -316,6 +330,18 @@ def nul_mode_fields(schema, port=None):
     return [f["name"] for f in fields
             if isinstance(f, dict) and f.get("type") == "ascii" and f.get("name")
             and f.get("nul") in ("stop", "drop")]
+
+
+def trimmed_fields(schema, port=None):
+    """Top-level ascii fields declared `trim: true` (PS-641, PS-642)."""
+    fields = schema.get("fields") or []
+    ports = schema.get("ports") or {}
+    if ports:
+        entry = ports.get(port, ports.get(str(port), ports.get("default")))
+        fields = (entry or {}).get("fields") or [] if isinstance(entry, dict) else []
+    return [f["name"] for f in fields
+            if isinstance(f, dict) and f.get("type") == "ascii" and f.get("name")
+            and f.get("trim") is True]
 
 
 def has_null_element(node):
@@ -350,6 +376,8 @@ def classify(decoded, traits, schema=None, port=None):
         return "absent-value"
     if schema is not None and zero_floats(schema, decoded.data, port):
         return "negative-zero"                                           # PS-566
+    if schema is not None and trimmed_fields(schema, port):
+        return "trimmed"                                                 # PS-641, PS-642
     if schema is not None and nul_mode_fields(schema, port):
         return "nul-mode"                                                # PS-534, PS-595
     if schema is not None and end_terminated_fields(schema, port):

@@ -209,6 +209,18 @@ func decodeEncoding(raw uint64, encoding string, size int) (int64, error) {
 			out = out*10 + int64(digit)
 		}
 		return out, nil
+	case "bcd_signed":
+		// PS-643 (CR-2026-200): M-Bus Type A. A most-significant group of 0xF is the sign
+		// and the groups below it the magnitude; otherwise plain bcd. -0 is 0.
+		top := bits - 4
+		if (raw>>top)&0x0F == 0x0F {
+			magnitude, err := decodeEncoding(raw&(uint64(1)<<top-1), "bcd", size)
+			if err != nil {
+				return 0, err
+			}
+			return -magnitude, nil
+		}
+		return decodeEncoding(raw, "bcd", size)
 	case "gray":
 		out := raw
 		for shift := uint(1); shift < bits; shift <<= 1 {
@@ -246,6 +258,20 @@ func encodeEncoding(value int64, encoding string, size int) (uint64, error) {
 			value /= 10
 		}
 		return out, nil
+	case "bcd_signed":
+		// PS-644 (CR-2026-200): a negative value takes 0xF in the top group and its
+		// magnitude in the groups below; zero or above is plain bcd.
+		if value >= 0 {
+			return encodeEncoding(value, "bcd", size)
+		}
+		if float64(-value) > math.Pow(10, float64(size*2-1))-1 {
+			return 0, fmt.Errorf("%d has no %d-bit signed BCD representation (PS-644)", value, bits)
+		}
+		magnitude, err := encodeEncoding(-value, "bcd", size)
+		if err != nil {
+			return 0, err
+		}
+		return uint64(0x0F)<<(bits-4) | magnitude, nil
 	case "gray":
 		v := uint64(value)
 		return v ^ (v >> 1), nil

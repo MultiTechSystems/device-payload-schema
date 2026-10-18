@@ -735,15 +735,16 @@ public class Schema {
         AsciiText.check(fm);                                  // PS-534, PS-593, PS-072
         AsciiText.checkCharset(fm);                           // PS-624
         FrameSource.check(fm);                                // PS-635
+        AsciiText.checkTrim(fm);                              // PS-641
         if (fm.containsKey("match_value")) {
             throw new SchemaException(at + "match_value is withdrawn; write a signed type (sN), a "
                     + "signed bit range (sN[start:end]), encoding, match or guard instead (PS-426)");
         }
         if (fm.containsKey("encoding")) {
             Object encoding = fm.get("encoding");
-            if (!List.of("sign_magnitude", "bcd", "gray").contains(encoding)) {
+            if (!List.of("sign_magnitude", "bcd", "bcd_signed", "gray").contains(encoding)) {
                 throw new SchemaException(at + "encoding " + encoding
-                        + " is not one of sign_magnitude, bcd, gray (PS-422)");
+                        + " is not one of sign_magnitude, bcd, bcd_signed, gray (PS-422)");
             }
             if (!UNSIGNED_TYPES.contains(fm.get("type"))) {
                 throw new SchemaException(at + "encoding applies only to an unsigned integer type uN, not "
@@ -1292,6 +1293,7 @@ public class Schema {
         f.setEndTerminates(Boolean.TRUE.equals(fm.get("end_terminates")));         // PS-619
         f.setUtf8("utf-8".equals(fm.get("charset")));                               // PS-624
         if (fm.get("source") instanceof String src) f.setSource(src);                // PS-635
+        f.setTrim(Boolean.TRUE.equals(fm.get("trim")));                              // PS-641
         if (fm.get("checksum") instanceof Map<?, ?> checksum) {                 // PS-585
             f.setChecksum((Map<String, Object>) checksum, String.valueOf(fm.get("type")));
         }
@@ -2209,6 +2211,7 @@ public class Schema {
                 if (field.isUtf8()) {
                     value = AsciiText.decodeUtf8(field.getName(), (String) value);   // PS-624
                 }
+                value = AsciiText.trim(field, (String) value);   // PS-641: after nul, terminator, charset
                 if (field.getNumeral() != null) {
                     value = Numeral.decode(field.getName(), (String) value, field.getNumeral());   // PS-560
                 }
@@ -3517,6 +3520,7 @@ public class Schema {
                 while (end > 0 && str.charAt(end - 1) == '\0') end--;
                 Object value = str.substring(0, end);
                 if (field.isUtf8()) value = AsciiText.decodeUtf8(field.getName(), (String) value);   // PS-624
+                value = AsciiText.trim(field, (String) value);                                   // PS-641
                 if (field.getNumeral() != null) {
                     value = Numeral.decode(field.getName(), (String) value, field.getNumeral());
                 }

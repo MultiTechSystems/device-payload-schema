@@ -3349,6 +3349,38 @@ improved. The Go, Java and C# corpus runners write per-vector reports only when
     carries its own schema, so 91 distinct run-time schemas would join `_language-conformance/`
     (or share one per CR with a port each, as the fixture does).
 
+- **CR-2026-197 (PS-514 amended, PS-638; la-payload-schema main 2e0b3c6, for 0.5.8): a
+  corrected vendor outcome on a vector that expects an error.** A test-vector rule; no decode
+  or encode changes.
+  - **The rule.** On a vector with `expected_error`, a `correction` entry MAY omit `field`: its
+    `codec` is the vendor codec's whole output (`data`) and its `reason` why the schema rejects
+    it, and the vector carries exactly that one entry. An error vector marked
+    `source: vendor-codec` asserts the vendor fails too; where the vendor succeeds it must be
+    `vendor-codec-corrected` with that entry. Only the decode form exists: encode vectors wait
+    for evidence (the CR's open question).
+  - **Where:** `validate_schema.correction_errors`, so the validator and the provenance gate
+    (which calls it) reject, in the prototype's words (`key_vocabulary.check_correction`):
+    `Vector 'v': a vector that expects an error carries one correction entry, without field,
+    whose codec is the vendor's whole output (PS-514, PS-638)` (an entry naming a field, more
+    than one entry, or `codec`/`reason` missing), `Vector 'v': a correction entry without
+    field belongs to a vector that expects an error (PS-514, PS-638)`, and, replacing the old
+    "'correction' is only for source vendor-codec-corrected", `Vector 'v': correction belongs
+    to a vector with source: vendor-codec-corrected (PS-514)`. `payload-schema.json`'s
+    correction entry no longer requires `field`.
+  - **Readings:** `is_independent_vector` counts such a vector as not independent (PS-515: the
+    entry corrects everything the codec produced). `crossvalidate_ttn.corrections` records the
+    entry as `None`, and `compare` takes a failed decode of that payload as the correction,
+    not a disagreement. Go, Java and C# read no `correction`; nothing changed there. The
+    PS-638 provenance half (does the vendor succeed?) needs the codec and is the oracle's.
+  - **Measured:** no corpus vector is rejected (12 error vectors, none vendor-sourced). The
+    registry (2ef53db) loads unchanged, but its 20 `vendor_codec_error_*` vectors in
+    seeed/loradevelopkit-e5 and sensecap/sensecap-common-decoder (16 PS-586 bad CRC, 4 PS-565
+    two-byte frames) say `source: vendor-codec` while the vendor reports `{valid: false, err:
+    -1, ...}`: each needs PS-638's marking, which a registry batch will do.
+  - **Cases:** `tests/cr-2026-197-cases.yaml` (the prototype's 5), read by
+    `test_cr_2026_197_cases.py`. No fixture: the corpus has no vendor output to record, and a
+    fixture is `source: generated`. No floor moves.
+
 - **CR-2026-168 (PS-345, PS-346 amended, PS-578 to PS-580; la-payload-schema main, for
   0.5.7): field templates and shared lookup tables.** A definition carries exactly one of
   `fields` (a group), `field` (one field) or `lookup` (a table). A `$ref` to a `field`
@@ -3599,6 +3631,49 @@ improved. The Go, Java and C# corpus runners write per-vector reports only when
     changes. The milesight em310-tilt and gs601/wt303/wt304/wt401 registry schemas read UTF-8
     text as plain `ascii` today; with ASCII content the two agree, so adopting the key is a
     registry follow-up.
+
+- **CR-2026-199 (PS-641, PS-642; la-payload-schema `cr/0.5.8-apply-199` d6b2a8b, for 0.5.8):
+  trimmed text.** An `ascii` field may declare `trim: true`: decode removes leading and trailing
+  U+0020, U+0009, U+000A and U+000D after `nul`, `terminator` and `charset` (and before
+  `numeral`), so interior whitespace and other control characters stay; encode pads a fixed
+  `length` with spaces in place of 0x00 where the field declares no `nul` (a declared `nul`,
+  `trailing` included, keeps 0x00), writes a terminated value unpadded, and writes the value as
+  given - leading whitespace the decoder removed is not restored. The truvami name shape
+  (`20 54 41 47 20 ...` -> `TAG`, re-encoded `54 41 47 20 ...`).
+  - **Load (the prototype's text):** `Field 'n': trim is true or false, on an ascii field
+    (PS-641)` for a non-boolean value and for the key on any other type. Python `trim_errors`
+    (from `schema_iterator_errors`, so the validator and the TS013 generator too), Go
+    `checkTrim` (`go/schema/cr199.go`, from `checkFieldRules`), Java `AsciiText.checkTrim`
+    (from `checkWave4`), C# `AsciiText.CheckTrim` (from `CheckWave4`; a plain YAML 1.2 boolean
+    through `BooleanOf`).
+  - **Where:** Python `decode_ascii(..., trim)`, `ascii_padding` and `encode_ascii(..., pad)`;
+    the generator's ascii branch and the runtime's `encPad(..., pad)`; Go `trimText`/
+    `spacePadded` (`Field.Trim`); Java `AsciiText.trim` and `Encoder.encodeAscii`
+    (`Field.isTrim`); C# `AsciiText.Trim`/`SpacePadded` (`SchemaField.Trim`). A non-consuming
+    field's echo value (PS-588) is trimmed the same way.
+  - **C has it:** `field_def_t.ascii_trim` (in padding, so `sizeof(field_def_t)` stays 1640 and
+    `schema_t` 52536), built with `field_ascii_trimmed()`; decode trims after the trailing 0x00
+    padding, encode pads with spaces (C's ascii has no `nul`). `src/selftest_schema.c`'s
+    `test_ascii_trim`; the harness sets the flag, and builds `ascii-trim-padded.yaml` (C 586 ->
+    588 attempted, all passing). **The binary form has no slot for it**, so
+    `tools/schema_binary.py` refuses `trim` by name (PS-446).
+  - **Before:** every implementation ignored the key - whitespace stayed and padding was 0x00 -
+    and the validator refused it as unknown.
+  - **Round trip:** `encode-round-trip.py` files a vector of a `trim` field that does not
+    re-encode as the inherent reason `trimmed`.
+  - **Cases and fixtures:** `tests/cr-2026-199-cases.yaml` (11 decode, 8 encode, 4 load; the
+    prototype's `TestCR2026199TrimmedText` and more) read by `test_cr_2026_199_cases.py`
+    (reference, generated codec, validator and the binary converter), Go `cr199_test.go`, Java
+    `CR2026199Test`, C# `CR2026_199Tests`. Fixtures `ascii-trim` (trim alone, with `nul: stop`
+    and with a terminator; 3 vectors) and `ascii-trim-padded` (2 vectors), `source: generated`:
+    decode 2962 -> 2967 in Go, Java and C#; re-encode +3 everywhere, all `plain fixed` (Python
+    2339 -> 2342, `plain fixed` 265 -> 268; Java 2339 -> 2342; C# 2340 -> 2343; Java and C#
+    `plain fixed` 259 -> 262; Go 2358 -> 2361, plain 2327 -> 2330, `plain fixed` 259 -> 262);
+    the two vectors with leading whitespace, or a tab or line end before the padding, do not.
+  - **Measured:** no corpus, library, example or registry schema declares `trim` (a field named
+    `trim` in `bitfield-string-padded-signed.yaml` is a name, not the key), and every new path is
+    reached only through it, so none is rejected and no decode or encode output changes.
+    Adopting it in the registry's truvami tag-s-l name is a registry follow-up.
 
 - **CR-2026-175 (PS-453 and PS-015 amended, PS-588, PS-589; la-payload-schema main 9e8957a, for
   0.5.7): a byte string that does not consume reports its span again.** A `bytes`, `hex` or
@@ -4518,6 +4593,43 @@ improved. The Go, Java and C# corpus runners write per-vector reports only when
     yaml.v3 and SnakeYAML.
   - **Also:** `mk/gate-verdicts.mk` and `tools/verdicts-gate.py` used `.cache/` whatever
     `CACHE_DIR` said; both follow `CACHE_DIR` now, as the Makefile's other targets do.
+- **CR-2026-200 (PS-422 amended, PS-643, PS-644; la-payload-schema branch
+  `cr/0.5.8-apply-200`, 59b59c1, for 0.5.8): `encoding: bcd_signed`, M-Bus Type A BCD.** A
+  most-significant 4-bit group of 0xF is a minus sign over the BCD magnitude of the groups
+  below it; any other value is plain `bcd`. Another group above 9 is PS-424's error, and a
+  negative zero (`F00000`) is reported as 0. An encoder writes 0xF above a negative value's
+  magnitude and rejects one wider than the groups below the sign, in the prototype's words:
+  `-123456 has no 24-bit signed BCD representation (PS-644)`; zero or above is plain `bcd`
+  (PS-463). The CR's worked example, a u24 little-endian with `div: 1000`: `3412F0` is
+  -1.234, `341200` 1.234.
+  - **Where:** beside the other encodings, one helper per language: Python
+    `_decode_encoding`/`_encode_encoding` (`ENCODINGS` for the PS-422 load check, so the
+    validator and the generator too), the generator's `decodeEncoding` and the runtime's
+    `encEncoding`, Go `decodeEncoding`/`encodeEncoding` (`wave4.go`, load check in
+    `vocabulary.go`), Java `Wave4` (load check in `Schema`), C# `Wave4` (load check in
+    `SchemaParser`). Vocabulary: `tools/schema_vocabulary.py`, and `schemas/payload-schema.json`
+    gains an `encoding` enum on `definitions.field`.
+  - **Before:** every implementation rejected `bcd_signed` at load (PS-422). The Python
+    reference's PS-424 error was `Invalid BCD digit: 10` with no PS number; it now ends
+    `(PS-424)`, as the other four did.
+  - **C** has no encodings: `tools/schema_binary.py` already refused `encoding` (PS-446), and
+    its reason (and the C harness's) now names `bcd_signed`. A recorded C gap.
+  - **`encode-round-trip.py`** files a vector that does not re-encode and reports 0 in a
+    `sign_magnitude` or `bcd_signed` field under `negative-zero`, as CR-2026-154 does for
+    floats (PS-423, PS-643).
+  - **Cases:** `tests/cr-2026-200-cases.yaml` (the prototype's six `TestCR2026200SignedBcd`
+    tests and a few more: the widest negative, a positive too wide, a big-endian u16, the
+    PS-422 type check), read by `test_cr_2026_200_cases.py` (reference and codec), Go
+    `cr200_test.go`, Java `CR2026200Test`, C# `CR2026_200Tests`.
+  - **Fixture** `_language-conformance/encoding-bcd-signed.yaml`: negative, positive and
+    negative-zero vectors (mutation score 100%). Floors: decode 2962 -> 2965 in Go, Java and
+    C#; re-encode +2 everywhere, `plain fixed` +2 (Python and Java 2339 -> 2341, C# 2340 ->
+    2342, Go 2358 -> 2360, plain 2327 -> 2329); the negative-zero vector cannot re-encode.
+  - **Measured:** no corpus or registry schema declares `bcd_signed`, so nothing changes decode
+    or encode output or is rejected at load; plain `bcd` (registry mclimate) is unchanged but
+    for the Python PS-424 text. The elvaco cmi4110/cmi4111 `flow` and `power` the CR cites
+    become expressible; converting them is the registry's follow-up.
+
 - **A quoted numeric tlv case key is the number it spells, in all five.** `'0x0309':` and
   `'258':` reach an implementation as text where `0x0309:` reaches it as an integer (PyYAML,
   yaml.v3 and SnakeYAML resolve the unquoted form; YamlDotNet keeps the text either way). Python

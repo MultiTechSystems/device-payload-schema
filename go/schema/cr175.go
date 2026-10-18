@@ -81,6 +81,7 @@ func echoValue(field Field, span []byte) (any, bool) {
 		}
 		text = utf
 	}
+	text = trimText(field, text) // PS-641
 	if field.Numeral != "" {
 		n, err := decodeNumeral(field.Name, text, field.Numeral)
 		if err != nil {

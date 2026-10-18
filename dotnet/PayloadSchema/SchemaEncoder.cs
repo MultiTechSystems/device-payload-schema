@@ -3455,11 +3455,14 @@ public static class SchemaEncoder
                 case FieldType.Ascii or FieldType.String:
                     // PS-537. A fixed `length` pads and bounds the value; `remaining` or a
                     // reference has no fixed count, so the value supplies it.
-                    return Helpers.EncodeAscii(field.Name, value?.ToString() ?? "",
+                {
+                    var asText = value?.ToString() ?? "";
+                    return AsciiText.SpacePadded(field, Helpers.EncodeAscii(field.Name, asText,
                         field.Length > 0 && field.LengthRef == null ? field.Length : null,
                         _result.Warnings, field.Nul,
                         field.Type == FieldType.Ascii ? field.Terminator : null,
-                        !field.KeepTerminator, field.Type == FieldType.Ascii && field.Utf8);
+                        !field.KeepTerminator, field.Type == FieldType.Ascii && field.Utf8), asText);   // PS-642
+                }
             }
 
             throw new InvalidOperationException($"Cannot encode type: {field.Type}");
@@ -3950,6 +3953,7 @@ internal sealed class FrameMeta
             {
                 object text = Helpers.DecodeAscii(field.Name, span, new List<string>(), null,
                     field.Utf8);
+                text = AsciiText.Trim(field, (string)text);                      // PS-641
                 if (field.Numeral != null)
                     text = Numeral.Decode(field.Name, (string)text, field.Numeral);
                 return text;

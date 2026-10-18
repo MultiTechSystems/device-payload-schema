@@ -143,7 +143,7 @@ static class Wave4
         return sub >= 65536 ? sign | (1UL << 16) : sign | (ulong)sub;
     }
 
-    /// <summary>PS-422 to PS-425: a named code applied to the unsigned integer read.</summary>
+    /// <summary>PS-422 to PS-425, PS-643: a named code applied to the unsigned integer read.</summary>
     public static long DecodeEncoding(ulong raw, string encoding, int size, string name)
     {
         int bits = size * 8;
@@ -165,6 +165,15 @@ static class Wave4
                     result = result * 10 + (long)digit;
                 }
                 return result;
+            }
+            case "bcd_signed":
+            {
+                // PS-643 (CR-2026-200): M-Bus Type A. A most-significant group of 0xF is the
+                // sign and the groups below it the magnitude; otherwise plain bcd. -0 is 0.
+                int top = bits - 4;
+                if (((raw >> top) & 0x0F) == 0x0F)
+                    return -DecodeEncoding(raw & ((1UL << top) - 1), "bcd", size, name);
+                return DecodeEncoding(raw, "bcd", size, name);
             }
             case "gray":
             {
@@ -200,6 +209,15 @@ static class Wave4
                     value /= 10;
                 }
                 return result;
+            }
+            case "bcd_signed":
+            {
+                // PS-644 (CR-2026-200): a negative value takes 0xF in the top group and its
+                // magnitude in the groups below; zero or above is plain bcd.
+                if (value >= 0) return EncodeEncoding(value, "bcd", size, name);
+                if (-value > Math.Pow(10, size * 2 - 1) - 1)
+                    throw new InvalidOperationException($"field '{name}': {value} has no {bits}-bit signed BCD representation (PS-644)");
+                return (0x0FUL << (bits - 4)) | EncodeEncoding(-value, "bcd", size, name);
             }
             case "gray":
                 return (ulong)value ^ ((ulong)value >> 1);

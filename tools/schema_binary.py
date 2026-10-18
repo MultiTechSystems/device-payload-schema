@@ -197,13 +197,16 @@ C_UNSUPPORTED_KEYS = {
     "compute": "the C interpreter has no computed fields",
     "ref": "the C interpreter has no computed fields (ref)",
     "guard": "the C interpreter has no guard",
-    "encoding": "the C interpreter has no sign_magnitude/bcd/gray encodings",
+    "encoding": "the C interpreter has no sign_magnitude/bcd/bcd_signed/gray encodings",
     "nul": "the C interpreter has no nul modes on ascii (PS-534)",
     "terminator": "the C interpreter has no terminator-delimited ascii (PS-593)",
     "consume_terminator": "the C interpreter has no terminator-delimited ascii (PS-619)",
     "end_terminates": "the C interpreter has no terminator-delimited ascii (PS-619)",
     "charset": "the C interpreter has no UTF-8 ascii (PS-624)",
     "source": "the C interpreter has no type: number field; a value of the frame (FPort, payload length, bytes remaining) is not built (PS-635)",
+    # CR-2026-199: the struct API has it (field_def_t.ascii_trim), but a field record of
+    # this format has no slot for it.
+    "trim": "this format has no trim record (PS-641)",
     "numeral": "the C interpreter holds ascii text, not the integer it spells (PS-560)",
     "bit_labels": "the C interpreter has no bit_labels; it reports a number, not the labels of its set bits (PS-616)",
     "join": "the C interpreter has no bit_labels (PS-616)",
