@@ -829,16 +829,16 @@
           },
           "correction": {
             "type": "array",
-            "description": "For source vendor-codec-corrected: each field whose expected value differs from the vendor codec's output (PS-514)",
+            "description": "For source vendor-codec-corrected: each field whose expected value differs from the vendor codec's output (PS-514). On a vector with expected_error, exactly one entry without field, whose codec is the vendor codec's whole output (PS-514, PS-638)",
             "minItems": 1,
             "items": {
               "type": "object",
               "properties": {
-                "field": {"type": "string", "description": "The reported name"},
-                "codec": {"description": "The value the codec produces, or null where it produces none"},
-                "reason": {"type": "string", "description": "Why the expected value differs"}
+                "field": {"type": "string", "description": "The reported name; omitted only on a vector with expected_error (PS-638)"},
+                "codec": {"description": "The value the codec produces, or null where it produces none; without field, the codec's whole output"},
+                "reason": {"type": "string", "description": "Why the expected value differs, or why the schema rejects what the codec decodes"}
               },
-              "required": ["field", "codec", "reason"],
+              "required": ["codec", "reason"],
               "additionalProperties": false
             }
           },

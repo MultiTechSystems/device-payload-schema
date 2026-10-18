@@ -3349,6 +3349,38 @@ improved. The Go, Java and C# corpus runners write per-vector reports only when
     carries its own schema, so 91 distinct run-time schemas would join `_language-conformance/`
     (or share one per CR with a port each, as the fixture does).
 
+- **CR-2026-197 (PS-514 amended, PS-638; la-payload-schema main 2e0b3c6, for 0.5.8): a
+  corrected vendor outcome on a vector that expects an error.** A test-vector rule; no decode
+  or encode changes.
+  - **The rule.** On a vector with `expected_error`, a `correction` entry MAY omit `field`: its
+    `codec` is the vendor codec's whole output (`data`) and its `reason` why the schema rejects
+    it, and the vector carries exactly that one entry. An error vector marked
+    `source: vendor-codec` asserts the vendor fails too; where the vendor succeeds it must be
+    `vendor-codec-corrected` with that entry. Only the decode form exists: encode vectors wait
+    for evidence (the CR's open question).
+  - **Where:** `validate_schema.correction_errors`, so the validator and the provenance gate
+    (which calls it) reject, in the prototype's words (`key_vocabulary.check_correction`):
+    `Vector 'v': a vector that expects an error carries one correction entry, without field,
+    whose codec is the vendor's whole output (PS-514, PS-638)` (an entry naming a field, more
+    than one entry, or `codec`/`reason` missing), `Vector 'v': a correction entry without
+    field belongs to a vector that expects an error (PS-514, PS-638)`, and, replacing the old
+    "'correction' is only for source vendor-codec-corrected", `Vector 'v': correction belongs
+    to a vector with source: vendor-codec-corrected (PS-514)`. `payload-schema.json`'s
+    correction entry no longer requires `field`.
+  - **Readings:** `is_independent_vector` counts such a vector as not independent (PS-515: the
+    entry corrects everything the codec produced). `crossvalidate_ttn.corrections` records the
+    entry as `None`, and `compare` takes a failed decode of that payload as the correction,
+    not a disagreement. Go, Java and C# read no `correction`; nothing changed there. The
+    PS-638 provenance half (does the vendor succeed?) needs the codec and is the oracle's.
+  - **Measured:** no corpus vector is rejected (12 error vectors, none vendor-sourced). The
+    registry (2ef53db) loads unchanged, but its 20 `vendor_codec_error_*` vectors in
+    seeed/loradevelopkit-e5 and sensecap/sensecap-common-decoder (16 PS-586 bad CRC, 4 PS-565
+    two-byte frames) say `source: vendor-codec` while the vendor reports `{valid: false, err:
+    -1, ...}`: each needs PS-638's marking, which a registry batch will do.
+  - **Cases:** `tests/cr-2026-197-cases.yaml` (the prototype's 5), read by
+    `test_cr_2026_197_cases.py`. No fixture: the corpus has no vendor output to record, and a
+    fixture is `source: generated`. No floor moves.
+
 - **CR-2026-168 (PS-345, PS-346 amended, PS-578 to PS-580; la-payload-schema main, for
   0.5.7): field templates and shared lookup tables.** A definition carries exactly one of
   `fields` (a group), `field` (one field) or `lookup` (a table). A `$ref` to a `field`
