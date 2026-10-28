@@ -16,6 +16,16 @@ This repository provides:
 The schema language enables device manufacturers and integrators to define payload
 structures once, then automatically generate decoders for multiple platforms.
 
+## Status
+
+This is a pre-standard proof of concept by Multi-Tech Systems, Inc. It is not a LoRa
+Alliance specification and is not endorsed by the LoRa Alliance. It makes no claim of
+conformance to any LoRa Alliance specification.
+
+A specification for payload schemas is in development, and this toolkit was its starting
+point. The two may differ. When the specification is published, a release of this toolkit
+matching it will be tagged, with any differences recorded.
+
 ## Quick Start
 
 ### Prerequisites
@@ -64,7 +74,7 @@ python3 tools/score_schema.py schemas/devices/decentlab/dl-5tm.yaml --verbose
 
 Quality tiers: Rejected (below 60%), Bronze (60-69%), Silver (70-84%), Gold (85-94%), Platinum (95-100%).
 A schema with no test vector declaring an independent `source:` (`vendor-doc`,
-`vendor-codec`, `field-capture`, `spec-example`) is capped at Silver (PS-264).
+`vendor-codec`, `field-capture`, `spec-example`) is capped at Silver.
 
 Scoring includes: schema validity, test vectors, Python/JS cross-validation, branch coverage, edge cases, and semantic annotations (IPSO, SenML, TTN normalized).
 
@@ -216,6 +226,8 @@ Contributions welcome! Please:
 1. Add test vectors for new schemas
 2. Ensure `pytest` passes
 3. Run `python3 tools/validate_schema.py <schema> -v` and `python3 tools/score_schema.py <schema>` on new schemas
+4. Reference this repository's issues in commits, comments and branch names. Do not cite
+   requirement or change request numbers from unpublished specification drafts.
 
 ## License
 
