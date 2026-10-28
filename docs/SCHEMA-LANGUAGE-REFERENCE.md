@@ -1,10 +1,11 @@
 # Payload Schema Language Reference
 
-Complete reference for the LoRa Alliance Payload Schema specification (v0.5.0).
+Complete reference for the payload schema language as this toolkit implements it.
 
-Normative requirement ids (`PS-nnn`) are cited where a rule is easy to get wrong or where
-implementations have disagreed. The specification is the authority; this is a working
-reference for authoring schemas in this repository.
+This toolkit is a pre-standard proof of concept by Multi-Tech Systems, Inc. (see the
+README's Status section). It is not a LoRa Alliance specification, and this document is
+not one either: it describes what the implementations in this repository do, for
+authoring schemas here.
 
 ## Document Structure
 

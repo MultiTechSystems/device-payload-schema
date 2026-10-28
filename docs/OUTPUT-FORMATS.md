@@ -48,7 +48,7 @@ those in `result.warnings` instead). `decode()` never adds `_meta`; `interpret()
 
 ## 1a. Interpreter Output: decoded JSON and `_meta`
 
-`_meta` is the normative interface to the Integration Layer. It is the
+`_meta` is the interface to an Integration Layer. It is the
 schema's semantic annotations and the uplink's context, beside the decoded values, so a
 converter downstream can name, type and route each value without reading the schema.
 
