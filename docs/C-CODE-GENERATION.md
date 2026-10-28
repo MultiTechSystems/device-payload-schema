@@ -182,6 +182,8 @@ No external dependencies. No `<math.h>`. Byte-order helpers are included inline.
 
 ## Feature Support
 
+Every port gets both `pack_*()` and `unpack_*()`, whatever its `direction`: a device packs its uplinks and unpacks its downlinks, and a host-side tool does the reverse.
+
 | Feature | pack_*() | unpack_*() | Notes |
 |---------|----------|------------|-------|
 | Basic types (u8-u64, s8-s64) | ✅ | ✅ | |
@@ -189,7 +191,7 @@ No external dependencies. No `<math.h>`. Byte-order helpers are included inline.
 | byte_group | ❌ | ❌ | Emitted code calls undefined `put_u8_be`/`get_u8_be` and does not compile |
 | flagged | ✅ | ✅ | Conditional on bitmask |
 | match | ✅ | ✅ | C switch statement; an `s32` member calls an undefined `get_s32_be` |
-| TLV | ❌ | ❌ | Emits a stub (`/* TLV decoding — use reference interpreter */`) that reads nothing |
+| TLV | ✅ | ✅ | pack writes the one entry its tag members select (`tlv_tag` for a `tag_size` tag), -1 for a tag no case takes; unpack reads entries to the end, bounded by `length_size`, and follows `unknown` (with `skip` and no length the return value falls short of `len`). `tlv_present` has a bit per case the frame held (`<NAME>_CASE_<key>` macros), so each entry of a multi-entry frame can be acted on; a case repeated in one frame returns -1 unless the tlv declares `on_repeat: last`. `merge: false` and a tag that is not a whole integer return -1. A case body reaching a nested `match` on a `var`, an internal field or an `s32` does not compile yet |
 | Transforms (div, sqrt, etc.) | ❌ | ❌ | By design - see above |
 | Nested objects | ❌ | ❌ | Flatten in schema |
 

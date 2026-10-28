@@ -136,6 +136,14 @@ def collect_fields(fields: List[Dict], prefix: str = '') -> List[Tuple[str, str,
 
         if 'tlv' in field:
             tlv = field['tlv']
+            # The tag is a member too: pack reads it to choose the one entry it
+            # writes, and unpack sets it to the tag of the last entry it read.
+            for cname, ttype, tdef in tlv_tag_parts(tlv):
+                result.append((cname, type_ctype(ttype), tdef))
+            # Which cases the frame held: a name two cases report cannot say.
+            present_type = 'u64' if len(tlv.get('cases', {})) > 32 else 'u32'
+            result.append((TLV_PRESENT_MEMBER, type_ctype(present_type),
+                           {'name': TLV_PRESENT_MEMBER, 'type': present_type}))
             for case_key, case_fields in tlv.get('cases', {}).items():
                 for cf in case_fields:
                     cfname = cf.get('name', '_')
@@ -190,6 +198,103 @@ def collect_fields(fields: List[Dict], prefix: str = '') -> List[Tuple[str, str,
     return deduped
 
 
+TLV_TAG_MEMBER = 'tlv_tag'
+TLV_PRESENT_MEMBER = 'tlv_present'
+
+
+def tlv_case_macro(case_key: Any) -> str:
+    """A C identifier for a case key: [1] -> 1, [1, 103] -> 1_103, [9, *] -> 9_ANY."""
+    text = str(case_key).strip().strip('[]')
+    parts = [p.strip() for p in text.split(',') if p.strip()] or [text]
+    out = []
+    for p in parts:
+        if p == '*':
+            out.append('ANY')
+        elif p.startswith('!'):
+            out.append('NOT' + p[1:].strip())
+        else:
+            out.append(re.sub(r'[^A-Za-z0-9]+', '_', p).upper().strip('_'))
+    return '_'.join(out)
+
+
+def tlv_case_bits(tlv: Dict) -> List[Tuple[Any, str, int]]:
+    """(case_key, macro suffix, bit) per case, in declaration order."""
+    return [(k, tlv_case_macro(k), i) for i, k in enumerate(tlv.get('cases', {}))]
+
+
+def tlv_tag_parts(tlv: Dict) -> List[Tuple[str, str, Dict]]:
+    """The tag as (c_name, type, field) parts, in the order they are on the wire.
+
+    A composite tag (tag_fields with tag_key) is its tag_fields, as the reference
+    reads it; otherwise one integer of tag_size bytes, held in `tlv_tag`.
+    """
+    tag_fields = tlv.get('tag_fields')
+    if tag_fields and tlv.get('tag_key'):
+        return [(to_c(tf.get('name', 'tag%d' % i)), tf.get('type', 'u8'), tf)
+                for i, tf in enumerate(tag_fields)]
+    size = tlv.get('tag_size', 1)
+    ttype = {1: 'u8', 2: 'u16', 3: 'u24', 4: 'u32'}.get(size, 'u%d' % (size * 8))
+    return [(TLV_TAG_MEMBER, ttype, {'name': TLV_TAG_MEMBER, 'type': ttype})]
+
+
+def tlv_key_members(tlv: Dict) -> List[str]:
+    """C members forming the case key, in key order."""
+    if tlv.get('tag_fields') and tlv.get('tag_key'):
+        key = tlv['tag_key']
+        return [to_c(k) for k in (key if isinstance(key, list) else [key])]
+    return [TLV_TAG_MEMBER]
+
+
+def _key_part_condition(member: str, part: Any) -> str:
+    """C condition for one component of a case key: 5, '*', '!0', '2..5'."""
+    text = str(part).strip()
+    if text == '*':
+        return '1'
+    if text.startswith('!'):
+        return f'{member} != {int(text[1:].strip(), 0)}'
+    if '..' in text:
+        lo, hi = (int(p.strip(), 0) for p in text.split('..', 1))
+        return f'({member} >= {lo} && {member} <= {hi})'
+    return f'{member} == {int(text, 0)}'
+
+
+def tlv_case_condition(case_key: Any, members: List[str]) -> Optional[str]:
+    """C condition selecting a case, over `data->` members; None for `default`.
+
+    A one-part key may list alternatives (`[1, 2, 3]`); a composite key gives one
+    component per member (`[1, 117]`), as the reference matches them.
+    """
+    if isinstance(case_key, str) and case_key.strip() == 'default':
+        return None
+    refs = [f'data->{m}' for m in members]
+    parts = case_key
+    if isinstance(case_key, str) and case_key.strip().startswith('['):
+        inner = case_key.strip()[1:-1]
+        parts = [p.strip() for p in inner.split(',') if p.strip()]
+    if not isinstance(parts, list):
+        parts = [parts]
+    if len(refs) == 1:
+        return ' || '.join(f'({_key_part_condition(refs[0], p)})' for p in parts)
+    if len(parts) != len(refs):
+        raise ValueError(f'tlv case {case_key!r} has {len(parts)} parts for a '
+                         f'{len(refs)}-part tag')
+    return ' && '.join(f'({_key_part_condition(r, p)})' for r, p in zip(refs, parts))
+
+
+def tlv_unsupported(tlv: Dict) -> Optional[str]:
+    """Why this generator cannot pack or unpack this tlv, or None."""
+    if tlv.get('merge', True) is False:
+        return 'merge: false reports a channel list, which the struct cannot hold'
+    for _, ttype, _ in tlv_tag_parts(tlv):
+        if type_size(ttype) is None:
+            return f'tag type {ttype} is not a whole integer'
+    if len(tlv.get('cases', {})) > 64:
+        return 'more than 64 cases for the tlv_present mask'
+    if tlv.get('length_size', 0) not in (0, 1, 2, 4):
+        return f'length_size {tlv["length_size"]} is not 1, 2 or 4'
+    return None
+
+
 def calc_payload_sizes(fields: List[Dict]) -> Dict[str, int]:
     """Calculate min/max/typical payload sizes."""
     fixed = 0
@@ -212,7 +317,9 @@ def calc_payload_sizes(fields: List[Dict]) -> Dict[str, int]:
         if 'tlv' in field:
             # TLV is variable, estimate max
             tlv = field['tlv']
-            tag_size = sum(type_size(tf.get('type', 'u8')) or 1 for tf in tlv.get('tag_fields', []))
+            # pack writes one entry, the one its tag selects
+            tag_size = sum(type_size(t) or 1 for _, t, _ in tlv_tag_parts(tlv))
+            tag_size += tlv.get('length_size', 0) or 0
             max_case = 0
             for case_fields in tlv.get('cases', {}).values():
                 case_size = tag_size
@@ -223,7 +330,7 @@ def calc_payload_sizes(fields: List[Dict]) -> Dict[str, int]:
                     elif cf.get('type') == 'bitfield_string':
                         case_size += cf.get('length', 2)
                 max_case = max(max_case, case_size)
-            optional_groups.append(max_case * len(tlv.get('cases', {})))
+            optional_groups.append(max_case)
             continue
 
         if 'byte_group' in field:
@@ -435,11 +542,11 @@ static inline void put_u64_le(uint8_t *buf, size_t *pos, uint64_t v) {
         parts.append(f'/* ==== Port {port_key}: {desc} ({direction}) ==== */\n')
         parts.append(self._gen_struct(suffix, fields))
         parts.append(self._gen_sizes(suffix, fields))
-        if direction == 'uplink':
-            parts.append(self._gen_unpack(suffix, fields))
-        else:
-            parts.append(self._gen_pack(suffix, fields))
-            parts.append(self._gen_unpack(suffix, fields))
+        # Both directions, whatever the port declares: the device packs its
+        # uplinks and unpacks its downlinks, and a host-side test or network
+        # tool does the reverse.
+        parts.append(self._gen_pack(suffix, fields))
+        parts.append(self._gen_unpack(suffix, fields))
         return '\n'.join(parts)
 
     def _gen_struct(self, name: str, fields: List[Dict]) -> str:
@@ -469,6 +576,14 @@ static inline void put_u64_le(uint8_t *buf, size_t *pos, uint64_t v) {
                     existing_names.add(fname)
         lines.append(f'}} {name}_t;')
         lines.append('')
+        for field in fields:
+            if 'tlv' in field:
+                wide = len(field['tlv'].get('cases', {})) > 32
+                lines.append(f'/* {TLV_PRESENT_MEMBER} bits: the cases unpack read */')
+                for _, macro, bit in tlv_case_bits(field['tlv']):
+                    lines.append(f'#define {to_upper(name)}_CASE_{macro} '
+                                 f'({"1ULL" if wide else "1UL"} << {bit})')
+                lines.append('')
         return '\n'.join(lines)
 
     def _find_field_type(self, fields: List[Dict], name: str) -> str:
@@ -619,31 +734,71 @@ static inline void put_u64_le(uint8_t *buf, size_t *pos, uint64_t v) {
             lines.append(f'{indent}put_u{sz*8}{suffix}(buf, &pos, (uint{sz*8}_t)(data->{cname}));')
 
     def _gen_pack_tlv(self, lines: List[str], tlv: Dict, indent: str, suffix: str):
-        tag_fields = tlv.get('tag_fields', [])
-        cases = tlv.get('cases', {})
-        lines.append(f'{indent}/* TLV encoding */')
+        """Write the one entry whose case the tag members select.
 
-        for case_key, case_fields in cases.items():
-            if case_key.startswith('['):
-                tag_vals = json.loads(case_key)
-            else:
-                tag_vals = [int(case_key)]
-
-            data_names = [cf.get('name') for cf in case_fields if cf.get('name') and not cf['name'].startswith('_')]
-            if not data_names:
+        A tlv frame may hold several entries, but a pack call writes one: the
+        struct holds one value per name, so the tag says which case it carries.
+        A tag no case takes is an error, never an empty or every-case payload.
+        """
+        why = tlv_unsupported(tlv)
+        if why:
+            self._warn(f'tlv not packed: {why}')
+            lines.append(f'{indent}/* tlv not supported by this generator: {why} */')
+            lines.append(f'{indent}return -1;')
+            return
+        members = tlv_key_members(tlv)
+        length_size = tlv.get('length_size', 0) or 0
+        lines.append(f'{indent}/* tlv: one entry, the case data->{", data->".join(members)} selects */')
+        default_fields = None
+        first = True
+        for case_key, case_fields in tlv.get('cases', {}).items():
+            cond = tlv_case_condition(case_key, members)
+            if cond is None:
+                default_fields = case_fields
                 continue
-
-            # Simple presence check: use first field
-            first = to_c(data_names[0])
-            lines.append(f'{indent}/* case {case_key} */')
-            lines.append(f'{indent}{{')
-            # Write tag bytes
-            for tv in tag_vals:
-                lines.append(f'{indent}    put_u8(buf, &pos, 0x{tv:02X});')
-            # Write value fields
-            for cf in case_fields:
-                self._gen_pack_one(lines, cf, indent + '    ', suffix)
+            lines.append(f'{indent}{"if" if first else "else if"} ({cond}) {{')
+            self._gen_pack_tlv_entry(lines, tlv, case_fields, indent + '    ', suffix)
             lines.append(f'{indent}}}')
+            first = False
+        if default_fields is not None:
+            lines.append(f'{indent}{"" if first else "else "}{{')
+            self._gen_pack_tlv_entry(lines, tlv, default_fields, indent + '    ', suffix)
+            lines.append(f'{indent}}}')
+        else:
+            lines.append(f'{indent}{"" if first else "else "}{{')
+            lines.append(f'{indent}    return -1; /* no case for this tag */')
+            lines.append(f'{indent}}}')
+
+    def _gen_pack_tlv_entry(self, lines: List[str], tlv: Dict, case_fields: List[Dict],
+                            indent: str, suffix: str):
+        for cname, ttype, tdef in tlv_tag_parts(tlv):
+            # Written directly: an internal (`_`) tag member is still the tag.
+            esuffix = '_be' if field_endian(ttype, self.endian) == 'big' else '_le'
+            lines.append(f'{indent}{self._put_uint(type_size(ttype), esuffix, "data->" + cname)}')
+        length_size = tlv.get('length_size', 0) or 0
+        if length_size:
+            lines.append(f'{indent}size_t len_at = pos;')
+            lines.append(f'{indent}pos += {length_size};')
+        self._gen_pack_fields(lines, case_fields, indent, suffix)
+        if length_size:
+            # The length is the value's byte count, in the schema's byte order,
+            # as the reference writes it.
+            lines.append(f'{indent}{{ size_t end = pos; pos = len_at; '
+                         f'{self._put_uint(length_size, suffix, "end - len_at - %d" % length_size)} '
+                         f'pos = end; }}')
+
+    def _put_uint(self, size: int, suffix: str, expr: str) -> str:
+        if size == 1:
+            return f'put_u8(buf, &pos, (uint8_t)({expr}));'
+        return f'put_u{size * 8}{suffix}(buf, &pos, (uint{size * 8}_t)({expr}));'
+
+    def _get_uint(self, size: int, suffix: str) -> str:
+        if size == 1:
+            return 'get_u8(buf, &pos)'
+        return f'get_u{size * 8}{suffix}(buf, &pos)'
+
+    def _warn(self, msg: str):
+        print(f'warning: {self.source or self.name}: {msg}', file=sys.stderr)
 
     def _gen_pack_match(self, lines: List[str], match: Dict, indent: str, suffix: str):
         """Generate switch statement for match encoding."""
@@ -776,7 +931,8 @@ static inline void put_u64_le(uint8_t *buf, size_t *pos, uint64_t v) {
         lines.append('')
         return '\n'.join(lines)
 
-    def _gen_unpack_fields(self, lines: List[str], fields: List[Dict], indent: str, suffix: str):
+    def _gen_unpack_fields(self, lines: List[str], fields: List[Dict], indent: str, suffix: str,
+                           limit: str = 'len'):
         for field in fields:
             if 'byte_group' in field:
                 bg = field['byte_group']
@@ -785,7 +941,7 @@ static inline void put_u64_le(uint8_t *buf, size_t *pos, uint64_t v) {
                 if isinstance(bg, dict):
                     bg_size = bg.get('size', 1)
                 lines.append(f'{indent}/* byte_group */')
-                lines.append(f'{indent}if (pos + {bg_size} > len) return -1;')
+                lines.append(f'{indent}if (pos + {bg_size} > {limit}) return -1;')
                 lines.append(f'{indent}{{')
                 lines.append(f'{indent}    uint{bg_size*8}_t packed = get_u{bg_size*8}{suffix}(buf, &(size_t){{pos}});')
                 for bf in (bg_fields if isinstance(bg_fields, list) else []):
@@ -813,24 +969,122 @@ static inline void put_u64_le(uint8_t *buf, size_t *pos, uint64_t v) {
                     bit = group['bit']
                     lines.append(f'{indent}if (data->{flag_name} & (1U << {bit})) {{')
                     for gf in group.get('fields', []):
-                        self._gen_unpack_one(lines, gf, indent + '    ', suffix)
+                        self._gen_unpack_one(lines, gf, indent + '    ', suffix, limit)
                     lines.append(f'{indent}}}')
                 continue
 
             if 'tlv' in field:
-                lines.append(f'{indent}/* TLV decoding — use reference interpreter */')
+                self._gen_unpack_tlv(lines, field['tlv'], indent, suffix, limit)
                 continue
 
             if 'match' in field:
-                self._gen_unpack_match(lines, field['match'], indent, suffix)
+                self._gen_unpack_match(lines, field['match'], indent, suffix, limit)
                 continue
 
             if field.get('type') == 'number':
                 continue
 
-            self._gen_unpack_one(lines, field, indent, suffix)
+            self._gen_unpack_one(lines, field, indent, suffix, limit)
 
-    def _gen_unpack_one(self, lines: List[str], field: Dict, indent: str, suffix: str):
+    def _gen_unpack_tlv(self, lines: List[str], tlv: Dict, indent: str, suffix: str,
+                        limit: str):
+        """Read entries to the end, each into the members its case names.
+
+        The tag members hold the last entry's tag, and `tlv_present` has a bit
+        (`<NAME>_CASE_<key>`) for each case the frame held, so a caller acts on
+        every entry, not only the last. A case repeated in one frame is -1 (the
+        reference collects it into an array, which the struct cannot hold)
+        unless the tlv declares `on_repeat: last`. A tag no case takes follows
+        `unknown`: `error`
+        fails, `skip` and `raw` step over an entry with a length and otherwise
+        stop, leaving the return value short of `len`.
+        """
+        why = tlv_unsupported(tlv)
+        if why:
+            self._warn(f'tlv not unpacked: {why}')
+            lines.append(f'{indent}/* tlv not supported by this generator: {why} */')
+            lines.append(f'{indent}return -1;')
+            return
+        members = tlv_key_members(tlv)
+        parts = tlv_tag_parts(tlv)
+        tag_width = sum(type_size(t) for _, t, _ in parts)
+        length_size = tlv.get('length_size', 0) or 0
+        reserve = tlv.get('reserve', 0) or 0
+        unknown = tlv.get('unknown', 'skip')
+        lines.append(f'{indent}/* tlv: entries to the end of the payload */')
+        lines.append(f'{indent}{{')
+        ind = indent + '    '
+        if reserve:
+            lines.append(f'{ind}if ({limit} - pos < {reserve}) return -1; /* no room for the reserve */')
+            lines.append(f'{ind}const size_t tlv_end = {limit} - {reserve};')
+        else:
+            lines.append(f'{ind}const size_t tlv_end = {limit};')
+        lines.append(f'{ind}while (pos < tlv_end) {{')
+        body = ind + '    '
+        lines.append(f'{body}size_t entry_start = pos;')
+        lines.append(f'{body}(void)entry_start;')
+        lines.append(f'{body}if (pos + {tag_width} > tlv_end) return -1; /* tag cut short */')
+        for cname, ttype, _ in parts:
+            sz = type_size(ttype)
+            eo = '_be' if field_endian(ttype, self.endian) == 'big' else '_le'
+            if is_signed(ttype):
+                raw = f'(int{sz * 8}_t){self._get_uint(sz, eo)}'
+            else:
+                raw = self._get_uint(sz, eo)
+            lines.append(f'{body}data->{cname} = {raw};')
+        entry_limit = 'tlv_end'
+        if length_size:
+            lines.append(f'{body}if (pos + {length_size} > tlv_end) return -1; /* length cut short */')
+            lines.append(f'{body}size_t entry_end = pos + {self._get_uint(length_size, suffix)};')
+            lines.append(f'{body}if (entry_end > tlv_end) return -1; /* length runs past the data */')
+            entry_limit = 'entry_end'
+        # The struct holds one value per name, so a case seen twice in a frame
+        # cannot be held as the reference holds it (as an array): it is
+        # refused, unless the tlv declares `on_repeat: last`.
+        keep_last = tlv.get('on_repeat') == 'last'
+        wide = len(tlv.get('cases', {})) > 32
+        one = '1ULL' if wide else '1UL'
+
+        def mark(bit: int, at: str):
+            mask = f'({one} << {bit})'
+            if not keep_last:
+                lines.append(f'{at}if (data->{TLV_PRESENT_MEMBER} & {mask}) return -1; '
+                             f'/* case repeated in one frame */')
+            lines.append(f'{at}data->{TLV_PRESENT_MEMBER} |= {mask};')
+
+        default_case = None
+        first = True
+        for case_key, _, bit in tlv_case_bits(tlv):
+            case_fields = tlv['cases'][case_key]
+            cond = tlv_case_condition(case_key, members)
+            if cond is None:
+                default_case = (case_fields, bit)
+                continue
+            lines.append(f'{body}{"if" if first else "else if"} ({cond}) {{')
+            mark(bit, body + '    ')
+            self._gen_unpack_fields(lines, case_fields, body + '    ', suffix, entry_limit)
+            lines.append(f'{body}}}')
+            first = False
+        lines.append(f'{body}{"" if first else "else "}{{')
+        if default_case is not None:
+            mark(default_case[1], body + '    ')
+            self._gen_unpack_fields(lines, default_case[0], body + '    ', suffix, entry_limit)
+        elif unknown == 'error':
+            lines.append(f'{body}    return -1; /* unknown tag */')
+        elif length_size:
+            lines.append(f'{body}    pos = entry_end; /* unknown tag, stepped over */')
+        else:
+            lines.append(f'{body}    pos = entry_start; /* unknown tag, no length: the rest is not read */')
+            lines.append(f'{body}    break;')
+        lines.append(f'{body}}}')
+        if length_size:
+            # The case is bounded by the entry; bytes it leaves are skipped.
+            lines.append(f'{body}pos = entry_end;')
+        lines.append(f'{ind}}}')
+        lines.append(f'{indent}}}')
+
+    def _gen_unpack_one(self, lines: List[str], field: Dict, indent: str, suffix: str,
+                        limit: str = 'len'):
         name = field.get('name', '_')
         ftype = field.get('type', 'u8')
         cname = to_c(name)
@@ -850,7 +1104,7 @@ static inline void put_u64_le(uint8_t *buf, size_t *pos, uint64_t v) {
             lines.append(f'{indent}/* unsupported: {ftype} */')
             return
 
-        lines.append(f'{indent}if (pos + {sz} > len) return -1;')
+        lines.append(f'{indent}if (pos + {sz} > {limit}) return -1;')
 
         eo = field_endian(ftype, self.endian)
         esuffix = '_be' if eo == 'big' else '_le'
@@ -884,7 +1138,8 @@ static inline void put_u64_le(uint8_t *buf, size_t *pos, uint64_t v) {
         # Store raw value - transforms applied by network-side interpreter
         lines.append(f'{indent}data->{cname} = {raw};')
 
-    def _gen_unpack_match(self, lines: List[str], match: Dict, indent: str, suffix: str):
+    def _gen_unpack_match(self, lines: List[str], match: Dict, indent: str, suffix: str,
+                          limit: str = 'len'):
         """Generate switch statement for match decoding."""
         field_ref = match.get('field', '')
         # Remove $ prefix if present
@@ -909,7 +1164,7 @@ static inline void put_u64_le(uint8_t *buf, size_t *pos, uint64_t v) {
             
             if isinstance(case_fields, list):
                 for cf in case_fields:
-                    self._gen_unpack_one(lines, cf, indent + '    ', suffix)
+                    self._gen_unpack_one(lines, cf, indent + '    ', suffix, limit)
             lines.append(f'{indent}    break;')
         
         lines.append(f'{indent}}}')
