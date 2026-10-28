@@ -92,10 +92,10 @@ class TestTheSpecificLinksThatWereBroken:
         assert "TS013-COMPLIANCE-ANALYSIS.md" not in text, "the dead link is back"
         assert "SPEC-IMPLEMENTATION-STATUS.md" in text
 
-    def test_the_sibling_repo_link_has_the_right_depth(self):
+    def test_no_link_into_the_unpublished_specification(self):
+        """The specification repository is not public, so a link into it is dead."""
         text = (DOCS / "BIDIRECTIONAL-CODEC.md").read_text()
-        assert "](../../la-payload-schema/" in text
-        assert "](../la-payload-schema/" not in text.replace("](../../la-payload", "")
+        assert "la-payload-schema/" not in text
 
     def test_the_replacement_target_covers_both_subjects(self):
         """Pointing at a doc that does not discuss C or TS013 would be a worse link."""

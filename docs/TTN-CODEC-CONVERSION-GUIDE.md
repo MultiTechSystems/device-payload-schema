@@ -116,7 +116,7 @@ test_vectors:
 | `(raw - 400) / 10` | `transform: [{add: -400}, {div: 10}]` |
 
 **Important:** bare modifiers always apply in the canonical order **mult, then div,
-then add**, whatever order the keys are written in (PS-101). Any other order needs a
+then add**, whatever order the keys are written in. Any other order needs a
 `transform` list, whose stages apply in list order.
 
 ```yaml
@@ -267,7 +267,7 @@ python3 tools/score_schema.py schemas/devices/vendor/device.yaml -v
 ```
 
 Target: **GOLD tier (85%+)** for production use. Gold needs at least one vector with
-an independent `source:` (PS-264).
+an independent `source:`.
 
 ### Phase 4: Generate Outputs
 
@@ -349,7 +349,7 @@ test_vectors:
 `source:` is one of `vendor-doc`, `vendor-codec`, `field-capture`, `spec-example` or
 `generated`. Use `generated` only for values recorded from this toolkit's own decoder:
 those prove self-consistency, not correctness, and a schema with no independently
-sourced vector is capped at Silver (PS-264). No vector kind expects a decode failure,
+sourced vector is capped at Silver. No vector kind expects a decode failure,
 so invalid or truncated payloads cannot be recorded as vectors.
 
 ### Payload Format

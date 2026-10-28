@@ -300,7 +300,7 @@ def render_schema_summary(entries: List[Dict[str, Any]]) -> List[str]:
             "Mean quality score %.1f%% (%s). Tiers follow the specification's"
             " Section 10: Platinum 95-100%%, Gold 85-94%%, Silver 70-84%%,"
             " Bronze 60-69%%, Rejected below 60%%. Gold and Platinum also have"
-            " gates (PS-239) -- see `../AGENTS.md`. A high score shows"
+            " gates -- see `../AGENTS.md`. A high score shows"
             " self-consistency with a schema's own test vectors, not that the"
             " vectors are right."
             % (mean, ", ".join("%s %d" % (t, counts[t]) for t in tiers if counts[t]))

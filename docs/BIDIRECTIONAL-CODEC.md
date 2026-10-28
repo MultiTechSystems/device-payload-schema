@@ -327,7 +327,7 @@ static const uint8_t UPLINK_SCHEMA[] = {
     0x12, 0xFE, 0xE7, 0x0C,        // s16, mult=0.01, IPSO 3303
     0x01, 0x81, 0xE8, 0x0C,        // u8, mult=0.5, IPSO 3304
     0x02, 0x00, 0x00, 0x00,        // u16, no IPSO object
-    // Name table (PS-555): the keys, never derived from the IPSO objects
+    // Name table: the keys, never derived from the IPSO objects
     11, 't', 'e', 'm', 'p', 'e', 'r', 'a', 't', 'u', 'r', 'e',
     8, 'h', 'u', 'm', 'i', 'd', 'i', 't', 'y',
     7, 'b', 'a', 't', 't', 'e', 'r', 'y',
@@ -379,5 +379,4 @@ void handle_downlink(const uint8_t* payload, int len) {
 
 - [SPEC-IMPLEMENTATION-STATUS.md](SPEC-IMPLEMENTATION-STATUS.md) - Feature support per
   implementation; see the `C (include/schema_interpreter.h)` section
-- [OTA-SCHEMA-TRANSFER.md](../../la-payload-schema/docs/features/OTA-SCHEMA-TRANSFER.md) - Schema transfer protocol
 - [Binary Schema Format](../tools/schema_binary.py) - Binary encoding tool (`encode`, `decode`, `dump`, `info`)

@@ -163,7 +163,7 @@ Scores based on:
 
 Tiers: Platinum 95-100%, Gold 85-94%, Silver 70-84%, Bronze 60-69%, Rejected below 60%.
 A schema whose vectors all lack an independent `source:` (`vendor-doc`, `vendor-codec`,
-`field-capture`, `spec-example`) is capped at Silver (PS-264).
+`field-capture`, `spec-example`) is capped at Silver.
 
 ---
 

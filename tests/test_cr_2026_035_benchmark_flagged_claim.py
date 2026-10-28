@@ -89,7 +89,6 @@ class TestTheStaleClaimIsGone:
         """The frame is still simplified - for one reason now, not two."""
         section = benchmark_section()
         assert "transform" in section and "polynomial" in section
-        assert "CR-2026-034" in section, "the reason it changed should be traceable"
 
     def test_the_unreproducible_figures_are_gone_or_marked_historical(self):
         text = DOC.read_text()

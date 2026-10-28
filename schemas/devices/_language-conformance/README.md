@@ -10,9 +10,9 @@ Every construct here was previously covered by no corpus vector. Adding them
 found two defects that four implementations disagreed about:
 
 - `enum` with `base:`/`values:` was unimplemented in Java, which reported the raw
-  integer instead of the mapped name (PS-067).
+  integer instead of the mapped name.
 - `default:` on an enum was ignored by Python, Go and C#, all of which reported
-  the raw value where the schema declares a fallback name (PS-068).
+  the raw value where the schema declares a fallback name.
 
 `source: generated` on a vector here means the expected value came from the
 Python interpreter and pins cross-language agreement, not correctness.
@@ -53,7 +53,7 @@ defects this directory has caught:
 The three `unknown-tlv-tag-*.yaml` fixtures pin the `unknown` parameter of a `tlv`, which
 **no device schema in the corpus sets** - so every mode of it went unexercised while 85 of
 the corpus's 87 tlv constructs sat in the shape where the default abandons the rest of the
-payload. They are the first vectors to use `expected_warnings` (CR-2026-014) for what it
+payload. They are the first vectors to use `expected_warnings` for what it
 was added for: asserting what a decode *said*, not only what it read.
 
 - `unknown-tlv-tag-skip.yaml` - the tag-only default. One vector asserts the warning and
@@ -62,7 +62,7 @@ was added for: asserting what a decode *said*, not only what it read.
 - `unknown-tlv-tag-skip-delimited.yaml` - the same mode with `length_size`, where the
   entry is stepped over and the fields after it are still trustworthy. Two of the 87
   constructs are in this shape and neither had a vector with an undescribed tag.
-- `unknown-tlv-tag-raw.yaml` - the captured entry under `unknown_tags` (PS-303), which
+- `unknown-tlv-tag-raw.yaml` - the captured entry under `unknown_tags`, which
   every implementation built and then dropped under the default `merge: true`. It is the
   only vector in the corpus that reads the key, and adding it found the fifth defect this
   directory has caught: the generated output JSON Schema did not describe `unknown_tags`
