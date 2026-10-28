@@ -25,11 +25,10 @@ Generated inventory of this repository: what lives where, what each document cov
 
 ## Documents
 
-18 documents in `docs/`. Read the one that matches the task; the sections list below tells you what is inside without opening it.
+16 documents in `docs/`. Read the one that matches the task; the sections list below tells you what is inside without opening it.
 
 | Document | Purpose | Lines |
 |---|---|---|
-| [`AUDIT-REPORT.md`](AUDIT-REPORT.md) | Payload Codec Proto - Spec Completeness Audit | 191 |
 | [`BIDIRECTIONAL-CODEC.md`](BIDIRECTIONAL-CODEC.md) | The Payload Schema codec is symmetric - both devices and networks use the same encode/decode... | 382 |
 | [`C-CODE-GENERATION.md`](C-CODE-GENERATION.md) | Generate standalone C codec headers from Payload Schema YAML files. | 223 |
 | [`CODEC-ANALYSIS-NOTES.md`](CODEC-ANALYSIS-NOTES.md) | Analysis of complex codecs from lorawan-devices repository to identify schema language gaps. | 607 |
@@ -43,14 +42,12 @@ Generated inventory of this repository: what lives where, what each document cov
 | [`OUTPUT-FORMATS.md`](OUTPUT-FORMATS.md) | The Payload Schema decoder can output data in multiple formats for different platforms and... | 637 |
 | [`SCHEMA-DEVELOPMENT-GUIDE.md`](SCHEMA-DEVELOPMENT-GUIDE.md) | Best practices for creating complete, validated payload schemas. | 215 |
 | [`SCHEMA-LANGUAGE-REFERENCE.md`](SCHEMA-LANGUAGE-REFERENCE.md) | Complete reference for the payload schema language as this toolkit implements it. | 2270 |
-| [`SESSION-NOTES-2026-02-25.md`](SESSION-NOTES-2026-02-25.md) | The prototype tests were using a custom REQ-xxx-yyy numbering scheme that was inconsistent with the... | 78 |
 | [`SPEC-IMPLEMENTATION-STATUS.md`](SPEC-IMPLEMENTATION-STATUS.md) | Feature support matrix across the reference implementations. | 354 |
 | [`TTN-CODEC-CONVERSION-GUIDE.md`](TTN-CODEC-CONVERSION-GUIDE.md) | Complete guide for AI-assisted conversion of The Things Network device repository codecs to Payload... | 575 |
 | [`WOT-REFERENCE.md`](WOT-REFERENCE.md) | Reference for mapping LoRaWAN payload schema fields to W3C WoT Thing Descriptions and SAREF... | 316 |
 
 ### Document sections
 
-- **AUDIT-REPORT.md** — Summary; Python Interpreter; Go Interpreter; Requirements Traceability; Verification; Changelog
 - **BIDIRECTIONAL-CODEC.md** — Device vs Network Responsibilities; Overview; Link Directions; Schema Types; Binary Schema Benefits; C API Reference; Python API Reference; Performance; Modifier Handling; Schema Distribution; Example: Complete Device Implementation; See Also
 - **C-CODE-GENERATION.md** — Overview; Design Decision: Raw Values Only; Usage; Generated Code Structure; Device Usage Example; Return Values; Dependencies; Generated vs Runtime Interpreter; Feature Support; Example Workflow; Batch Generation
 - **CODEC-ANALYSIS-NOTES.md** — 1. Digital Matter Oyster (GPS Tracker); 2. Dragino LAQ4 (Air Quality Sensor); 3. Sensative Strips (Multi-Sensor); 4. Decentlab DL-5TM (Soil Sensor); 5. Tektelic Agriculture (Data-Driven TLV); Summary: Schema Language Gaps
@@ -64,7 +61,6 @@ Generated inventory of this repository: what lives where, what each document cov
 - **OUTPUT-FORMATS.md** — Example; 1. Raw Format (Default); 1a. Interpreter Output: decoded JSON and `_meta`; 2. IPSO Smart Objects Format; 3. SenML Format (RFC 8428); 4. TTN Normalized Format; Format Comparison; Schema Definition; API Usage; Output JSON Schema; Format-Specific JSON Schemas
 - **SCHEMA-DEVELOPMENT-GUIDE.md** — Overview; Process: Converting an Existing Codec; Message Types; Edge Cases; Common Pitfalls; Tools; Checklist: Before Declaring "Complete"; Example: MClimate Vicki
 - **SCHEMA-LANGUAGE-REFERENCE.md** — Document Structure; Field Types; Arithmetic Modifiers; Lookup Tables; Computed Fields; Transform Operations; Conditional Parsing; Named Encodings; Bitfield String; Test Vectors; Enum Type; Repeat (Arrays) ...
-- **SESSION-NOTES-2026-02-25.md** — Requirement Numbering Alignment
 - **SPEC-IMPLEMENTATION-STATUS.md** — Quick Summary; Feature Matrix; Implementation Notes; Test Coverage; Performance Benchmarks; Known Gaps
 - **TTN-CODEC-CONVERSION-GUIDE.md** — Overview; Prerequisites; Conversion Workflow; Test Vector Guidelines; Quality Tiers; Common Conversion Patterns; AI-Assisted Workflow; Troubleshooting; Output Directory Structure; Resources
 - **WOT-REFERENCE.md** — Architecture; Thing Description Structure; SAREF Ontology Mapping; WoT Unit Codes; Integration Profile WoT Section; Mapping from IPSO to SAREF (Automated); Example: Full TD from Schema; Relationship to Other Output Formats; Version History
@@ -119,7 +115,6 @@ Generated inventory of this repository: what lives where, what each document cov
 | `tools/validate_schema.py` | Validate schema and run test vectors |
 | `tools/vector-verdicts.py` | Execute every corpus test vector through both conformance paths and record a verdict. |
 | `tools/verdicts-gate.py` | Five-implementation verdicts, vector by vector: the gate a pass count cannot be. |
-| `tools/verify_spec_completeness.py` | Requirements traceability and spec completeness verification. |
 
 ## Device schemas
 

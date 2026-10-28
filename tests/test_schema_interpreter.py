@@ -1,16 +1,5 @@
 """
 Tests for schema interpreter.
-
-Requirements coverage: see test-requirements-map.yaml, which keys on the stable `PS-nnn`
-tags carried in the specification text and in the Tag column of
-la-payload-schema/spec/sections/10-conformance.md.
-
-The ranges this docstring used to list (M003-M040 schema format, M041-M045 integer types,
-and so on) came from a requirements appendix that no longer exists, and the M/R/O ids are
-positional: they are assigned by source order, so an inserted requirement renumbers every
-one after it. Listing them here made the ranges look authoritative while they silently
-came to mean something else. The map is the single place that records which requirement a
-test covers.
 """
 
 import json
