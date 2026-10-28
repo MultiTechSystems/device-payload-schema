@@ -61,8 +61,7 @@ test_vectors:
 **`source:` says where a vector's values came from**: `vendor-doc`, `vendor-codec`,
 `field-capture`, `spec-example`, or `generated` (recorded from this toolkit's own
 decoder). Take expected values from your datasheet or firmware, not from the
-decoder's output. A schema with no independently sourced vector is capped at Silver
-(PS-264), however well it scores otherwise.
+decoder's output. A schema with no independently sourced vector is capped at Silver, however well it scores otherwise.
 
 **Payload breakdown:**
 - `09C4` = 2500 → 2500/100 = 25.0°C

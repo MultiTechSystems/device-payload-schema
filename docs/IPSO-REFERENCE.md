@@ -80,8 +80,7 @@ When converting a TTN codec that uses an IPSO object not in this list:
 ## Which Fields the Scorer Expects to Be Annotated
 
 `tools/score_schema.py` expects an IPSO annotation only on a field the
-Integration Layer's TTN classification rule would place from its name
-(IL-204, in la-integration-layer's `docs/guides/protocol-mappings/ttn-normalized.md`).
+Integration Layer's TTN classification rule would place from its name.
 A name is split on `_` and at camelCase boundaries, ignoring case:
 
 1. A **qualifier** word means the field is not a reading: `threshold`,
@@ -93,7 +92,7 @@ A name is split on `_` and at camelCase boundaries, ignoring case:
    gives `water.temperature`.
 3. A **medium with no TTN path** (`leaf`, `dew`, `surface`, `internal`, `board`,
    `pcb`, `electronics`, `head`, `barometer`, or `soil`/`water` with a quantity
-   they have no path for) leaves a reading IL-204 cannot place. An annotation on
+   they have no path for) leaves a reading that rule cannot place. An annotation on
    it is right, but none is expected, and none is checked.
 4. Any other name says nothing. Its annotation is the only evidence, so it is
    neither expected nor flagged, and it earns no credit.
@@ -106,9 +105,9 @@ A name is split on `_` and at camelCase boundaries, ignoring case:
 | moisture | soil.moisture | 3320 | 3304 | % |
 | precipitation | rain.cumulative | 3300 | | m |
 
-A unit never selects an object (IL-203), so neither `V` nor the word `battery`
+A unit never selects an object, so neither `V` nor the word `battery`
 asks for 3316. A generic object (3300, 3320, 3325, 3332) selects no category on
-its own (IL-199), so it is never reported as a mismatch. It earns credit only
+its own, so it is never reported as a mismatch. It earns credit only
 where the table expects it.
 
 An ipso annotation is reported wrong only where the name places the field and
@@ -119,7 +118,7 @@ whatever its name says (`temperature_sensor_status`). A lookup with numeric labe
 arithmetic (Elvaco's exponent table) and its field stays a reading. The
 `sensor:` key is not part of the language and is rejected by strict validation.
 
-A schema with fields but none that IL-204 places has nothing these checks can
+A schema with fields but none that rule places has nothing these checks can
 verify. It earns half of the 20 semantic points.
 
 ## Complex Codec Examples (from TTN lorawan-devices)

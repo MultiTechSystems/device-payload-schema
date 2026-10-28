@@ -49,18 +49,18 @@ build (`make test-c` prints why). Go, Java and C# decode floors are the full cor
 | `i8` `i16` `i32` `i64` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | `uintN`, `intN`, `i24` aliases | ✓ | ✗ | ⚠¹ | ✗ | ✓ | ⚠¹ |
 | `float`, `double` | ✓ | ✗ | ✗ | ✗ | ✓ | ⚠¹ |
-| `u32le16` (PS-271) | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| `u32le16` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | `f16` | ✓ | ✓ | ✓ | ✓ | ✓ | ⚠² |
 | `f32`, `f64` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | `bool` + `bit:` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | bit range `u8[a:b]` + `consume` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | cross-byte range `u16[4:11]` | ✓ | ✓ | ✓ | ✓ | ⚠³ | ✓ |
-| range base read big-endian (PS-059) | ✓ | ⚠⁴ | ✓ | ✓ | ⚠³ | ⚠⁴ |
+| range base read big-endian | ✓ | ⚠⁴ | ✓ | ✓ | ⚠³ | ⚠⁴ |
 | `ascii` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | `string` with `length` | ✓ | ✓ | ⚠⁵ | ✓ | ✓ | ⚠⁵ |
 | literal `{type: string\|number, value:}` | ✓ | ✓ | ✓ | ✓ | ✗ | ✓ |
 | `bytes` (lowercase hex string) | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
-| `hex` (lowercase, PS-074) | ✓ | ✓ | ✓ | ✓ | ⚠⁶ | ✓ |
+| `hex` (lowercase) | ✓ | ✓ | ✓ | ✓ | ⚠⁶ | ✓ |
 | `hex:upper` | ✓ | ✓ | ✗ | ✗ | ✗ | ⚠⁷ |
 | `base64` | ✓ | ✗ | ✗ | ✗ | ✓ | ⚠⁷ |
 | `format:` / `separator:` on `bytes` | ∅ | ✓ | ✓ | ✓ | ✗ | ∅ |
@@ -82,7 +82,7 @@ build (`make test-c` prints why). Go, Java and C# decode floors are the full cor
 3. C's bit range reads one byte whatever the base type, so `u16[4:11]` over `0FF0`
    gives 0 and `consume` advances one byte.
 4. Go and the generated codec take the base in the schema's byte order: under
-   `endian: little`, `u16[0:7]` over `12 34` gives 18 where PS-059 and the other three
+   `endian: little`, `u16[0:7]` over `12 34` gives 18 where the big-endian base rule and the other three
    give 52.
 5. Java and the generated codec treat `type: string` without `value:` as a literal: no
    bytes are read, the field is dropped, and every following field is misaligned.
@@ -96,20 +96,20 @@ build (`make test-c` prints why). Go, Java and C# decode floors are the full cor
 | Feature | Python | Go | Java | C# | C | TS013 |
 |---|---|---|---|---|---|---|
 | `lookup` sequence | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
-| sequence out of range is an error (PS-105) | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
-| `lookup` mapping; a miss omits the field (PS-269) | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| sequence out of range is an error | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| `lookup` mapping; a miss omits the field | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | `lookup` `default` | ✓ | ✓ | ✓ | ✓ | ✗ | ✓ |
-| `mult` `div` `add`, canonical order (PS-101) | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| `mult` `div` `add`, canonical order | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | `transform:` arithmetic stages | ✓ | ✓ | ✓ | ✓ | ✗ | ✓ |
 | `sqrt` `abs` `pow` `log` `log10` | ✓ | ✓ | ✓ | ✓ | ✗ | ✓ |
 | `{op: round, decimals: N}` half-to-even | ✓ | ✓ | ✓ | ✓ | ✗ | ✓ |
-| `floor:` `ceiling:` bounds (`clamp:` is withdrawn, CR-2026-159) | ✓ | ∅ | ∅ | ∅ | ✗ | ✓ |
+| `floor:` `ceiling:` bounds (`clamp:` is withdrawn) | ✓ | ∅ | ∅ | ∅ | ✗ | ✓ |
 | `{op: floor}` / `{op: ceiling}` | ✓ | ∅ | ∅ | ∅ | ✗ | ✓ |
 | `polynomial` | ✓ | ✓ | ✓ | ✓ | ✗ | ✓ |
 | `type: number` + `ref:` | ✓ | ✓ | ✓ | ✓ | ✗ | ✓ |
 | `compute` `add` `sub` `mul` `div` | ✓ | ✓ | ✓ | ✓ | ✗ | ✓ |
-| `compute` `mod` `idiv`, floored (CR-2026-007) | ✓ | ✓ | ✓ | ✓ | ✗ | ✓ |
-| `compute` `pow`, absent where not a finite real (CR-2026-172) | ✓ | ✓ | ✓ | ✓ | ✗ | ✓ |
+| `compute` `mod` `idiv`, floored | ✓ | ✓ | ✓ | ✓ | ✗ | ✓ |
+| `compute` `pow`, absent where not a finite real | ✓ | ✓ | ✓ | ✓ | ✗ | ✓ |
 | `guard` | ✓ | ✓ | ✓ | ✓ | ✗ | ✓ |
 | `match_value` | ∅ | ∅ | ∅ | ∅ | ✗ | ∅ |
 
@@ -168,7 +168,7 @@ the generated codec — write ranges in decimal.
 
 | Feature | Python | Go | Java | C# | C | TS013 |
 |---|---|---|---|---|---|---|
-| `valid_range` → `_quality` (PS-131/PS-182) | ✓ | ⚠¹⁶ | ∅ | ⚠¹⁶ | ✗ | ✓ |
+| `valid_range` → `_quality` | ✓ | ⚠¹⁶ | ∅ | ⚠¹⁶ | ✗ | ✓ |
 | `metadata.timestamps` | ✓¹⁷ | ∅ | ∅ | ∅ | ✗ | ∅ |
 | `direction:` (uplink/downlink/both, by grep) | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | `downlink_commands` | ✓ | — | — | — | — | ✓ |
@@ -176,7 +176,7 @@ the generated codec — write ranges in decimal.
 16. Go and C# report `_quality` and also put the warning list into the decoded data as
     a `_warnings` key.
 17. Only when the caller passes `input_metadata`; with none the block is ignored
-    (PS-312). `unix_epoch` emits an ISO string with milliseconds.
+   . `unix_epoch` emits an ISO string with milliseconds.
 
 ### Encoding (struct → bytes)
 
@@ -244,11 +244,11 @@ field.
 
 **Validation schemas** for decoder output.
 
-- `_quality` is declared when any field carries a `valid_range` (PS-182), with a closed
+- `_quality` is declared when any field carries a `valid_range`, with a closed
   key set unless a `name_from` makes the output key dynamic
-- A `lookup` is typed from its values (PS-106) and declared as an `enum`, since both the
-  mapping and sequence forms are closed (PS-269, PS-105); `type: enum` is enumerated only
-  where a `default` closes it (PS-068)
+- A `lookup` is typed from its values and declared as an `enum`, since both the
+  mapping and sequence forms are closed; `type: enum` is enumerated only
+  where a `default` closes it
 - `$ref` into local `definitions` is resolved, so fields behind a reference are declared
 - `match` is traversed (the `match:` construct; the legacy `type: match`/`on:` is withdrawn),
   including `default` branches; types widen where cases report a name differently
@@ -287,7 +287,7 @@ Regenerate with `make bench-c` (`tools/benchmark-c-interpreter.py`). Frame:
 payload decoding to **15 fields**: three plain, then a two-group `flagged` covering
 twelve more, two of them scaled with `div`. It is `dl-lid` rather than the richer
 `dl-5tm` because `dl-5tm` needs `transform` and `polynomial`, which C lacks; the other
-reason once given, that C had no `flagged`, stopped being true with CR-2026-034.
+reason once given, that C had no `flagged`, stopped being true when C gained `flagged`.
 
 | Implementation | Throughput | Latency |
 |----------------|------------|---------|
@@ -340,8 +340,8 @@ DL-5TM schema (8 fields, `flagged`, `polynomial`).
 
 The cells above marked ∅ or ⚠ are the work list; the ones that matter most:
 
-- `floor`/`ceiling` stages are silently ignored by Go, Java and C# (`clamp` is withdrawn, CR-2026-159).
-- Bit-range base byte order: Go and the generator disagree with PS-059.
+- `floor`/`ceiling` stages are silently ignored by Go, Java and C# (`clamp` is withdrawn).
+- Bit-range base byte order: Go and the generator disagree with the rule that a bit range's base is read big-endian.
 - `$ref` inside a nested construct works only in C#, and only inside an `object`.
 - The generator's silent omissions (`f16`, `hex:upper`, `base64`, `udec`,
   `version_string`, `string` without `value:`) and its local-name collisions.
@@ -349,6 +349,6 @@ The cells above marked ∅ or ⚠ are the work list; the ones that matter most:
 
 ### Not Planned
 
-- Formula expressions: withdrawn (CR-2026-159)
+- Formula expressions: withdrawn
 - Dynamic schema modification
 - Encryption/compression (out of scope)

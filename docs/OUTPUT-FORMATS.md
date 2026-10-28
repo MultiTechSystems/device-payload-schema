@@ -36,7 +36,7 @@ Simple flat dictionary - easiest to use in applications.
 ```
 
 An integral value is reported as an integer (`65`, not `65.0`), as a JavaScript codec
-would (CR-2026-008). Keys beginning with `_` are the interpreter's own: `_quality` appears
+would. Keys beginning with `_` are the interpreter's own: `_quality` appears
 when a decoded field declares `valid_range` (Python, Go, C# and the TS013 codec; not Java),
 and Go, Java and C# add `_warnings` when the decode had something to report (Python returns
 those in `result.warnings` instead). `decode()` never adds `_meta`; `interpret()` does
@@ -48,13 +48,13 @@ those in `result.warnings` instead). `decode()` never adds `_meta`; `interpret()
 
 ## 1a. Interpreter Output: decoded JSON and `_meta`
 
-`_meta` is the normative interface to the Integration Layer (PS-175, PS-180). It is the
+`_meta` is the interface to an Integration Layer. It is the
 schema's semantic annotations and the uplink's context, beside the decoded values, so a
 converter downstream can name, type and route each value without reading the schema.
 
 `decode()` is unchanged and returns the decoded fields alone, because existing callers such
 as td-tools read it. `interpret()` returns the same decoded fields with `_meta` added last.
-A generated TS013 codec never carries `_meta` (PS-467), and the C interpreter does not
+A generated TS013 codec never carries `_meta`, and the C interpreter does not
 produce it yet.
 
 ```json
@@ -77,7 +77,7 @@ produce it yet.
 }
 ```
 
-**The input context (PS-495)** is the TS013 uplink input plus the device's EUI:
+**The input context** is the TS013 uplink input plus the device's EUI:
 - `fPort`;
 - `input_metadata`, carrying `recvTime` (ISO 8601 or seconds) and `devEUI`.
 
@@ -92,36 +92,36 @@ A test vector supplies it the same way, through its `fPort` and `input_metadata`
 
 **Device level:**
 - `schema` and `version` come from the schema.
-- `device_eui` is 16 lower-case hex digits, with separators removed (PS-496).
-- `rx_time` is Unix seconds in UTC, keeping milliseconds (PS-177).
-- `fPort` is reported as supplied, even where selection fell through to `default` (PS-342).
+- `device_eui` is 16 lower-case hex digits, with separators removed.
+- `rx_time` is Unix seconds in UTC, keeping milliseconds.
+- `fPort` is reported as supplied, even where selection fell through to `default`.
 
 A key whose source is absent is omitted. A devEUI or recvTime that is present but malformed
-is an error, and a failed decode produces no `_meta` (PS-497).
+is an error, and a failed decode produces no `_meta`.
 
-**`fields`** has exactly one entry per top-level reported key (PS-181). Each entry comes from
-the declaration that produced the value (PS-490), so a name declared in two cases is typed by
-the case that was taken. A `name_from` key gets its declaration's entry (PS-492). The entry's
+**`fields`** has exactly one entry per top-level reported key. Each entry comes from
+the declaration that produced the value, so a name declared in two cases is typed by
+the case that was taken. A `name_from` key gets its declaration's entry. The entry's
 attributes are:
-- `type`: the declared type, an alias written canonically and a bit range as written (PS-493);
-- `unit`: `senml.unit`, else `unit`, never converted (PS-178);
+- `type`: the declared type, an alias written canonically and a bit range as written;
+- `unit`: `senml.unit`, else `unit`, never converted;
 - `ipso`: with its defaults filled in;
-- `senml.name` (PS-480);
+- `senml.name`;
 - `description`.
 
-An object's `fields` and a repeat's `elements` list what is declared (PS-481, PS-371). No
-internal field has an entry at any depth (PS-494). A repeat element's per-element `unit`,
+An object's `fields` and a repeat's `elements` list what is declared. No
+internal field has an entry at any depth. A repeat element's per-element `unit`,
 `ipso.instance` and `identity` are listings, marked `open` where the field's lookup default
-carries `${value}` (PS-375, PS-489).
+carries `${value}`.
 
-**Schema rule (PS-491):** the declarations of one reported name in one field list must agree
+**Schema rule:** the declarations of one reported name in one field list must agree
 on `unit`, `senml` and `ipso`, or the schema is rejected at load. No corpus schema breaks it.
 
 `make gate-verdicts` compares every corpus vector's `_meta` across Python, Go, Java and C#
 (rule 3). A test vector may pin it with `expected_meta`, which is compared exactly.
 
 
-### The decode record (`_decode`, PS-572 to PS-574)
+### The decode record (`_decode`)
 
 Asked for, the interpreter output also carries `_decode`, the record of what one decode
 chose. It is not information about the device; it is what an encoder needs to write the
@@ -147,13 +147,12 @@ payload order `/fields/0/tlv[4]/cases/103/0/match`, a record `.../records/1[0]/.
 | Go | `s.Interpret(payload, schema.InputContext{DecodeRecord: true})` | `s.EncodeWithRecord(data, fPort, rec)`, or `data["_decode"]` |
 | Java | `schema.interpret(payload, ctx, true)` | `encode(data, rec)`, `encodeWithPort(data, port, dir, rec)`, or `_decode` in data |
 | C# | `SchemaDecoder.Interpret(schema, payload, ctx, decodeRecord: true)` | `SchemaEncoder.Encode(schema, data, decodeRecord: rec)`, or `_decode` in data |
-| TS013 codec | never produced (PS-467) | `encodeDownlink({data: {..., _decode: rec}})` |
+| TS013 codec | never produced | `encodeDownlink({data: {..., _decode: rec}})` |
 
 `decode()` never carries it. An encoder given the record writes each recorded
 discriminator, takes each recorded case and supplies each recorded internal value and flags
-value where the input gives none. It rejects input that contradicts the record (PS-573).
-Where neither the input nor the record settles a match's case, the encoders here derive it
-(PS-551, PS-563, PS-564), which PS-574 makes optional. The C interpreter produces no
+value where the input gives none. It rejects input that contradicts the record.
+Where neither the input nor the record settles a match's case, the encoders here derive it, which is optional. The C interpreter produces no
 `_meta` and no record.
 
 ---
@@ -238,19 +237,19 @@ IETF Sensor Measurement Lists standard.
 
 One record per field the decoded output reports, wherever it is declared - a port
 entry, a `match` or `tlv` case, a `byte_group`, a `flagged` group - and an object's
-members as `object/member` (PS-478, PS-479). A record is named by the field's
+members as `object/member`. A record is named by the field's
 `senml.name`, else its reported name.
 
 Its unit comes from `senml.unit`, else `unit`, and is always a unit of the IANA SenML
-Units registry (CR-2026-094):
+Units registry:
 
 - **A registered unit** is used as it is: `Cel`, `%RH`, `V`.
 - **A secondary unit** is re-expressed in its primary unit by the registry's scale and
-  offset, computed in decimal (PS-487): 1013.2 `hPa` is 101320 `Pa`, 850 `ppm` is
+  offset, computed in decimal: 1013.2 `hPa` is 101320 `Pa`, 850 `ppm` is
   0.00085 `/`, 3284 `mV` is 3.284 `V` (not 3.2840000000000003), -97 `dBm` is -127 `dBW`.
   `%` is written by its preferred name `/`, with no change of value.
 - **A unit the registry does not have** (`°C`, `kPa`, `bar`) is left out of the record,
-  the value kept, with a warning naming the field and the unit (PS-488). Python reports
+  the value kept, with a warning naming the field and the unit. Python reports
   it in `interpreter.semantic_warnings` after `get_semantic_output()`; C# adds it to the
   optional `warnings` list passed to `SemanticFormatter.ToSenML()`.
 
@@ -489,7 +488,7 @@ For a sensor with `temperature` (`s16`, `div: 10`, `unit: "°C"`,
     },
     "_quality": {
       "type": "object",
-      "description": "Per-field quality flags for fields declaring valid_range (PS-131/PS-182). Present only when at least one such field is decoded; absent otherwise.",
+      "description": "Per-field quality flags for fields declaring valid_range. Present only when at least one such field is decoded; absent otherwise.",
       "properties": {
         "temperature": {
           "type": "string",
@@ -501,7 +500,7 @@ For a sensor with `temperature` (`s16`, `div: 10`, `unit: "°C"`,
     },
     "_warnings": {
       "type": "array",
-      "description": "What the decode had to say that did not stop it - a value outside its `valid_range`, or a TLV tag the schema does not describe (PS-301, PS-302). Present only when something was reported.",
+      "description": "What the decode had to say that did not stop it - a value outside its `valid_range`, or a TLV tag the schema does not describe. Present only when something was reported.",
       "items": {"type": "string"}
     }
   },

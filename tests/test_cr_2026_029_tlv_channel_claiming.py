@@ -203,15 +203,3 @@ class TestBothEncodeContractsAreRatchetedSeparately:
         assert plain < ordered, (plain, ordered)
         assert "ascending tag order" in text
         assert "CR-2026-029" in text
-
-
-class TestTheCorrectionIsRecorded:
-    """A wrong figure repeated across four CRs is worth stating where it was stated."""
-
-    def test_agents_md_says_which_api_a_comparison_measures(self):
-        text = " ".join((REPO_ROOT / "AGENTS.md").read_text().split())
-        assert "`Encode` and `EncodeOrdered` are different contracts" in text
-
-    def test_agents_md_withdraws_the_figure(self):
-        text = " ".join((REPO_ROOT / "AGENTS.md").read_text().split())
-        assert "no gap against the reference" in text

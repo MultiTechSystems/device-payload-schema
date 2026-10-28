@@ -1,10 +1,11 @@
 # Payload Schema Language Reference
 
-Complete reference for the LoRa Alliance Payload Schema specification (v0.5.0).
+Complete reference for the payload schema language as this toolkit implements it.
 
-Normative requirement ids (`PS-nnn`) are cited where a rule is easy to get wrong or where
-implementations have disagreed. The specification is the authority; this is a working
-reference for authoring schemas in this repository.
+This toolkit is a pre-standard proof of concept by Multi-Tech Systems, Inc. (see the
+README's Status section). It is not a LoRa Alliance specification, and this document is
+not one either: it describes what the implementations in this repository do, for
+authoring schemas here.
 
 ## Document Structure
 
@@ -38,7 +39,7 @@ downlink_commands: [...]  # Command definitions (for downlink)
 
 **Note:** 24-bit types (`u24`, `s24`) are commonly used for GPS coordinates in compact formats.
 
-Each integer type has fixed aliases, and no others (PS-049, PS-326); they are case-sensitive:
+Each integer type has fixed aliases, and no others; they are case-sensitive:
 
 | Type | Aliases |
 |------|---------|
@@ -47,8 +48,7 @@ Each integer type has fixed aliases, and no others (PS-049, PS-326); they are ca
 
 ### Checksum Fields
 
-An unsigned integer field may hold a check value over the bytes before it (PS-585 to
-PS-587). It declares `checksum`, a mapping:
+An unsigned integer field may hold a check value over the bytes before it. It declares `checksum`, a mapping:
 
 | Key | Meaning |
 |-----|---------|
@@ -62,9 +62,8 @@ value read (in the field's type and byte order) with the checksum of that range;
 computes it over the bytes it wrote and ignores any input value. A checksum field may sit at
 the top level, in a port entry, in a match case, in a flagged group, and after a construct
 that declares `reserve` - a repeat's `trailer` included; one that is a byte_group member, or
-sits within a tlv entry, a `records` entry or a repeat element, is rejected at load
-(PS-608). A range that covers nothing (`from` at or past the field) is a decode error and an
-encode rejection (PS-608). A type other than `uN`, an unknown `algo`, a `seed` with a CRC,
+sits within a tlv entry, a `records` entry or a repeat element, is rejected at load. A range that covers nothing (`from` at or past the field) is a decode error and an
+encode rejection. A type other than `uN`, an unknown `algo`, a `seed` with a CRC,
 or a type too narrow for the result (`u8` for `crc16/kermit`) is rejected at load.
 
 ```yaml
@@ -77,8 +76,7 @@ or a type too narrow for the result (`u8` for `crc16/kermit`) is rejected at loa
 ### Word-Ordered 32-Bit Types
 
 Some devices send a 32-bit value as two 16-bit units in an order neither `endian`
-setting describes. The type names the order, and a field's `endian:` does not change it
-(PS-271, PS-272, PS-362, PS-363):
+setting describes. The type names the order, and a field's `endian:` does not change it:
 
 | Type | Units | Bytes within a unit | Interpreted as |
 |------|-------|---------------------|----------------|
@@ -99,12 +97,11 @@ setting describes. The type names the order, and a field's `endian:` does not ch
 | Type | Bytes | Description |
 |------|-------|-------------|
 | `f16`, `f32`, `f64` | 2,4,8 | IEEE 754 float |
-| `bf16` | 2 | The upper 16 bits of an IEEE 754 binary32 (1 sign, 8 exponent, 7 fraction bits), read in the field's effective byte order (PS-558) |
+| `bf16` | 2 | The upper 16 bits of an IEEE 754 binary32 (1 sign, 8 exponent, 7 fraction bits), read in the field's effective byte order |
 
-A `bf16` word is the binary32 whose low 16 bits are zero; an infinity or NaN is absent
-(PS-282). An encoder rounds the binary64 value once to the nearest `bf16`, a tie to the even
+A `bf16` word is the binary32 whose low 16 bits are zero; an infinity or NaN is absent. An encoder rounds the binary64 value once to the nearest `bf16`, a tie to the even
 fraction, never through a binary32, and rejects a finite value past 3.3895313892515355e38 as
-PS-168 requires (PS-559). Netvox r718e sends it little-endian:
+out of range. Netvox r718e sends it little-endian:
 
 ```yaml
 - name: acceleration_x
@@ -113,14 +110,14 @@ PS-168 requires (PS-559). Netvox r718e sends it little-endian:
 ```
 
 A negative zero is zero for every float type (`f16`, `bf16`, `f32`, `f64`, `f32le16`,
-`f32be16le` and the minifloats, PS-566): the sign-bit word decodes to 0, and an encoder writes
+`f32be16le` and the minifloats): the sign-bit word decodes to 0, and an encoder writes
 the positive-zero word for -0.0, for a decoded -0 and for a -0 that arithmetic such as
 `mult: -1` over 0 produces. A vector carrying a sign-bit zero word therefore does not
 re-encode to itself.
 
 ### Compact Floats (MCCI)
 
-Unsigned and signed minifloats used by MCCI sensors (PS-417 to PS-421). They are not
+Unsigned and signed minifloats used by MCCI sensors. They are not
 IEEE half precision:
 
 | Type | Bytes | Layout | Value |
@@ -130,7 +127,7 @@ IEEE half precision:
 | `sflt24` | 3 | sign, exponent 7, fraction 16 | `+-(1 + f / 65536) x 2^(e - 63)`; exponent 127 means no value, and the field is absent |
 
 An encoder picks the smallest exponent whose fraction fits, ties to even; a value outside
-the range is an error (PS-420).
+the range is an error.
 
 ### Decimal Types
 
@@ -143,19 +140,19 @@ the range is an error (PS-420).
 
 | Type | Description |
 |------|-------------|
-| `ascii` | Text of `length:` bytes; trailing 0x00 padding dropped, a byte above 0x7F reported as its ISO 8859-1 character with a warning (PS-534, PS-538). Encoding pads with 0x00 and rejects a value too long or above U+00FF (PS-537) |
+| `ascii` | Text of `length:` bytes; trailing 0x00 padding dropped, a byte above 0x7F reported as its ISO 8859-1 character with a warning. Encoding pads with 0x00 and rejects a value too long or above U+00FF |
 | `hex` | Lowercase hex string (requires `length:`) |
-| `bytes` | Raw bytes, reported as declared by `format:` (requires `length:`, PS-456) |
+| `bytes` | Raw bytes, reported as declared by `format:` (requires `length:`) |
 | `base64` | Base64 encoded output (requires `length:`) |
 
 An `ascii` field that declares `numeral: decimal` or `numeral: hex` reports its digit text
-as the integer it spells (PS-560), so modifiers, lookups and references apply to it as to
+as the integer it spells, so modifiers, lookups and references apply to it as to
 any integer. The text, after the trailing 0x00 padding is removed, must be wholly a numeral:
 `decimal` is an optional `+` or `-` and one or more of `0`-`9`, `hex` is one or more hex
 digits with no sign and no `0x`. Anything else (empty text, whitespace, a digit outside the
 base) is an error naming the field, never a prefix read as JavaScript's `parseInt` would.
 An encoder writes the integer in digits of the base, uppercase hex, `0`-filled to `length`
-after any sign, and rejects a negative `hex` value or one that does not fit (PS-561, PS-168).
+after any sign, and rejects a negative `hex` value or one that does not fit.
 `numeral` on any other type, or with another value, is rejected at load.
 
 ```yaml
@@ -163,24 +160,24 @@ after any sign, and rejects a negative `hex` value or one that does not fit (PS-
 - {name: rssi,  type: ascii, length: 4, numeral: decimal}   # "-065" -> -65
 ```
 
-An `ascii` field may declare `nul` (PS-534): `trailing` (the default) removes trailing 0x00
+An `ascii` field may declare `nul`: `trailing` (the default) removes trailing 0x00
 bytes, `stop` ends the value before the first 0x00 and leaves the rest of the field unreported,
 `drop` removes every 0x00. Whitespace is never trimmed. Instead of `length`, an `ascii` field may
-declare `terminator`, a byte 0 to 255 (PS-593): the text runs to the first such byte, which is
+declare `terminator`, a byte 0 to 255: the text runs to the first such byte, which is
 consumed and not reported, and a payload that ends first is an error naming the field. Declaring
 both `length` and `terminator`, or neither, is rejected at load. `nul` and `terminator` apply before
-`numeral` (PS-594). An encoder writes `nul: stop` and `nul: drop` values padded to `length` (a value
+`numeral`. An encoder writes `nul: stop` and `nul: drop` values padded to `length` (a value
 holding 0x00 under `stop` is rejected; `drop` does not round-trip a dropped 0x00), and a terminated
 value followed by its terminator, with no padding and no fill for a `numeral`; a value holding the
-terminator is rejected (PS-595).
+terminator is rejected.
 
 A field with `terminator` may also declare `consume_terminator: false`, which stops before the
 terminator and leaves it for the next field to read, and an encoder then does not write it; and
 `end_terminates: true`, with which the end of the data (the payload less any `reserve`, or a tlv
-entry's declared length) ends the text too, an empty text being `""` (PS-619). Without
-`end_terminates`, reaching the end is still PS-593's error. Unless `consume_terminator: false`,
+entry's declared length) ends the text too, an empty text being `""`. Without
+`end_terminates`, reaching the end is still an error. Unless `consume_terminator: false`,
 an encoder writes the terminator even under `end_terminates`, so a frame that ended without one
-re-encodes with it (PS-620). Either key without `terminator`, or with a value other than true or
+re-encodes with it. Either key without `terminator`, or with a value other than true or
 false, is rejected at load.
 
 ```yaml
@@ -192,20 +189,18 @@ false, is rejected at load.
 ```
 
 Each byte of an `ascii` value is the ISO 8859-1 character of the same number, with a warning
-for one above 0x7F (PS-538, PS-073). A device that writes UTF-8 text declares `charset: utf-8`
-(PS-624): `length`, `nul` and `terminator` apply to the bytes first, and the bytes they leave
+for one above 0x7F. A device that writes UTF-8 text declares `charset: utf-8`: `length`, `nul` and `terminator` apply to the bytes first, and the bytes they leave
 are decoded as UTF-8, with no warning. Bytes that are not well-formed UTF-8 are an error naming
 the field and the position of the first bad byte within the text. An encoder writes the value
-as UTF-8, and `length` counts bytes, not characters: a value whose UTF-8 is longer is rejected
-(PS-625). `charset` with another value, or on another type, is rejected at load.
+as UTF-8, and `length` counts bytes, not characters: a value whose UTF-8 is longer is rejected. `charset` with another value, or on another type, is rejected at load.
 
 ```yaml
 - {name: condition, type: ascii, length: 8, nul: stop, charset: utf-8}   # C3 85 6E 67 00 ... -> "Ång"
 ```
 
 An `ascii` field declaring `trim: true` loses leading and trailing whitespace (U+0020, U+0009,
-U+000A, U+000D) after `nul`, `terminator` and `charset` have been applied (PS-641). An encoder
-pads such a field with spaces instead of 0x00, unless the field declares `nul` (PS-642).
+U+000A, U+000D) after `nul`, `terminator` and `charset` have been applied. An encoder
+pads such a field with spaces instead of 0x00, unless the field declares `nul`.
 Leading whitespace is not restored. `trim` with a value other than true or false, or on
 another type, is rejected at load.
 
@@ -213,10 +208,10 @@ another type, is rejected at load.
 - {name: name, type: ascii, length: 10, trim: true}   # 20 54 41 47 20 20 ... -> "TAG"; encodes 54 41 47 20 ...
 ```
 
-A `bytes` field reports a **lowercase** hex string by default (PS-281). Its `format:` is
-one of `hex`, `hex:upper`, `base64` or `array` (PS-079), and a `separator:` goes between
-the bytes of either hex format (PS-391). `hex:upper` is a format, not a type: `type:
-hex:upper` is rejected (CR-2026-037).
+A `bytes` field reports a **lowercase** hex string by default. Its `format:` is
+one of `hex`, `hex:upper`, `base64` or `array`, and a `separator:` goes between
+the bytes of either hex format. `hex:upper` is a format, not a type: `type:
+hex:upper` is rejected.
 
 ```yaml
 - name: device_eui
@@ -226,14 +221,14 @@ hex:upper` is rejected (CR-2026-037).
   separator: ":"        # -> "AB:CD:..."
 ```
 
-The type vocabulary is closed and case-sensitive (CR-2026-037): the aliases are exactly
+The type vocabulary is closed and case-sensitive: the aliases are exactly
 `uint8`-`uint64`, `int8`-`int64` and `i8`-`i64`, and anything else - `float`, `double`,
 `UDec`, `U8`, `version_string` - is rejected when the schema is loaded, naming the field.
-A field with no type and no construct is rejected too (PS-334).
+A field with no type and no construct is rejected too.
 
 #### `length: remaining`
 
-Consumes every byte from the read position to the end of the payload (PS-013):
+Consumes every byte from the read position to the end of the payload:
 
 ```yaml
 - name: message_type
@@ -245,14 +240,13 @@ Consumes every byte from the read position to the end of the payload (PS-013):
 
 - `remaining` is the **only** spelling. A negative integer is an internal sentinel the
   parsers map it to, and `validate_schema.py` rejects it in a schema.
-- At the end of a payload it yields an empty value, not an error and not a one-byte read
-  (PS-014).
-- At most one field per nesting level may use it (PS-015), and only on a variable-length
+- At the end of a payload it yields an empty value, not an error and not a one-byte read.
+- At most one field per nesting level may use it, and only on a variable-length
   type — `bytes`, `hex`, `ascii`, `base64`. On a fixed-width type it is a validation error.
 
 #### A length taken from an earlier field
 
-`length` may name a field decoded before it, with or without `$` (PS-464). A length octet
+`length` may name a field decoded before it, with or without `$`. A length octet
 followed by that many bytes is written directly:
 
 ```yaml
@@ -263,12 +257,12 @@ followed by that many bytes is written directly:
   length: $n            # or `length: n`
 ```
 
-A name that no earlier field binds is an error naming it (PS-465).
+A name that no earlier field binds is an error naming it.
 
 #### Optional trailing fields
 
 A field declaring `optional: true` is decoded where its bytes remain and is absent where
-none do (PS-402). Devices that append fields in later firmware are described by one schema:
+none do. Devices that append fields in later firmware are described by one schema:
 
 ```yaml
 - name: reset_cause
@@ -282,20 +276,19 @@ none do (PS-402). Devices that append fields in later firmware are described by 
 ```
 
 - Some bytes but fewer than the field takes is an error; an optional field is never partly
-  read (PS-403). A `type: object` is present or absent whole, sized as its fields sum.
-- Every field after an optional one must be optional too (PS-404), so an absent field never
+  read. A `type: object` is present or absent whole, sized as its fields sum.
+- Every field after an optional one must be optional too, so an absent field never
   leaves a later one reading the wrong bytes.
 - An encoder writes an optional field only where the input has it, and rejects an input
-  that supplies one after omitting an earlier one (PS-405).
+  that supplies one after omitting an earlier one.
 - When encoding it contributes no fixed count; the value supplies its own length.
 
 #### Reporting a span again (`consume: 0`)
 
 A `bytes`, `hex` or `ascii` field declaring `consume: 0` reads and reports its span and
-leaves the read position where it was, so the fields after it read the same bytes again
-(PS-588). It reports the whole frame, or a command's bytes, beside the values decoded from
+leaves the read position where it was, so the fields after it read the same bytes again. It reports the whole frame, or a command's bytes, beside the values decoded from
 them. Its `length` may be `remaining`, and it does not count toward the one `remaining`
-field a level may hold (PS-015).
+field a level may hold.
 
 ```yaml
 - name: raw              # the whole frame, reported first
@@ -310,15 +303,15 @@ field a level may hold (PS-015).
 - An encoder writes nothing for it and does not require it. A value given for it must
   equal what the field decodes from the bytes the other fields write over its span (its
   `format` and `separator`, or the trailing 0x00 removal, applied first), or the input is
-  rejected naming the field (PS-589).
+  rejected naming the field.
 - On any other type than a bit range, a `bool`, a byte string or a whole number (below),
-  `consume: 0` is NOT RECOMMENDED (PS-453).
+  `consume: 0` is NOT RECOMMENDED.
 
 #### Reading a whole number in place (`consume: 0`)
 
 A whole numeric field - an integer `uN`/`sN`, a float `f16`/`bf16`/`f32`/`f64`, a minifloat,
 `udec`/`sdec` or a word-ordered variant - declaring `consume: 0` reads its value from the bytes
-at the read position as it otherwise would, and leaves the position where it was (PS-603). It
+at the read position as it otherwise would, and leaves the position where it was. It
 is reported, referenced and matched on like any field, as its full bit range is. A frame's kind
 peeked before the cases that read it again:
 
@@ -335,7 +328,7 @@ peeked before the cases that read it again:
 - An encoder writes nothing for it; the fields that consume its bytes write them. Where the
   input omits it, the bytes fix it, and it is not required. A value given for it must equal
   what those bytes decode to, through its own type, arithmetic and lookup, or the input is
-  rejected naming the field (PS-604).
+  rejected naming the field.
 
 ### Special Types
 
@@ -343,8 +336,8 @@ peeked before the cases that read it again:
 |------|-------------|
 | `bool` | Boolean (0=false, nonzero=true) |
 | `number` | Computed field, or a constant with `value:` (no wire bytes) |
-| `string` | Constant with `value:` (no wire bytes) only; text read from the payload is `ascii` (PS-361) |
-| `boolean` | Constant `true` or `false` with `value:` (no wire bytes) only; `value` is required, and `yes`, `on` or `"true"` is refused (PS-519, PS-520). Not a spelling of `bool`, which reads a bit |
+| `string` | Constant with `value:` (no wire bytes) only; text read from the payload is `ascii` |
+| `boolean` | Constant `true` or `false` with `value:` (no wire bytes) only; `value` is required, and `yes`, `on` or `"true"` is refused. Not a spelling of `bool`, which reads a bit |
 | `skip` | Skip bytes (padding) |
 | `enum` | Enumerated values |
 | `bitfield_string` | Bit flags as string |
@@ -364,7 +357,7 @@ By default, bool fields do not advance the position, allowing multiple bits
 from the same byte. Add `consume: 1` to advance after reading.
 
 A constant boolean that the payload does not carry - a flag the device has no bit
-for - is a `boolean` literal, which reads no bytes and writes none (PS-357, PS-519):
+for - is a `boolean` literal, which reads no bytes and writes none:
 
 ```yaml
 - name: hardware_error
@@ -383,13 +376,12 @@ for - is a `boolean` literal, which reads no bytes and writes none (PS-357, PS-5
 ```
 
 `uN[start:end]` (inclusive) is the only bitfield spelling; `u8:2`, `u8[3+:2]`,
-`bits<3,2>` and `bits:2@3` were withdrawn (CR-2026-006) and are rejected. A bit range
+`bits<3,2>` and `bits:2@3` were withdrawn and are rejected. A bit range
 assembles its base value from N/8 bytes in the field's effective byte order - the schema's
-`endian`, or the field's own (PS-059) - and consumes nothing unless `consume: N` is given,
+`endian`, or the field's own - and consumes nothing unless `consume: N` is given,
 so the last range over a byte needs `consume: 1`.
 
-A signed base, `sN[start:end]`, sign-extends from the width of the range, not of the base
-(PS-352, PS-353):
+A signed base, `sN[start:end]`, sign-extends from the width of the range, not of the base:
 
 ```yaml
 - name: offset
@@ -412,8 +404,7 @@ fields:
 
 The override does not cascade into the members of a nested construct (`object`, `repeat`,
 `match` ...); set it on each member. Byte order is never part of a type name: the `le_`
-and `be_` prefixes (`le_u16`) are withdrawn and every implementation rejects them
-(PS-053a, CR-2026-039).
+and `be_` prefixes (`le_u16`) are withdrawn and every implementation rejects them.
 
 ### Byte Group (multiple values from shared bytes)
 
@@ -428,7 +419,7 @@ and `be_` prefixes (`le_u16`) are withdrawn and every implementation rejects the
 ```
 
 A group assembles its `size` bytes into one value, and its members' bit positions refer to
-that value (PS-364). The group may declare `endian`; its members may not:
+that value. The group may declare `endian`; its members may not:
 
 ```yaml
 - byte_group:
@@ -453,9 +444,9 @@ Shorthand (size inferred from field types):
 
 Without `size`, a group covers its widest member's base type, whichever bytes that
 member's bits fall in: a `u16[0:3]` member makes the group two bytes, a `u32[...]` member
-four (PS-070, CR-2026-131). `size` may widen the group but not narrow it: a `size: 5`
+four. `size` may widen the group but not narrow it: a `size: 5`
 beside a `u64[...]` member is rejected when the schema is loaded, with `byte_group declares
-size 5, narrower than its widest member's 8 bytes (PS-070)`. Every implementation used to
+size 5, narrower than its widest member's 8 bytes`. Every implementation used to
 read a sizeless group as one byte.
 
 A member is a bit range, a whole integer (`u16` is `u16[0:15]` of the group's value) or a
@@ -466,7 +457,7 @@ overlap checks; any other member is rejected.
 ## Arithmetic Modifiers
 
 Bare modifiers are applied in the canonical order **mult, then div, then add**, however
-the keys are written (PS-101/PS-102):
+the keys are written:
 
 ```yaml
 - name: temperature
@@ -497,7 +488,7 @@ For any other order, use a `transform` list, whose stages apply in list order:
 Two forms, and they differ in more than syntax — a value the table does not cover behaves
 differently in each.
 
-**Sequence** — indexed from zero (PS-104):
+**Sequence** — indexed from zero:
 
 ```yaml
 - name: status
@@ -505,11 +496,11 @@ differently in each.
   lookup: ["off", "on", "error", "unknown"]
 ```
 
-An index past the last entry is an **error** (PS-105). The payload does not match the
+An index past the last entry is an **error**. The payload does not match the
 schema's shape, so reporting the raw integer under a name that promises a label would be
 worse than failing.
 
-**Mapping** — keys need not start at zero or be contiguous (PS-268):
+**Mapping** — keys need not start at zero or be contiguous:
 
 ```yaml
 - name: button
@@ -520,7 +511,7 @@ worse than failing.
     10: held
 ```
 
-A value with no entry **omits the field** (PS-269) rather than reporting the raw number.
+A value with no entry **omits the field** rather than reporting the raw number.
 Declare a `default` to report something instead:
 
 ```yaml
@@ -532,7 +523,7 @@ Declare a `default` to report something instead:
     default: unknown
 ```
 
-A default may name the value it could not map by carrying `${value}` (PS-406):
+A default may name the value it could not map by carrying `${value}`:
 
 ```yaml
 - name: sensor
@@ -543,24 +534,23 @@ A default may name the value it could not map by carrying `${value}` (PS-406):
     default: "AnalogSensor${value}"     # 7 -> "AnalogSensor7"
 ```
 
-The value is the one after arithmetic (PS-107), written in decimal with no fraction where
+The value is the one after arithmetic, written in decimal with no fraction where
 it is integral - as JavaScript's `String()` writes it, so the interpreters and the generated
-codec agree. Such a lookup always reports a string, so its labels must be strings
-(PS-407). `${value}` means this only in a mapping's `default` (PS-408). An encoder given
-`AnalogSensor7` recovers the 7 (PS-409); a plain `default` label still cannot be encoded,
+codec agree. Such a lookup always reports a string, so its labels must be strings. `${value}` means this only in a mapping's `default`. An encoder given
+`AnalogSensor7` recovers the 7; a plain `default` label still cannot be encoded,
 because it stands for every unmapped value at once.
 
-Values may be numbers as well as strings (PS-106).
+Values may be numbers as well as strings.
 
 **A `default` label cannot be encoded back.** It stands for every value the table does not
 list, so there is no original to recover; encoders report the field rather than writing a
-plausible byte. The same applies to an `enum` `default` (PS-068).
+plausible byte. The same applies to an `enum` `default`.
 
 ### Set-Bit Labels (`bit_labels`)
 
 A status, alarm or capability word is often reported as the names of its set bits. A
 `lookup` names one value; `bit_labels` names each bit (0 the least significant), and the field
-reports the labels of the bits that are set (PS-616):
+reports the labels of the bits that are set:
 
 ```yaml
 - name: sensor_type                  # 0x0F -> "T/H,CO2,PMx,Gas1"
@@ -580,17 +570,17 @@ reports the labels of the bits that are set (PS-616):
 - The labels are a list, or one string separated by `join` where it is declared. `order` is
   `ascending` (the default) or `descending`, by bit number. Where no listed bit is set the
   field reports its `none` label (`["None"]`, or the text), else `[]` or `""`.
-- A `$` reference to the field binds its number, as for a lookup (PS-523).
+- A `$` reference to the field binds its number, as for a lookup.
 - A set bit with no label is not reported, and the decoder warns, naming the field and the
-  bit (PS-617). A bit outside the width, two bits with one label, a `none` that is a bit's
+  bit. A bit outside the width, two bits with one label, a `none` that is a bit's
   label, or a label containing a non-empty `join` is rejected at load.
 - An empty `join` concatenates the labels; an encoder splits such text by the longest label
   first, so where one label is a prefix of another the schema decodes but is refused for
-  encoding (PS-617).
+  encoding.
 - An encoder takes a list, or the joined text where `join` is declared, and writes the bits of
   those labels and no others; an unknown label is rejected, and `[]`, `""` or the `none` label
-  writes 0. Order and repetition do not matter (PS-618).
-- `_meta` reports `array`, or `string` where `join` is declared (PS-570).
+  writes 0. Order and repetition do not matter.
+- `_meta` reports `array`, or `string` where `join` is declared.
 
 ## Computed Fields
 
@@ -629,12 +619,12 @@ reports the labels of the bits that are set (PS-616):
 | `div` | Division | `a / b` |
 | `mod` | Modulo (remainder) | `int(a) % int(b)` |
 | `idiv` | Integer division | `int(a) // int(b)` |
-| `pow` | Power; `b` may be a field (PS-584) | `a ** b` |
+| `pow` | Power; `b` may be a field | `a ** b` |
 
 `pow` computes `a` raised to `b` in binary64, with `b` a literal or a field
 (`{op: pow, a: 10, b: $scale}`); a literal base of 2.718281828459045 gives `e^x`. A result
 that is not a finite real number - a negative `a` with a non-integer `b`, `0` with a negative
-`b`, an overflow - leaves the field absent, as a zero divisor does (PS-278, PS-584), and the
+`b`, an overflow - leaves the field absent, as a zero divisor does, and the
 rest of the payload still decodes.
 
 **Nibble Extraction Example:**
@@ -675,9 +665,9 @@ rest of the payload still decodes.
 ```
 
 `in` and `not_in` take a list of numbers and hold where the value equals one of them, or
-none of them (PS-543): `{field: $mode, in: [2, 4]}`. An empty `in` never holds, and an
+none of them: `{field: $mode, in: [2, 4]}`. An empty `in` never holds, and an
 empty `not_in` always does; a boolean is not a number. Every condition has exactly one
-operator (PS-126), so a range of values is two conditions, not one, and a condition with
+operator, so a range of values is two conditions, not one, and a condition with
 none or two is rejected. The same conditions serve
 `present_if`.
 
@@ -687,10 +677,10 @@ A `type: number` field may report a value no payload byte holds: `source: $fPort
 uplink's FPort), `$payloadLength` (the payload's length in bytes) or `$remaining` (the bytes
 from the field's position to the end of the data, less any `reserve`; inside a tlv entry, to
 the entry's end, as `match: {remaining: true}` counts them). It reads no bytes; its
-modifiers apply once, and a reference to it binds the value (PS-635). With no FPort given, a
-`$fPort` field is omitted with a warning naming it (PS-636). An encoder writes nothing for it
+modifiers apply once, and a reference to it binds the value. With no FPort given, a
+`$fPort` field is omitted with a warning naming it. An encoder writes nothing for it
 and checks a given value against the finished frame and the FPort it reports, rejecting one
-that differs (PS-637). Any other `source`, or one beside `value`, `compute`, `ref`,
+that differs. Any other `source`, or one beside `value`, `compute`, `ref`,
 `polynomial` or `time` `parts`, is rejected at load.
 
 ```yaml
@@ -701,10 +691,9 @@ that differs (PS-637). Any other `source`, or one beside `value`, `compute`, `re
 
 ### Formula (Withdrawn)
 
-`formula` and `encode_formula` are withdrawn (CR-2026-159, PS-448): a schema declaring one is
+`formula` and `encode_formula` are withdrawn: a schema declaring one is
 rejected at load, in every implementation, the validator and the TS013 generator:
-"`formula` is withdrawn; use `compute`, `polynomial`, `transform` or `guard` (CR-2026-159,
-PS-448)". No registry, device or example schema used either. The same result portably:
+"`formula` is withdrawn; use `compute`, `polynomial`, `transform` or `guard`". No device or example schema used either. The same result portably:
 
 ```yaml
 - name: temp_c
@@ -725,7 +714,7 @@ transform:
   - sqrt: true        # √x (input clamped at 0)
   - abs: true         # |x|
   - pow: 2            # x²
-  - log10: true       # Base-10 logarithm; x <= 0 leaves the field absent (PS-117)
+  - log10: true       # Base-10 logarithm; x <= 0 leaves the field absent
   - log: true         # Natural logarithm; likewise
   - floor: 0          # Lower bound: max(x, 0)
   - ceiling: 100      # Upper bound: min(x, 100)
@@ -733,10 +722,10 @@ transform:
   - {op: round, decimals: 2, ties: away}  # A tie rounds away from zero (toFixed)
 ```
 
-All five implementations support every stage. `clamp` is withdrawn (CR-2026-159, PS-115):
+All five implementations support every stage. `clamp` is withdrawn:
 write a `floor` stage and a `ceiling` stage. Any other stage - `{round: n}`, `{op:
-floor}`, `{sub: n}` - is rejected, never skipped (PS-390). A zero divisor, like the log of
-x <= 0, leaves the field absent rather than reporting NaN (PS-100, PS-282).
+floor}`, `{sub: n}` - is rejected, never skipped. A zero divisor, like the log of
+x <= 0, leaves the field absent rather than reporting NaN.
 
 ## Conditional Parsing
 
@@ -765,7 +754,7 @@ withdrawn; write `match: {field: $name, cases: ...}` (Clause 4)".
 
 Some devices tell their layouts apart by length alone. `remaining: true` makes the
 discriminator the number of bytes from here to the end, less any enclosing repeat's
-`reserve` (PS-414); it reads nothing:
+`reserve`; it reads nothing:
 
 ```yaml
 - match:
@@ -779,7 +768,7 @@ discriminator the number of bytes from here to the end, less any enclosing repea
           type: u32
 ```
 
-A match declares exactly one of `field`, `length` and `remaining` (PS-416).
+A match declares exactly one of `field`, `length` and `remaining`.
 
 ### Flagged (bitmask presence)
 
@@ -812,14 +801,14 @@ A match declares exactly one of `field`, `length` and `remaining` (PS-416).
 |----------|-------------|
 | `sign_magnitude` | Bit 15 is sign, bits 0-14 are magnitude |
 | `bcd` | Binary-coded decimal |
-| `bcd_signed` | M-Bus Type A BCD: a most-significant group of 0xF marks a negative value, the other groups its digits; otherwise `bcd` (PS-643, PS-644) |
+| `bcd_signed` | M-Bus Type A BCD: a most-significant group of 0xF marks a negative value, the other groups its digits; otherwise `bcd` |
 | `gray` | Gray code |
 
 `encoding` applies only to an unsigned integer type, reading it unsigned and then decoding
-the code (PS-422 to PS-425); Python, Go, Java, C# and the TS013 codec all support it. An
-encoder rejects a value the code cannot represent (PS-463). C does not have it.
+the code; Python, Go, Java, C# and the TS013 codec all support it. An
+encoder rejects a value the code cannot represent. C does not have it.
 
-`match_value` is withdrawn and rejected (PS-426): write a signed type, a signed bit range,
+`match_value` is withdrawn and rejected: write a signed type, a signed bit range,
 `encoding`, `match` or `guard` instead.
 
 ## Bitfield String
@@ -838,11 +827,11 @@ Parse bits into formatted string (e.g., version numbers):
 # Input: 0x0102 → Output: "v1.2"
 ```
 
-A part's third element is its format (PS-430): `decimal` (the default), `sdecimal`, `hex`
+A part's third element is its format: `decimal` (the default), `sdecimal`, `hex`
 (lower case) or `hex:upper`, optionally followed by `:N`, a minimum width from 1 to 32.
 With `:N` a part is zero-filled on the left to `N` digits; a part already that wide or wider
 is written in full, never cut. `sdecimal` reads the part's bits as two's complement of its
-width and writes a `-` before any padding, so -5 as `sdecimal:2` is `"-05"` (PS-582). Quote
+width and writes a `-` before any padding, so -5 as `sdecimal:2` is `"-05"`. Quote
 a format carrying `:N`.
 
 ```yaml
@@ -863,14 +852,14 @@ a format carrying `:N`.
 ```
 
 Encoding parses each segment by its format: leading zeros are accepted, hex in either case,
-and a `-` only on `sdecimal` (PS-096, PS-431). A segment the part's width cannot hold - 0 to
+and a `-` only on `sdecimal`. A segment the part's width cannot hold - 0 to
 2^w - 1, or -2^(w-1) to 2^(w-1) - 1 for `sdecimal` - is rejected naming the field and the
-segment, never masked (PS-583). A value without the declared `prefix`, or with a segment
+segment, never masked. A value without the declared `prefix`, or with a segment
 count other than the part count, is rejected; a missing part is never filled with 0 and an
-extra segment never ignored (PS-605).
+extra segment never ignored.
 
 With `delimiter: ""` the parts are joined with nothing between them, and an encoder splits
-the value by each part's `:N` width (PS-606). That needs every part to declare a width that
+the value by each part's `:N` width. That needs every part to declare a width that
 holds its largest value (`hex:2` for 8 bits, `decimal:3`) and no part to be `sdecimal`; a
 field that does not meet this still decodes, but is refused for encoding, and a value whose
 length differs from the sum of the widths is rejected.
@@ -897,9 +886,9 @@ test_vectors:
 ```
 
 A vector is either a decode vector (`payload` + `expected`) or an encode vector (`input` +
-`expected_payload`), never both (PS-297). Declare `source:` on every vector: expected
+`expected_payload`), never both. Declare `source:` on every vector: expected
 values recorded from this repository's own decoder are `generated`, and a schema with no
-independently sourced vector is capped at Silver (PS-264).
+independently sourced vector is capped at Silver.
 
 ## Enum Type
 
@@ -934,7 +923,7 @@ independently sourced vector is capped at Silver (PS-264).
     - name: value
       type: u16
 
-# A span of bytes taken from an earlier field; the elements must divide it exactly (PS-088)
+# A span of bytes taken from an earlier field; the elements must divide it exactly
 - name: data_length
   type: u8
 - name: samples
@@ -954,13 +943,12 @@ independently sourced vector is capped at Silver (PS-264).
 ```
 
 `min` and `max` bound a repeat's element count: at most `max` elements are read (default
-1000), and fewer than `min` fails the decode. On any other field they are withdrawn
-(CR-2026-159, PS-395): "`max` on field 'v' is withdrawn: it bounds a repeat's element count
-only; declare a value range with `valid_range` (CR-2026-159, PS-395)". A `valid_range` is a
+1000), and fewer than `min` fails the decode. On any other field they are withdrawn: "`max` on field 'v' is withdrawn: it bounds a repeat's element count
+only; declare a value range with `valid_range`". A `valid_range` is a
 quality flag on decode; an encoder does not reject a value for being outside it.
 
 Each element is decoded like a field list of its own: it may hold computed fields,
-internal (`_`) fields and constructs. Its names exist only inside the element (PS-368):
+internal (`_`) fields and constructs. Its names exist only inside the element:
 a reference to one from after the array is an error, as is a reference inside an
 element to one of its fields not yet decoded.
 
@@ -970,9 +958,9 @@ element to one of its fields not yet decoded.
 - name: slots
   type: repeat
   count: 4
-  index: i              # 0, 1, 2, 3 while each element decodes (PS-366)
-  count_as: occupied    # after the array: elements reported (PS-367)
-  present_if:           # one guard condition; a false element is dropped (PS-386)
+  index: i              # 0, 1, 2, 3 while each element decodes
+  count_as: occupied    # after the array: elements reported
+  present_if:           # one guard condition; a false element is dropped
     field: $id
     ne: 0
   fields:
@@ -986,14 +974,14 @@ element to one of its fields not yet decoded.
   ref: $occupied
 ```
 
-`index` and `count_as` are never reported unless a field refers to them (PS-370). A
+`index` and `count_as` are never reported unless a field refers to them. A
 dropped element still advances `index` and consumes its bytes, and `count_as` counts the
-elements reported, not read (CR-2026-080). A repeat with `present_if` over elements that
-read bytes cannot be encoded - the dropped elements are not in the output (PS-387).
+elements reported, not read. A repeat with `present_if` over elements that
+read bytes cannot be encoded - the dropped elements are not in the output.
 
 `index_base`, an integer (default 0), is the number `index` starts at: vendors that count
 from 1 declare `index_base: 1`, so `name_from: "Device${i}ID"` gives `Device1ID` first.
-`count_as` is unaffected, and anything but an integer is rejected (PS-530).
+`count_as` is unaffected, and anything but an integer is rejected.
 
 ### Values rather than records (`element`)
 
@@ -1001,7 +989,7 @@ from 1 declare `index_base: 1`, so `name_from: "Device${i}ID"` gives `Device1ID`
 - name: increments
   type: repeat
   until: end
-  element: {type: u16, div: 10}     # in place of fields (PS-528)
+  element: {type: u16, div: 10}     # in place of fields
 # 0078 0096 005A  ->  {"increments": [12, 15, 9]}
 ```
 
@@ -1010,14 +998,13 @@ one field and the array holds its values. An omitted value - a sentinel, a looku
 value that cannot be computed - is `null` in its position, so later values keep their
 index; this is the one place a decoded value is `null`. The element's `name` (default
 `element`) is how `present_if` refers to the current value and is never reported, so a
-leading `_` hides nothing: the value is still reported, and `$_x` still reads it (PS-545).
+leading `_` hides nothing: the value is still reported, and `$_x` still reads it.
 The element is one data field: it declares `type` and is not a `match`, `byte_group`,
 `flagged`, `tlv` or `records` entry, which is rejected at load; a `type: object` element
-reports one object per position. An encoder takes the array of values back (PS-529) and
+reports one object per position. An encoder takes the array of values back and
 writes the element's first `sentinel` for a `null` position, as the raw integer the field
 reads, without inverting any modifier (a `div: 10` element with `sentinel: [0xFFFF]`
-writes `FFFF`); with no sentinel it reports an error naming the repeat and the position
-(PS-544).
+writes `FFFF`); with no sentinel it reports an error naming the repeat and the position.
 
 ```yaml
 - {name: probes, type: repeat, count: 3, element: {type: u16, sentinel: [0xFFFF]}}
@@ -1032,7 +1019,7 @@ writes `FFFF`); with no sentinel it reports an error naming the repeat and the p
 - name: co2_history
   type: repeat
   count: $_count
-  packed_bits: 10                   # each element is the next 10 bits (PS-621)
+  packed_bits: 10                   # each element is the next 10 bits
   bit_offset: 4                     # the first starts 4 bits into the byte
   element: {type: u16, sentinel: [0x3FF], mult: 5}
 # 0000 0C 00 5143FF0040  ->  {"co2_history": [400, null, 5]}
@@ -1046,15 +1033,14 @@ for a signed element type, sign-extended, and then decoded as the element type's
 its `sentinel`, modifiers and `lookup` apply. The element is an integer type at least
 `packed_bits` wide, and the repeat declares `count` or `byte_length`; with `byte_length` the
 elements are as many as fit whole in `byte_length x 8 - bit_offset` bits. Afterwards the read
-position moves to the next byte, or to the end of `byte_length` where that is further
-(PS-622). The bits before `bit_offset` belong to the fields before the repeat, read as bit
+position moves to the next byte, or to the end of `byte_length` where that is further. The bits before `bit_offset` belong to the fields before the repeat, read as bit
 ranges that consume nothing. Either key anywhere else is rejected at load. An encoder writes
 each element through its modifiers inverted, rejects one that does not fit in `packed_bits`,
-ORs the first byte into the bits the fields before it left, and pads with 0 bits (PS-623).
+ORs the first byte into the bits the fields before it left, and pads with 0 bits.
 
-A repeat with `fields` packs a record when every field declares `packed_bits` (PS-639): an
+A repeat with `fields` packs a record when every field declares `packed_bits`: an
 element is the fields' bits in order, each read as its own type's integer. With
-`consume: 0` (PS-640) a packed repeat reads in place and the fields after it read the same
+`consume: 0` a packed repeat reads in place and the fields after it read the same
 bytes, so two runs can share one block:
 
 ```yaml
@@ -1073,7 +1059,7 @@ bytes, so two runs can share one block:
 
 An encoder writes a record's fields in order, each checked against its own `packed_bits`;
 takes a referenced offset from the input and refuses a repeat whose offset is computed; and,
-with `consume: 0`, leaves its bits for the fields after it to write over (PS-623).
+with `consume: 0`, leaves its bits for the fields after it to write over.
 
 ### Groups reported as one list (`flatten`)
 
@@ -1081,7 +1067,7 @@ with `consume: 0`, leaves its bits for the fields after it to write over (PS-623
 - name: counters
   type: repeat
   until: end
-  flatten: _members                 # report every group's members as one list (PS-633)
+  flatten: _members                 # report every group's members as one list
   fields:
     - {name: _count, type: u8}
     - {name: _time, type: u16}
@@ -1100,8 +1086,8 @@ A repeat with `fields` may name, in `flatten`, one of its element's fields that 
 arrays in payload order. The element's other fields must be internal; a value they hold,
 such as a group's shared time, reaches the members through a reference. A `flatten` naming
 no `repeat` among the element's fields, or an element reporting another field, is rejected
-at load (PS-633). The flat list does not say which group each member came from, so an
-encoder refuses the schema, which still decodes (PS-634).
+at load. The flat list does not say which group each member came from, so an
+encoder refuses the schema, which still decodes.
 
 ### Several records from one element (`records`)
 
@@ -1127,15 +1113,15 @@ encoder refuses the schema, which still decodes (PS-634).
 
 A `records` entry, in a repeat's element or a `match` case within it, is a non-empty list
 of field lists. Each is decoded in order from the read position and yields one record, and
-the repeat reports the records as consecutive elements in place of the element (PS-541).
+the repeat reports the records as consecutive elements in place of the element.
 The element's other reported fields are copied into each record, before the record's own;
 `_` fields are not reported, so they are not copied. A record field may not share a name
-with a field the element reports outside `records` (CR-2026-124). `index` counts source elements, and
+with a field the element reports outside `records`. `index` counts source elements, and
 `count_as` counts the records reported. `records` anywhere else - the top level, an
 object's members, a tlv case, a flagged group, a byte_group, a trailer, another record -
 and under `element` is rejected at load. An encoder refuses
 a repeat whose elements can reach one, since a record does not say which element it came
-from (PS-542). `_meta`'s `elements` describes every record's fields, keyed by name.
+from. `_meta`'s `elements` describes every record's fields, keyed by name.
 
 ### Running values (`carry`)
 
@@ -1153,8 +1139,8 @@ from (PS-542). `_meta`'s `elements` describes every record's fields, keyed by na
 ```
 
 Inside its own computation, a carried field's name is its value in the previous
-element - the `carry` value in the first (PS-378, PS-379). It restarts each time the
-repeat begins, including inside each element of an enclosing repeat (PS-380).
+element - the `carry` value in the first. It restarts each time the
+repeat begins, including inside each element of an enclosing repeat.
 
 ### Bytes reserved at the end
 
@@ -1162,9 +1148,9 @@ repeat begins, including inside each element of an enclosing repeat (PS-380).
 - name: registers
   type: repeat
   until: end
-  reserve: 1            # the last byte is not an element (PS-350)
+  reserve: 1            # the last byte is not an element
   index: i
-  trailer:              # decoded first, from the reserved bytes (PS-383)
+  trailer:              # decoded first, from the reserved bytes
     - name: first_slot
       type: u8
   fields:
@@ -1178,8 +1164,8 @@ repeat begins, including inside each element of an enclosing repeat (PS-380).
 `reserve` keeps `until: end` off the last bytes, and the fields declared after the
 repeat decode them. A `trailer` reads them before the first element instead, so the
 elements can use its values; it is reported beside the array, and its fields' sizes
-must add up to `reserve` (PS-384). The encoder writes the elements, then the trailer.
-Fewer bytes than `reserve` at the start of the repeat is an error (PS-351).
+must add up to `reserve`. The encoder writes the elements, then the trailer.
+Fewer bytes than `reserve` at the start of the repeat is an error.
 
 ### What each element measures
 
@@ -1188,7 +1174,7 @@ Fewer bytes than `reserve` at the start of the repeat is an error (PS-351).
   type: repeat
   count: 2
   index: i
-  identity: i                         # or a $ref to a field of the element (PS-372)
+  identity: i                         # or a $ref to a field of the element
   fields:
     - name: unit_code
       type: u8
@@ -1196,21 +1182,21 @@ Fewer bytes than `reserve` at the start of the repeat is an error (PS-351).
     - name: reading
       type: s16
       div: 10
-      unit: $unit_code                # per element (PS-373)
+      unit: $unit_code                # per element
       ipso: {object: 3303, instance: $i, resource: 5700}
       senml: {name: "probe_${i}"}
 ```
 
-These are annotations: they change no decoded value (PS-376). A field they name must
+These are annotations: they change no decoded value. A field they name must
 carry a `lookup` or be a literal, so its values are known from the schema, and the index
-needs a literal `count` or a `max` (PS-374). An `ipso.instance` must be an integer from 0
+needs a literal `count` or a `max`. An `ipso.instance` must be an integer from 0
 to 65534, or a reference every value of which is one: an index whose range from
 `index_base` fits, a literal, or a lookup whose labels are all such integers with no
-`${value}` default; anything else is rejected at load (PS-548).
+`${value}` default; anything else is rejected at load.
 
 One array can identify another, position by position. Where a device sends a list of
 codes and then one reading per code, `$name[i]` names an earlier sibling repeat declaring
-`element`, indexed by this repeat's own `index` (PS-546):
+`element`, indexed by this repeat's own `index`:
 
 ```yaml
 - {name: _n, type: u8}
@@ -1229,7 +1215,7 @@ codes and then one reading per code, `$name[i]` names an earlier sibling repeat 
 ```
 
 The decoded output is two arrays; `_meta` lists the identity as `{"repeat": "codes",
-"values": [...]}` (PS-547): the identity at each position is taken from the sibling's
+"values": [...]}`: the identity at each position is taken from the sibling's
 value at the same position. The sibling's element must carry a `lookup` or be a literal, and
 two arrays of different lengths are a decode error naming both. A per-element `unit` or
 `ipso.instance` may name a sibling the same way.
@@ -1237,7 +1223,7 @@ two arrays of different lengths are a decode error naming both. A per-element `u
 ### A history: `sampled`
 
 A device that buffers readings sends them as a history: one frame, the last N samples of a
-measurement, taken at a fixed interval. A repeat says so with `sampled` (PS-567), in either
+measurement, taken at a fixed interval. A repeat says so with `sampled`, in either
 its `element` or its `fields` form:
 
 ```yaml
@@ -1254,18 +1240,18 @@ its `element` or its `fields` form:
 - `order` is `newest_first` (the default) or `oldest_first`.
 - `at` is the time of the newest sample: `rx_time` (the default), the name of a
   `metadata.timestamps` entry whose mode is `unix_epoch` or `iso8601`, or the name of a field
-  decoded before the repeat that declares `time` with format `unix` or `iso8601` (PS-610),
-  whose instant is the anchor (CR-2026-192).
+  decoded before the repeat that declares `time` with format `unix` or `iso8601`,
+  whose instant is the anchor.
 
 Element k of N was sampled at `at` - k x `interval` for `newest_first`, and at `at` -
 (N - 1 - k) x `interval` for `oldest_first`. `sampled` is an annotation: decoding and
 encoding ignore it, and no time is added to the output. `_meta.fields.<repeat>.sampled`
-carries it with the defaults written (PS-568): `{"interval": {"configured": "history_period"},
+carries it with the defaults written: `{"interval": {"configured": "history_period"},
 "order": "newest_first", "at": "rx_time"}`, a reference as `{"field": "period"}`. A schema is
 rejected at load where `sampled` is on a field that is not a repeat, the interval is absent,
 not above 0, a bare string without `$` or a mapping other than `configured`, the order is
 neither value, or `at` names neither a `unix_epoch`/`iso8601` entry nor a `unix`/`iso8601`
-time field decoded before the repeat (PS-569); a `calendar` or `pattern` time field is no anchor. Python, Go, Java and
+time field decoded before the repeat; a `calendar` or `pattern` time field is no anchor. Python, Go, Java and
 C# implement it; the C binary form has no repeat.
 
 ## Nested Objects
@@ -1299,14 +1285,14 @@ Store values for later reference:
 ```
 
 A name beginning with `_` is internal: it is decoded and can be referenced like any
-field, and it is never reported (PS-432). Use it for protocol bytes, masks, reserved bits
+field, and it is never reported. Use it for protocol bytes, masks, reserved bits
 and the steps of a computation.
 
 - `_meta`, `_quality` and `_warnings` are reserved for interpreter output and cannot name a
-  field (PS-433).
+  field.
 - An encoder never needs an internal field in its input. One that reads bytes writes its
   `value`; without one it takes the input's value under its name, and otherwise reports an
-  error naming it (PS-434). So a reserved field states what it carries:
+  error naming it. So a reserved field states what it carries:
 
 ```yaml
 - name: _reserved
@@ -1314,12 +1300,12 @@ and the steps of a computation.
   value: 0              # what an encoder writes
 ```
 
-- A `metadata` timestamp may read an internal field (PS-435).
+- A `metadata` timestamp may read an internal field.
 
 ## Computed Output Keys (`name_from`)
 
 The reported key comes from a template filled in from values decoded earlier in the same
-payload (PS-265). The field's own `name` is then **not** a key in the output (PS-266) — it
+payload. The field's own `name` is then **not** a key in the output — it
 stays available as a variable.
 
 ```yaml
@@ -1344,7 +1330,7 @@ by its schema name, and the decoded output holds the resolved key instead.
 ## Template Strings (`template`)
 
 A `type: string` field declares either `value`, a literal, or `template`, text joined from
-values decoded earlier (PS-361, PS-590). It reads and writes no bytes, and an encoder ignores
+values decoded earlier. It reads and writes no bytes, and an encoder ignores
 a value given for it.
 
 ```yaml
@@ -1356,21 +1342,21 @@ a value given for it.
   template: "${_major}.${_minor:decimal:2}.${_build:decimal:3}"
 ```
 
-- `${name}` writes the value as `name_from` does (PS-532): a number as JavaScript's
+- `${name}` writes the value as `name_from` does: a number as JavaScript's
   `String(n)`, a looked-up field's label, a string as it is, a boolean as `true`/`false`.
 - `${name:format}` writes the number the reference binds - a looked-up field's code - in a
   bitfield_string part format: `decimal`, `sdecimal`, `hex` or `hex:upper`, with an optional
   `:N` minimum width (zero-filled, never cut; a `-` before the padding).
 - `$$` writes a `$`.
-- A reference with no value makes the field absent (PS-592); a format given a fraction, or
-  `hex` given a negative number, makes it absent with a warning (PS-591).
+- A reference with no value makes the field absent; a format given a fraction, or
+  `hex` given a negative number, makes it absent with a warning.
 - A reference to an undeclared name, an object or a repeat, a format that is not a part
   format, and `template` beside `value` or off `type: string` are rejected at load.
 
 ## Time Fields (`time`)
 
 A numeric field - an integer, float, nibble-decimal or minifloat type, a bit range, or a
-computed `number` or `integer` - may declare `time` (PS-610). Its value after the modifiers
+computed `number` or `integer` - may declare `time`. Its value after the modifiers
 is a count of seconds since `epoch` (an RFC 3339 UTC instant, 1970-01-01T00:00:00Z where
 absent), and the field is reported as that instant, in UTC, in its `format`. A reference to
 the field still binds the number.
@@ -1392,31 +1378,30 @@ the field still binds the number.
 ```
 
 - `format: unix` reports seconds since 1970, or since `since:`; `milliseconds: true` reports
-  an integer count of milliseconds (PS-611).
+  an integer count of milliseconds.
 - `format: iso8601` reports `YYYY-MM-DDTHH:MM:SSZ`; `fraction: N` (1 to 9) writes exactly N
-  fractional digits, and without it digits appear only where the value has them (PS-611).
+  fractional digits, and without it digits appear only where the value has them.
 - `format: calendar` reports `{year, month, day, hour, minute, second}`, with
-  `month_labels:` (twelve names) and `keys:` (part to member name) as PS-411 and PS-412
-  define them (PS-612).
+  `month_labels:` (twelve names) and `keys:` (part to member name) as `metadata.timestamps` defines
+  them.
 - `format: pattern` writes `pattern:` with `%Y`, `%m`, `%d`, `%H`, `%M`, `%S`, `%L`
-  (milliseconds), `%b` (`Jan`), `%a` (`Mon`) and `%%` replaced; names are English (PS-613).
+  (milliseconds), `%b` (`Jan`), `%a` (`Mon`) and `%%` replaced; names are English.
 - `parts:` on a `type: number` field maps `year`, `month`, `day` and optionally `hour`,
   `minute`, `second` to fields decoded earlier; a part that is not whole, or a date that
   does not exist (an all-zero clock), omits the field with a warning naming it, and
-  decoding continues; a rolled-over date is never reported. `epoch` does not apply
-  (PS-614).
-- An instant outside the years 1 to 9999 likewise omits the field with a warning (PS-610).
+  decoding continues; a rolled-over date is never reported. `epoch` does not apply.
+- An instant outside the years 1 to 9999 likewise omits the field with a warning.
 - Milliseconds, `fraction` and `%L` truncate, as JavaScript's `Date` does.
-- An encoder parses the value back in its format (PS-615). A pattern lacking `%Y`, `%m` or
+- An encoder parses the value back in its format. A pattern lacking `%Y`, `%m` or
   `%b`, `%d`, `%H`, `%M` or `%S`, and `parts` naming a field that reads no bytes, decode
   but are refused for encoding; a `%a` that is not the date's weekday is rejected.
 - `time` on another type or beside `lookup`, an unknown format, or a key of another format
   is rejected at load.
-- `valid_range` on a time field compares the seconds after the modifiers (PS-615). No
+- `valid_range` on a time field compares the seconds after the modifiers. No
   encoder here range-checks on write, so an instant outside the range is written as any
   other value is.
 - `_meta.fields.<name>.time` carries `format`, and `epoch`, `since`, `milliseconds`,
-  `fraction` and `pattern` where declared; never `parts`, `month_labels` or `keys` (PS-629).
+  `fraction` and `pattern` where declared; never `parts`, `month_labels` or `keys`.
 
 ## TLV (Type-Length-Value)
 
@@ -1442,7 +1427,7 @@ Parse tag-based variable content. Supports single and multi-byte tags.
 ```yaml
 - tlv:
     tag_size: 1
-    reserve: 9            # the last nine bytes are not entries (PS-471)
+    reserve: 9            # the last nine bytes are not entries
     cases: { ... }
 - name: keepalive
   type: bytes
@@ -1455,10 +1440,10 @@ bytes than `reserve` at the start is an error.
 ### A name reported more than once (`on_repeat`)
 
 With `merge: true`, a name two entries report - whether they share a tag or not - is
-combined as its `on_repeat` says (PS-157, PS-525): `collect` (the default) gathers the
+combined as its `on_repeat` says: `collect` (the default) gathers the
 values into an array in payload order, `last` keeps the value reported last, `merge`
 combines `type: object` values member by member, and `concat` always reports one flat
-array (PS-632).
+array.
 
 ```yaml
 - tlv:
@@ -1472,17 +1457,17 @@ array (PS-632).
 
 A field's own `on_repeat` takes precedence over the tlv's. Only a `type: object` field may
 declare `merge`, and every field reporting one name must resolve to the same mode, or the
-schema is rejected (PS-526). A merged object reporting one member twice is an error,
+schema is rejected. A merged object reporting one member twice is an error,
 unless that member declares `on_repeat: last`. `on_repeat` anywhere else - outside a tlv,
-or on a member of an object that is not merged - is rejected (PS-525).
+or on a member of an object that is not merged - is rejected.
 
-Merged cases may share a member only where it declares `on_repeat: last` (PS-526).
+Merged cases may share a member only where it declares `on_repeat: last`.
 
 `concat` reports the name as one array however many entries report it, one included; a
 value that is itself an array has its elements appended, and a name no entry reports is
-absent (PS-632). An encoder writes one entry per element of the array where the case
+absent. An encoder writes one entry per element of the array where the case
 reports a scalar or an object; where the case reports an array, the flat list cannot be
-split back into entries and the schema is refused for encoding (PS-634).
+split back into entries and the schema is refused for encoding.
 
 ```yaml
 - tlv:
@@ -1492,9 +1477,9 @@ split back into entries and the schema is refused for encoding (PS-634).
 # FE 01  ->  {"request_result": [{"cmd": 1}]}
 ```
 
-The encoder writes each value - a scalar, each element of an array PS-157 collected, a
+The encoder writes each value - a scalar, each element of an array a repeated tag collected, a
 `last` value, a merged object's members - under the first case whose declared fields it
-supplies in full, and never zero-fills or drops one (PS-527). A shared `last` member is
+supplies in full, and never zero-fills or drops one. A shared `last` member is
 written in every case written for its object. A value no case takes in full, or a member
 no case declares, is an error naming it.
 
@@ -1542,7 +1527,7 @@ A composite key is a quoted string; a bare YAML list (`[1, 0x67]:`) is not a val
 key and the file fails to load. The corpus writes the components in decimal.
 
 A one-field tag may use the one-element keys `"[*]"` (any value) and `"[!n]"` (any value but
-n). They rank below every exact key, whatever order they are written in (PS-270, PS-438):
+n). They rank below every exact key, whatever order they are written in:
 
 ```yaml
 - tlv:
@@ -1554,9 +1539,8 @@ n). They rank below every exact key, whatever order they are written in (PS-270,
 ```
 
 A tlv has no `default` case; its catch-all is `"[*]"` (`"[*, *]"` for a two-field tag), and
-a `default` key is rejected at load (PS-436, PS-438). One key written twice (`"[*]"` and
-`"[ * ]"`) is rejected (PS-437), and so are two negated keys, which can match one tag
-(PS-440).
+a `default` key is rejected at load. One key written twice (`"[*]"` and
+`"[ * ]"`) is rejected, and so are two negated keys, which can match one tag.
 
 ## Match Patterns
 
@@ -1599,21 +1583,21 @@ fields:
     length: 2
 ```
 
-A definition is an object with a `fields:` list (PS-345), and `$ref` splices those fields
+A definition is an object with a `fields:` list, and `$ref` splices those fields
 into the list where it appears - any field list: a port's, an object's, a repeat's, a
-case's (PS-347). `01 02 AB CD` decodes to `{version: 1, flags: 2, payload: "abcd"}`. The
+case's. `01 02 AB CD` decodes to `{version: 1, flags: 2, payload: "abcd"}`. The
 top-level `header:` block is gone; use a definition for a common header.
 
 A reference that does not resolve, a cycle, or a pointer not of the form
 `#/definitions/<name>` makes the schema invalid. A reference into another file
 (`lib.yaml#/definitions/x`) is resolved only by `tools/schema_preprocessor.py`, which also
-applies `rename:` and `prefix:`; an interpreter given one rejects it (PS-462). The `use:`
-shorthand is withdrawn (CR-2026-045): write `$ref`.
+applies `rename:` and `prefix:`; an interpreter given one rejects it. The `use:`
+shorthand is withdrawn: write `$ref`.
 
 ### Field templates and shared lookup tables
 
 A definition carries exactly one of `fields` (a group, as above), `field` (one field) or
-`lookup` (a table) (PS-345, CR-2026-168):
+`lookup` (a table):
 
 ```yaml
 definitions:
@@ -1631,13 +1615,12 @@ fields:
 
 A `$ref` to a `field` definition may carry field keys beside it: each replaces the defined
 key whole, one level deep, so a `lookup` or `transform` given there is not merged with the
-definition's (PS-578). The resolved field must have a `name`, from the definition or the
+definition's. The resolved field must have a `name`, from the definition or the
 reference. A `$ref` to a group carries nothing else, and a `$ref` in a field list never
-names a `lookup` definition (PS-348). A field's `lookup` may be the pointer
+names a `lookup` definition. A field's `lookup` may be the pointer
 `#/definitions/<name>` to a `lookup` definition, and decodes and encodes exactly as the
-table written in its place (PS-579). A `field` definition may use a pointer, and a group may
-reference `field` definitions; references resolve transitively, and a cycle is invalid
-(PS-580, PS-349). The decoded output and `_meta` are those of the schema written out. An
+table written in its place. A `field` definition may use a pointer, and a group may
+reference `field` definitions; references resolve transitively, and a cycle is invalid. The decoded output and `_meta` are those of the schema written out. An
 `enum`'s `values` cannot point to a table.
 
 ## Port-Based Routing
@@ -1656,8 +1639,7 @@ ports:
         type: u8
 ```
 
-A port declares `fields`, `direction` and a `description`. `confirmed` is withdrawn
-(CR-2026-159, PS-448): whether a downlink is confirmed is chosen per transmission, not by the
+A port declares `fields`, `direction` and a `description`. `confirmed` is withdrawn: whether a downlink is confirmed is chosen per transmission, not by the
 schema, and a port declaring it is rejected at load.
 
 ## Downlink Encoding
@@ -1693,7 +1675,7 @@ divide by `mult`, then round to the wire integer.
 
 `downlink_commands` is handled by the Python interpreter (`encode_command()`,
 `decode_command()`) and the TS013 generator only; it is not in the specification, and
-Go, Java, C# and C ignore it. A schema must still declare `fields` or `ports` (PS-004),
+Go, Java, C# and C ignore it. A schema must still declare `fields` or `ports`,
 so commands sit beside a layout, as in the bidirectional example below.
 
 ```yaml
@@ -1750,7 +1732,7 @@ downlink_commands:
 
 ## Network Metadata Enrichment
 
-Include TS013 input fields in decoder output. The `metadata` block is optional (PS-310)
+Include TS013 input fields in decoder output. The `metadata` block is optional
 and **only the Python interpreter implements it** (`decode(payload, fPort=...,
 input_metadata={...})`); every other implementation decodes the payload and ignores the
 block. A decoded field wins a name collision, and a value that cannot be resolved omits
@@ -1783,7 +1765,7 @@ metadata:
       mode: subtract
       offset_field: seconds_ago
 
-    # A base time minus an elapsed count from a field (PS-318, PS-319)
+    # A base time minus an elapsed count from a field
     - name: sampled_at
       mode: elapsed_to_absolute
       elapsed_field: seconds_ago        # `offset_field` is the older spelling
@@ -1793,7 +1775,7 @@ metadata:
     - name: device_time
       mode: unix_epoch
       field: counter
-      epoch: "2013-01-01T00:00:00Z"     # optional; 1970 where absent (PS-354, PS-355)
+      epoch: "2013-01-01T00:00:00Z"     # optional; 1970 where absent
 
     # The same instant as an RFC 3339 UTC string
     - name: device_time_iso
@@ -1801,10 +1783,10 @@ metadata:
       field: counter
       epoch: "2013-01-01T00:00:00Z"
 
-    # The same instant as its UTC calendar parts (PS-410 to PS-413)
+    # The same instant as its UTC calendar parts
     - name: stamp
       mode: calendar
-      field: _since_2015                 # an internal field resolves (PS-435)
+      field: _since_2015                 # an internal field resolves
       epoch: "2015-01-01T00:00:00Z"
       month_labels: [January, February, March, April, May, June,
                      July, August, September, October, November, December]
@@ -1817,7 +1799,7 @@ metadata:
 
 The three epoch modes read their field as seconds since `epoch` - an RFC 3339 UTC string
 with a `Z`, quoted, or YAML reads it as a date - and keep the field itself as the device's
-own count (PS-356). For 2026-09-24T14:05:09Z, 433260309 seconds after 2013:
+own count. For 2026-09-24T14:05:09Z, 433260309 seconds after 2013:
 
 | Mode | Reports |
 |------|---------|
@@ -1829,8 +1811,8 @@ Before 0.5.2 `unix_epoch` reported a string, and `iso8601` took a `format:` strf
 pattern; that key is withdrawn and rejected. A device counting minutes converts with
 `mult: 60`. A GPS epoch is an approximation: GPS time does not insert leap seconds.
 
-Enrichment runs only when the decoder is given runtime input (PS-312), and only the Python
-reference implements it; the others may decline `metadata` (PS-310), but must decode the
+Enrichment runs only when the decoder is given runtime input, and only the Python
+reference implements it; the others may decline `metadata`, but must decode the
 payload as though the block were absent.
 
 ### Available TS013 Input Fields
@@ -1853,21 +1835,21 @@ payload as though the block were absent.
   unit: "°C"
   ipso: {object: 3303, instance: 0, resource: 5700}   # IPSO object/instance/resource
   senml: {name: "temperature", unit: "Cel"}           # SenML record name and unit
-  semantic: "air.temperature"                          # TTN normalized path (PS-470)
+  semantic: "air.temperature"                          # TTN normalized path
 ```
 
-**`semantic` is a TTN normalized measurement path** (CR-2026-179, PS-470): a string from
+**`semantic` is a TTN normalized measurement path**: a string from
 the `measurement` definition of TTN's `lib/payload.json` (`air.temperature`,
 `air.relativeHumidity`, `soil.moisture`, `position.latitude`, `battery`, ...). Anything
-else that is not a string is rejected. `_meta.fields` carries it unchanged (PS-600). The
+else that is not a string is rejected. `_meta.fields` carries it unchanged. The
 validator warns of a path TTN does not define, of a unit that is neither the path's nor one
-normalizeUplink converts, and of two fields of one message on one path (PS-597). A
+normalizeUplink converts, and of two fields of one message on one path. A
 generated TS013 codec gains `normalizeUplink()`, which places each value at its path in
-TTN's unit (PS-598, PS-599): it converts °F, mV, Pa/kPa/bar/inHg, km/h/mph/knots and a
+TTN's unit: it converts °F, mV, Pa/kPa/bar/inHg, km/h/mph/knots and a
 fraction (`/`), and otherwise leaves the value out with a warning - a field with no `unit`
 on a path that has one included, and every value on a path two fields declare. So declare
 `unit` beside `semantic`, and do not put a battery in % on `battery`, which is in V.
-TTN calls `normalizeUplink()` with no FPort (PS-609, CR-2026-185): for a schema with
+TTN calls `normalizeUplink()` with no FPort: for a schema with
 `ports`, an `fPort` in its input selects the entry; otherwise the candidates are the uplink
 entries reporting every key of the data, and their placement is used where they all place
 the same values, else nothing is placed, with a warning naming the FPorts or saying none
@@ -1939,8 +1921,7 @@ codec, and only when a decoded field declares `valid_range`; Java does not emit 
 #### No reading: `sentinel` and `out_of_range: omit`
 
 A device that reports "no reading" with a reserved value - SenseCAP's `0x8000`, a humidity
-of 200 % - should not have it decoded as a quantity. Both forms leave the field absent
-(PS-427 to PS-429):
+of 200 % - should not have it decoded as a quantity. Both forms leave the field absent:
 
 ```yaml
 - name: temperature
@@ -2118,7 +2099,7 @@ Section 10 tier: **Platinum** 95-100%, **Gold** 85-94%, **Silver** 70-84%, **Bro
 | 5 | At least 5 vectors |
 | 20 | Correct IPSO (7) + SenML (7) + semantic (6) annotation of detectable sensor fields |
 
-Gold and Platinum also have **gates** (PS-239, PS-264): a schema is capped at Silver,
+Gold and Platinum also have **gates**: a schema is capped at Silver,
 whatever it scores, unless it has at least 5 vectors, all vectors pass, every branch is
 covered, edge-case vectors are present, no annotation is incorrect, and at least one
 vector declares an independent `source:` (`vendor-doc`, `vendor-codec`, `field-capture`
@@ -2154,7 +2135,7 @@ function encodeDownlink(input) {
 A fixed three-field uplink with canonical annotations. It validates, passes all five
 vectors in the Python interpreter and the generated JS codec, and scores 100%. Its
 vectors are marked `source: generated` because the device is invented, so
-`score_schema.py` caps it at **Silver** (PS-264); with
+`score_schema.py` caps it at **Silver**; with
 `--no-require-provenance` it is **Platinum**. A real schema reaches Gold or Platinum
 by taking at least one vector from the vendor.
 
@@ -2192,7 +2173,7 @@ fields:
 
 # Illustrative: this device is invented, so its vectors are computed by hand from
 # the layout above and declared `source: generated`. A real schema takes them from
-# the vendor's documentation or codec (PS-264).
+# the vendor's documentation or codec.
 test_vectors:
   - name: normal
     payload: "00E7 32 0C80"
@@ -2258,8 +2239,8 @@ MODIFIERS:    mult div add (canonical order) | lookup | polynomial | compute | g
 CONDITIONALS: match (value dispatch) | flagged (bitmask) | tlv (tag dispatch)
 
 TRANSFORMS:   mult div add | sqrt abs pow log10 log | floor ceiling
-              | {op: round, decimals: n, ties: even|away} - nothing else (PS-390)
-              div 0 or log of x <= 0: the field is absent (PS-100, PS-117)
+              | {op: round, decimals: n, ties: even|away} - nothing else
+              div 0 or log of x <= 0: the field is absent
 
 COMPUTE OPS:  add sub mul div mod idiv pow
 
@@ -2268,7 +2249,7 @@ GUARD OPS:    gt gte lt lte eq ne
 ENCODINGS:    sign_magnitude bcd gray (on uN only)
 
 MATCH:        exact | range ("n..m", decimal) | list ("[1, 2, 3]", quoted) | default
-              exactly one of field: or length: (PS-399)
+              exactly one of field: or length:
 
 REFERENCES:   $field_name | var: name | $ref: '#/definitions/name'
 

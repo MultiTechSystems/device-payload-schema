@@ -32,7 +32,7 @@ This document explains the design decisions behind the Payload Schema language.
 ### 3. Explicit Over Magic
 
 **Decision**: All transformations visible in schema. Bare modifiers apply in one fixed
-order, mult → div → add (CR-2026-002, PS-101); any other order is written as an explicit
+order, mult → div → add; any other order is written as an explicit
 `transform` list.
 
 **Rationale**:
@@ -115,7 +115,7 @@ type: u8[0:3]     # Range syntax - bits 0-3, the only spelling
 
 The language carried five spellings for a while - `u8[0:3]`, `u8[3+:2]`,
 `bits<3,2>`, `bits:2@3` and the sequential `u8:4` - deliberately, to keep the
-options open while the working group chose. CR-2026-006 settled on the range and
+options open while the working group chose. A later change settled on the range and
 withdrew the rest.
 
 The sequential form is why it mattered. "Four bits from the current position" needs
@@ -200,7 +200,7 @@ type: sdec       # 0xE5 → -1.5 (high nibble is a signed two's-complement nibbl
 
 **Original decision (reversed)**: `add`, `mult`, `div` applied in YAML key order.
 
-**Current decision**: CR-2026-002 (PS-101/PS-102) replaced it with a fixed canonical
+**Current decision**: it was replaced with a fixed canonical
 order, **mult → div → add**, regardless of how the keys are written. An order other
 than the canonical one must be an explicit `transform` list.
 

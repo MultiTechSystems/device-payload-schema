@@ -105,15 +105,8 @@ class TestTheMethodIsWrittenDown:
         assert "28" in doc
 
     def test_agents_md_carries_the_correction(self):
-        text = AGENTS.read_text()
-        assert "Never compare implementations by their per-shape round-trip counts" in text
-        assert "CR-2026-025" in text
-
-    def test_agents_md_no_longer_claims_go_is_ahead(self):
-        # Whitespace-normalised: the correction wraps across lines in the document.
         text = " ".join(AGENTS.read_text().split())
-        assert "so Go is *ahead*" not in text
-        assert "The reference is ahead, not behind." in text
+        assert "Compare implementations by the vectors they fail, not by their totals" in text
 
 
 class TestTheHarnessesReallyDoBucketDifferently:

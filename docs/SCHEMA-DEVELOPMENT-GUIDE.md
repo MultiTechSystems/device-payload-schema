@@ -57,7 +57,7 @@ const result = decodeUplink({ bytes: [...], fPort: 2 });
 Record each such vector with `source: vendor-codec` (or `vendor-doc` when the values come
 from the datasheet). Never record what this toolkit's own decoder printed as if it were
 independent: label such vectors `source: generated`. A schema with no independently
-sourced vector is capped at Silver (PS-264) however high it scores.
+sourced vector is capped at Silver however high it scores.
 
 Minimum test vector coverage:
 - **One test per message type** (keepalive, each command, etc.)
@@ -206,7 +206,7 @@ The Vicki schema demonstrates these principles:
 2. **Scoped to keepalive only**: Command responses documented as future work
 3. **Test vectors**: 12 vectors covering all keepalive edge cases. They were validated
    against the interpreter's output and carry no independent `source:`, so the schema
-   scores 100% yet is capped at Silver (PS-264) until vectors from the vendor codec are
+   scores 100% yet is capped at Silver until vectors from the vendor codec are
    recorded
 4. **Added rounding transforms**: Match original's `toFixed(2)` and `Math.round()`
 5. **Documented bugs**: Original's broken reason=0x51 formula
