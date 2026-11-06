@@ -280,6 +280,9 @@ def case_key_type_warnings(schema: Any) -> List[str]:
                 visit_node(value, f"{path}[{i}]", scope)
 
     if isinstance(schema, dict):
+        # A match reached through `$ref` sits in `definitions`, which the walk
+        # below does not visit; check the document with its references spliced.
+        schema = expand_refs(schema)[0]
         visit_list(schema.get('fields'), 'fields', {})
         ports = schema.get('ports')
         if isinstance(ports, dict):
