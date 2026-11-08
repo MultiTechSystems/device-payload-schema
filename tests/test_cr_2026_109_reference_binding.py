@@ -340,6 +340,37 @@ def test_a_text_case_key_on_a_looked_up_field_warns():
     assert decode(doc, "8107")[1]
 
 
+def test_a_text_case_key_in_a_referenced_definition_warns():
+    # The match sits in `definitions` and is reached through `$ref`; a sequence
+    # lookup on a bit range, as in a relay schema whose FSK case was keyed `FSK`.
+    doc = {
+        "name": "probe",
+        "endian": "big",
+        "definitions": {
+            "datarate": {
+                "fields": [
+                    {
+                        "name": "modu",
+                        "type": "u8[6:7]",
+                        "consume": 1,
+                        "lookup": ["LORA", "FSK", "LRFHSS", "FLRC"],
+                    },
+                    {
+                        "match": {
+                            "field": "$modu",
+                            "cases": {"FSK": [{"name": "kbps", "type": "u8"}]},
+                            "default": "skip",
+                        }
+                    },
+                ]
+            }
+        },
+        "fields": [{"$ref": "#/definitions/datarate"}],
+    }
+    warnings = case_key_type_warnings(doc)
+    assert len(warnings) == 1 and "'FSK'" in warnings[0]
+
+
 @pytest.mark.parametrize("key", [129, "0x81", "128..130", "[129, 130]", "default"])
 def test_numeric_case_keys_do_not_warn(key):
     doc = schema(
