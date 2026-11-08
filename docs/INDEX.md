@@ -30,7 +30,7 @@ Generated inventory of this repository: what lives where, what each document cov
 | Document | Purpose | Lines |
 |---|---|---|
 | [`BIDIRECTIONAL-CODEC.md`](BIDIRECTIONAL-CODEC.md) | The Payload Schema codec is symmetric - both devices and networks use the same encode/decode... | 382 |
-| [`C-CODE-GENERATION.md`](C-CODE-GENERATION.md) | Generate standalone C codec headers from Payload Schema YAML files. | 223 |
+| [`C-CODE-GENERATION.md`](C-CODE-GENERATION.md) | Generate standalone C codec headers from Payload Schema YAML files. | 225 |
 | [`CODEC-ANALYSIS-NOTES.md`](CODEC-ANALYSIS-NOTES.md) | Analysis of complex codecs from lorawan-devices repository to identify schema language gaps. | 607 |
 | [`FAQ.md`](FAQ.md) | A declarative, YAML/JSON-based format for defining the structure of binary LoRaWAN device payloads.... | 478 |
 | [`FORMULA-MIGRATION-TRACKING.md`](FORMULA-MIGRATION-TRACKING.md) | Tracking the migration from imperative formulas (JavaScript eval()) to declarative schema... | 466 |
