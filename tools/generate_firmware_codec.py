@@ -66,6 +66,8 @@ TYPE_MAP = {
 # compile as C11/C23 and when included from C++ firmware (mbed, Arduino). Only the C identifier changes -- never the
 # schema's name, the wire or the JSON. Any other generator that names this header's structs, members, functions or
 # macros must apply the same mapping; the list is pinned by its digest (tests/test_firmware_codec_keywords.py).
+# The mixed-case entries (_Bool, _BitInt, ...) can never match, since to_c() lower-cases first; they stay so the list,
+# and its pinned digest, equal the other generators' copy. Do not prune them.
 C_KEYWORDS = frozenset("""
     auto break case char const continue default do double else enum extern float for goto if inline int long
     register restrict return short signed sizeof static struct switch typedef union unsigned void volatile while
