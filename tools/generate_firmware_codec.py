@@ -210,13 +210,21 @@ def collect_fields(fields: List[Dict], prefix: str = '') -> List[Tuple[str, str,
         else:
             result.append((to_c(name), type_ctype(ftype), field))
 
-    # Deduplicate (union fields from match/tlv may repeat)
-    seen = set()
+    # Deduplicate: one name reported by several match or tlv cases is one member. Two different names with one C
+    # spelling (`Seq` and `seq`, `switch` and `switch_`) would be one member too, so they are refused, as is a name
+    # with no C spelling at all (`4_20_mA`), which would name no member.
+    seen: Dict[str, str] = {}
     deduped = []
     for item in result:
-        if item[0] not in seen:
-            seen.add(item[0])
-            deduped.append(item)
+        cname, schema_name = item[0], item[2].get('name', item[0])
+        if not re.fullmatch(r'[A-Za-z_][A-Za-z0-9_]*', cname):
+            raise ValueError(f'field {schema_name!r} has no C spelling ({cname!r})')
+        if cname in seen:
+            if seen[cname] != schema_name:
+                raise ValueError(f'fields {seen[cname]!r} and {schema_name!r} are both {cname!r} in C')
+            continue
+        seen[cname] = schema_name
+        deduped.append(item)
     return deduped
 
 
